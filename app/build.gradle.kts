@@ -80,6 +80,7 @@ dependencies {
 
     // Coroutines (for async calls)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // ML Kit
     implementation(libs.mlkit.face.detection)

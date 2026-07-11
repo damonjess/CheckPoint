@@ -1,10 +1,11 @@
 package com.yourcompany.facesearch.ui
 
+import android.app.Application
 import android.graphics.Bitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.yourcompany.facesearch.network.FaceSearchOutcome
 import com.yourcompany.facesearch.network.FaceSearchRepository
@@ -13,9 +14,11 @@ import com.yourcompany.facesearch.vision.FaceDetectorHelper
 import kotlinx.coroutines.launch
 
 class CheckInViewModel(
-    private val faceDetectorHelper: FaceDetectorHelper = FaceDetectorHelper(),
-    private val faceSearchRepository: FaceSearchRepository = FaceSearchRepository()
-) : ViewModel() {
+    application: Application
+) : AndroidViewModel(application) {
+
+    private val faceDetectorHelper = FaceDetectorHelper(application)
+    private val faceSearchRepository = FaceSearchRepository()
 
     var uiState by mutableStateOf<CheckInUiState>(CheckInUiState.Idle)
         private set

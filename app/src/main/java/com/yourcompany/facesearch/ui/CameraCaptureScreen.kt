@@ -28,7 +28,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.core.content.ContextCompat.checkSelfPermission
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -51,7 +50,7 @@ fun CameraCaptureScreen(
 
     var hasCameraPermission by remember {
         mutableStateOf(
-            checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
                 PackageManager.PERMISSION_GRANTED
         )
     }

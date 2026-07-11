@@ -37,6 +37,10 @@ android {
         compose = true
     }
 
+    androidResources {
+        noCompress += "tflite"
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -86,8 +90,8 @@ dependencies {
     // ML Kit
     implementation(libs.mlkit.face.detection)
 
-    // MediaPipe Face Mesh
-    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+    // TensorFlow Lite (on-device face embeddings)
+    implementation(libs.tensorflow.lite)
 
     // Image Loading
     implementation(libs.coil.compose)

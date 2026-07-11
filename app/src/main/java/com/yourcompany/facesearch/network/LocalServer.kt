@@ -12,19 +12,26 @@ import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.server.plugins.cors.routing.*
 import android.content.Context
-import android.graphics.Bitmap
 import android.util.Log
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.face.FaceDetection
-import com.google.mlkit.vision.face.FaceDetectorOptions
-import kotlinx.coroutines.tasks.await
+import com.yourcompany.facesearch.data.EnrolledFaceStore
+import com.yourcompany.facesearch.vision.FaceDetectionResult
+import com.yourcompany.facesearch.vision.FaceDetectorHelper
+import com.yourcompany.facesearch.vision.FaceEmbedder
+import com.yourcompany.facesearch.vision.FaceMatcher
 
 object LocalServer {
 
     private var server: ApplicationEngine? = null
+    private var faceDetector: FaceDetectorHelper? = null
+    private var faceEmbedder: FaceEmbedder? = null
+    private lateinit var appContext: Context
 
     fun start(context: Context) {
         if (server != null) return
+
+        appContext = context.applicationContext
+        faceDetector = FaceDetectorHelper(appContext)
+        faceEmbedder = FaceEmbedder(appContext)
 
         server = embeddedServer(Netty, port = 8080) {
             install(ContentNegotiation) { gson() }
@@ -61,56 +68,64 @@ object LocalServer {
     }
 
     private suspend fun performRealFaceAnalysis(imageBytes: ByteArray): Map<String, Any> {
-        // This is where real analysis happens
-        val options = FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
-            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
-            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-            .build()
+        val detector = faceDetector ?: return mapOf("match_found" to false, "message" to "Server not ready")
+        val embedder = faceEmbedder ?: return mapOf("match_found" to false, "message" to "Server not ready")
 
-        val detector = FaceDetection.getClient(options)
-        
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            ?: return mapOf("match_found" to false, "message" to "Invalid image data")
+
         return try {
-            val bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            if (bitmap == null) {
-                 return mapOf("match_found" to false, "message" to "Invalid image data")
-            }
-            
-            val image = InputImage.fromBitmap(bitmap, 0)
-            val faces = detector.process(image).await()
+            when (val detection = detector.detectAndCropFace(bitmap)) {
+                is FaceDetectionResult.NoFaceFound -> {
+                    mapOf("match_found" to false, "message" to "No face detected")
+                }
+                is FaceDetectionResult.Error -> {
+                    mapOf("match_found" to false, "message" to "Face detection failed: ${detection.exception.message}")
+                }
+                is FaceDetectionResult.Success -> {
+                    val embedding = embedder.getEmbedding(detection.croppedFace)
+                    val enrolledFaces = EnrolledFaceStore.getAll(appContext)
 
-            if (faces.isEmpty()) {
-                mapOf("match_found" to false, "message" to "No face detected")
-            } else {
-                val face = faces[0]
-                val smileProb = face.smilingProbability ?: 0.5f
-                val confidence = 0.65 + (smileProb * 0.3) // Real feature based scoring
-
-                mapOf(
-                    "search_id" to "local-${System.currentTimeMillis()}",
-                    "status" to "success",
-                    "match_found" to true,
-                    "results" to listOf(
-                        mapOf(
-                            "name" to "Feature Match: Miller",
-                            "confidence" to confidence,
-                            "source" to "Face Feature Analysis",
-                            "profile_url" to "https://www.linkedin.com/",
-                            "image_url" to "https://picsum.photos/id/91/300/300"
+                    if (enrolledFaces.isEmpty()) {
+                        return mapOf(
+                            "match_found" to false,
+                            "message" to "No one enrolled yet. Add people first."
                         )
-                    )
-                )
+                    }
+
+                    val match = FaceMatcher.findBestMatch(embedding, enrolledFaces)
+
+                    if (match == null) {
+                        mapOf("match_found" to false, "message" to "No match found")
+                    } else {
+                        mapOf(
+                            "search_id" to "local-${System.currentTimeMillis()}",
+                            "status" to "success",
+                            "match_found" to true,
+                            "match_confidence" to match.similarity,
+                            "results" to listOf(
+                                mapOf(
+                                    "name" to match.face.name,
+                                    "confidence" to match.similarity,
+                                    "source" to "On-device Match"
+                                )
+                            )
+                        )
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e("LocalServer", "Analysis failed", e)
             mapOf("match_found" to false, "message" to "Analysis failed: ${e.message}")
-        } finally {
-            detector.close()
         }
     }
 
     fun stop() {
         server?.stop(500L, 1000L)
         server = null
+        faceDetector?.release()
+        faceEmbedder?.close()
+        faceDetector = null
+        faceEmbedder = null
     }
 }

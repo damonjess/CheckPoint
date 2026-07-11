@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -30,13 +31,21 @@ fun CheckInScreen(
     capturedBitmap: Bitmap?,
     uiState: CheckInUiState,
     onCapturePhotoClick: () -> Unit,
-    onRetryClick: () -> Unit
+    onRetryClick: () -> Unit,
+    onManagePeopleClick: () -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Sherlock Face Search") })
+            TopAppBar(
+                title = { Text("Sherlock Face Search") },
+                actions = {
+                    IconButton(onClick = onManagePeopleClick) {
+                        Icon(Icons.Default.People, contentDescription = "Manage People")
+                    }
+                }
+            )
         }
     ) { padding ->
         Column(
@@ -69,7 +78,7 @@ fun CheckInScreen(
             when (uiState) {
                 is CheckInUiState.Idle -> {
                     Text(
-                        text = "Take a photo to search the web",
+                        text = "Take a photo to search enrolled faces",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 16.sp
                     )
@@ -78,7 +87,7 @@ fun CheckInScreen(
                 is CheckInUiState.Loading -> {
                     CircularProgressIndicator()
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Searching the internet...")
+                    Text("Comparing against enrolled faces...")
                 }
 
                 is CheckInUiState.Success -> {

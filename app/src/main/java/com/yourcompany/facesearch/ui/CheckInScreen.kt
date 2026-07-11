@@ -30,12 +30,15 @@ fun CheckInScreen(
     capturedBitmap: Bitmap?,
     uiState: CheckInUiState,
     onCapturePhotoClick: () -> Unit,
-    onOpenDirectoryClick: (String) -> Unit, // renamed but kept for compatibility
     onRetryClick: () -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Sherlock Face Search") }) }) { padding ->
+    Scaffold(
+        topBar = {
+            TopAppBar(title = { Text("Sherlock Face Search") })
+        }
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -45,6 +48,8 @@ fun CheckInScreen(
         ) {
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // Captured Photo Preview
             PhotoPreview(bitmap = capturedBitmap)
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -63,34 +68,34 @@ fun CheckInScreen(
 
             when (uiState) {
                 is CheckInUiState.Idle -> {
-                    Text("Take a photo to search the web", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = "Take a photo to search the web",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 16.sp
+                    )
                 }
 
                 is CheckInUiState.Loading -> {
                     CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Searching the web...")
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Searching the internet...")
                 }
 
                 is CheckInUiState.Success -> {
-                    if (uiState.matches.isEmpty()) {
-                        Text("No matches found")
-                    } else {
-                        Text(
-                            "Possible Matches Found",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Found ${uiState.matches.size} possible matches",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                        LazyColumn {
-                            items(uiState.matches) { match ->
-                                MatchCard(
-                                    match = match,
-                                    onClick = { uriHandler.openUri(match.profileUrl) }
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                            }
+                    LazyColumn {
+                        items(uiState.matches) { match ->
+                            MatchCard(
+                                match = match,
+                                onClick = { uriHandler.openUri(match.profileUrl) }
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
                         }
                     }
                 }
@@ -100,16 +105,24 @@ fun CheckInScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("No matches found on the web", fontWeight = FontWeight.Medium)
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("No matches found", fontWeight = FontWeight.Medium)
                             TextButton(onClick = onRetryClick) { Text("Try Again") }
                         }
                     }
                 }
 
                 is CheckInUiState.Error -> {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                        Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             Text(uiState.message)
                             TextButton(onClick = onRetryClick) { Text("Retry") }
                         }
@@ -124,7 +137,7 @@ fun CheckInScreen(
 private fun PhotoPreview(bitmap: Bitmap?) {
     Box(
         modifier = Modifier
-            .size(180.dp)
+            .size(200.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center
@@ -132,12 +145,17 @@ private fun PhotoPreview(bitmap: Bitmap?) {
         if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Captured photo",
+                contentDescription = "Your photo",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
         } else {
-            Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(72.dp))
+            Icon(
+                imageVector = Icons.Default.Person,
+                contentDescription = null,
+                modifier = Modifier.size(80.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -146,18 +164,19 @@ private fun PhotoPreview(bitmap: Bitmap?) {
 private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Match photo
+            // Profile Image
             AsyncImage(
                 model = match.imageUrl,
                 contentDescription = null,
                 modifier = Modifier
-                    .size(60.dp)
+                    .size(64.dp)
                     .clip(CircleShape),
                 contentScale = ContentScale.Crop
             )
@@ -165,13 +184,25 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
             Spacer(modifier = Modifier.width(16.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(match.name, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                Text(match.source, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("${(match.confidence * 100).toInt()}% confidence", fontSize = 13.sp)
+                Text(
+                    text = match.name,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+                Text(
+                    text = match.source,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = "${(match.confidence * 100).toInt()}% match",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
 
             Button(onClick = onClick) {
-                Text("View Profile")
+                Text("View")
             }
         }
     }

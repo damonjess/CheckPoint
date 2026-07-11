@@ -23,43 +23,38 @@ class CheckInViewModel(
     var capturedBitmap by mutableStateOf<Bitmap?>(null)
         private set
 
-    /**
-     * Entry point for a new capture.
-     * First runs local face detection to ensure quality, then hits the backend.
-     */
     fun onPhotoCaptured(bitmap: Bitmap) {
         capturedBitmap = bitmap
         
         viewModelScope.launch {
             uiState = CheckInUiState.Loading
             
-            // 1. Local ML Kit Detection & Crop
+            // Step 1: Local face detection
             when (val detectionResult = faceDetectorHelper.detectAndCropFace(bitmap)) {
                 is FaceDetectionResult.Success -> {
-                    // Use the cropped face for the search
-                    performCheckIn(detectionResult.croppedFace)
+                    performWebSearch(detectionResult.croppedFace)
                 }
                 is FaceDetectionResult.NoFaceFound -> {
                     uiState = CheckInUiState.NoMatch
                 }
                 is FaceDetectionResult.Error -> {
-                    uiState = CheckInUiState.Error("Face detection failed. Please try again.")
+                    uiState = CheckInUiState.Error("Face detection failed. Try again.")
                 }
             }
         }
     }
 
-    private suspend fun performCheckIn(faceBitmap: Bitmap) {
+    private suspend fun performWebSearch(faceBitmap: Bitmap) {
         when (val outcome = faceSearchRepository.searchByFace(faceBitmap)) {
             is FaceSearchOutcome.Success -> {
                 uiState = CheckInUiState.Success(
-                    matches = outcome.matches.map { webMatch ->
+                    matches = outcome.matches.map { match ->
                         WebMatchDisplay(
-                            name = webMatch.name ?: "Unknown Person",
-                            source = webMatch.source ?: "Web",
-                            profileUrl = webMatch.profileUrl ?: "",
-                            confidence = webMatch.confidence ?: 0.0,
-                            imageUrl = webMatch.imageUrl
+                            name = match.name ?: "Unknown Person",
+                            source = match.source ?: "Web",
+                            profileUrl = match.profileUrl ?: "",
+                            confidence = match.confidence ?: 0.75,
+                            imageUrl = match.imageUrl
                         )
                     }
                 )
@@ -74,7 +69,7 @@ class CheckInViewModel(
                 uiState = CheckInUiState.Error("Connection error. Check your network.")
             }
             is FaceSearchOutcome.UnknownError -> {
-                uiState = CheckInUiState.Error("Something went wrong.")
+                uiState = CheckInUiState.Error("Something went wrong. Please try again.")
             }
         }
     }

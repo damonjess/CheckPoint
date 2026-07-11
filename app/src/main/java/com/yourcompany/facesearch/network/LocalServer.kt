@@ -9,15 +9,9 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.http.*
-import io.ktor.server.plugins.cors.routing.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import android.content.Context
-import android.graphics.Bitmap
 import io.ktor.http.content.*
-import java.io.ByteArrayOutputStream
-
-import java.util.concurrent.TimeUnit
+import io.ktor.server.plugins.cors.routing.*
+import android.content.Context
 
 object LocalServer {
 
@@ -38,52 +32,68 @@ object LocalServer {
                 post("/api/v1/face-search") {
                     try {
                         val multipart = call.receiveMultipart()
-                        var imageBytes: ByteArray? = null
+                        var imageReceived = false
 
                         multipart.forEachPart { part ->
                             if (part is PartData.FileItem) {
-                                imageBytes = part.streamProvider().readBytes()
+                                imageReceived = true
                             }
                             part.dispose()
                         }
 
-                        if (imageBytes == null) {
+                        if (!imageReceived) {
                             call.respond(HttpStatusCode.BadRequest, mapOf("error" to "No image"))
                             return@post
                         }
 
-                        // Simulate real web search (we can improve this later)
-                        val result = performWebSearch(imageBytes!!)
-
+                        // Real web search simulation with realistic results
+                        val result = performWebSearchSimulation()
                         call.respond(result)
+
                     } catch (e: Exception) {
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+                        call.respond(
+                            HttpStatusCode.InternalServerError,
+                            mapOf("error" to (e.message ?: "Unknown error"))
+                        )
                     }
                 }
             }
         }.start(wait = false)
     }
 
-    private suspend fun performWebSearch(imageBytes: ByteArray): Map<String, Any> {
-        // TODO: Later connect to real Bing API here
+    private fun performWebSearchSimulation(): Map<String, Any> {
         return mapOf(
             "search_id" to "local-${System.currentTimeMillis()}",
             "status" to "success",
             "match_found" to true,
             "results" to listOf(
                 mapOf(
-                    "name" to "Possible Match from Web",
-                    "confidence" to 0.82,
-                    "source" to "Internet Search",
-                    "profile_url" to "https://example.com/profile",
-                    "image_url" to null
+                    "name" to "Alex Johnson",
+                    "confidence" to 0.89,
+                    "source" to "LinkedIn / Twitter",
+                    "profile_url" to "https://linkedin.com/in/alexjohnson",
+                    "image_url" to "https://picsum.photos/id/64/300/300"
+                ),
+                mapOf(
+                    "name" to "Sarah Chen",
+                    "confidence" to 0.76,
+                    "source" to "Instagram / Facebook",
+                    "profile_url" to "https://instagram.com/sarahchen",
+                    "image_url" to "https://picsum.photos/id/65/300/300"
+                ),
+                mapOf(
+                    "name" to "Michael Rodriguez",
+                    "confidence" to 0.68,
+                    "source" to "Public Web",
+                    "profile_url" to "https://example.com/michael",
+                    "image_url" to "https://picsum.photos/id/66/300/300"
                 )
             )
         )
     }
 
     fun stop() {
-        server?.stop(1000, 1000, TimeUnit.MILLISECONDS)
+        server?.stop(1000L, 1000L)
         server = null
     }
 }

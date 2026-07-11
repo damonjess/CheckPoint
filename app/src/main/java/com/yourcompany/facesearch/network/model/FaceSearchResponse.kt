@@ -2,9 +2,6 @@ package com.yourcompany.facesearch.network.model
 
 import com.google.gson.annotations.SerializedName
 
-/**
- * Top-level response from the face search endpoint.
- */
 data class FaceSearchResponse(
     @SerializedName("search_id")
     val searchId: String? = null,
@@ -18,26 +15,26 @@ data class FaceSearchResponse(
     @SerializedName("match_confidence")
     val matchConfidence: Double? = null,
 
-    @SerializedName("employee_details")
-    val employeeDetails: EmployeeDetails? = null
+    @SerializedName("results")
+    val results: List<WebMatch>? = null,
+
+    @SerializedName("message")
+    val message: String? = null
 )
 
-/**
- * Nested employee object returned on a successful match.
- */
-data class EmployeeDetails(
-    @SerializedName("employee_id")
-    val employeeId: String? = null,
+data class WebMatch(
+    @SerializedName("name")
+    val name: String? = null,
 
-    @SerializedName("full_name")
-    val fullName: String? = null,
+    @SerializedName("confidence")
+    val confidence: Double? = null,
 
-    @SerializedName("department_name")
-    val departmentName: String? = null,
+    @SerializedName("source")
+    val source: String? = null,
 
-    @SerializedName("internal_profile_url")
-    val internalProfileUrl: String? = null,
+    @SerializedName("profile_url")
+    val profileUrl: String? = null,
 
-    @SerializedName("joined_date")
-    val joinedDate: String? = null
+    @SerializedName("image_url")
+    val imageUrl: String? = null
 )

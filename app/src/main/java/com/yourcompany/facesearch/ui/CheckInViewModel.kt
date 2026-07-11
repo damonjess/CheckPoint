@@ -52,13 +52,16 @@ class CheckInViewModel(
     private suspend fun performCheckIn(faceBitmap: Bitmap) {
         when (val outcome = faceSearchRepository.searchByFace(faceBitmap)) {
             is FaceSearchOutcome.Success -> {
-                val details = outcome.employeeDetails
                 uiState = CheckInUiState.Success(
-                    EmployeeMatch(
-                        name = details.fullName ?: "Unknown",
-                        department = details.departmentName ?: "Unknown Department",
-                        directoryUrl = details.internalProfileUrl ?: ""
-                    )
+                    matches = outcome.matches.map { webMatch ->
+                        WebMatchDisplay(
+                            name = webMatch.name ?: "Unknown Person",
+                            source = webMatch.source ?: "Web",
+                            profileUrl = webMatch.profileUrl ?: "",
+                            confidence = webMatch.confidence ?: 0.0,
+                            imageUrl = webMatch.imageUrl
+                        )
+                    }
                 )
             }
             is FaceSearchOutcome.NoMatches -> {

@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yourcompany.facesearch.network.LocalServer
 import com.yourcompany.facesearch.ui.CameraCaptureScreen
 import com.yourcompany.facesearch.ui.CheckInScreen
 import com.yourcompany.facesearch.ui.CheckInViewModel
@@ -18,6 +19,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Start local embedded server
+        LocalServer.start(this)
+
         setContent {
             MaterialTheme {
                 val viewModel: CheckInViewModel = viewModel()
@@ -52,5 +57,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        LocalServer.stop()
+        super.onDestroy()
     }
 }

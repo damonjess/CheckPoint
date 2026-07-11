@@ -1,7 +1,7 @@
 package com.yourcompany.facesearch.network
 
 import android.graphics.Bitmap
-import com.yourcompany.facesearch.network.model.EmployeeDetails
+import com.yourcompany.facesearch.network.model.WebMatch
 import com.yourcompany.facesearch.network.model.FaceSearchResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -12,10 +12,10 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 
 sealed class FaceSearchOutcome {
-    data class Success(val employeeDetails: EmployeeDetails) : FaceSearchOutcome()
+    data class Success(val matches: List<WebMatch>) : FaceSearchOutcome()
     object NoMatches : FaceSearchOutcome()
     data class ApiError(val code: Int, val message: String) : FaceSearchOutcome()
-    data class NetworkError(val exception: IOException) : FaceSearchOutcome()
+    data class NetworkError(val exception: Exception) : FaceSearchOutcome()
     data class UnknownError(val exception: Exception) : FaceSearchOutcome()
 }
 
@@ -39,11 +39,10 @@ class FaceSearchRepository(
 
             when {
                 body == null -> FaceSearchOutcome.UnknownError(IllegalStateException("Empty response body"))
-                !body.matchFound || body.employeeDetails == null -> FaceSearchOutcome.NoMatches
-                else -> FaceSearchOutcome.Success(body.employeeDetails)
+                !body.matchFound || body.results.isNullOrEmpty() -> FaceSearchOutcome.NoMatches
+                else -> FaceSearchOutcome.Success(body.results)
             }
         } catch (e: IOException) {
-            // Network-level failure: no connection, timeout, DNS, etc.
             FaceSearchOutcome.NetworkError(e)
         } catch (e: Exception) {
             FaceSearchOutcome.UnknownError(e)

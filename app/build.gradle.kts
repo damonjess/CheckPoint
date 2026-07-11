@@ -45,6 +45,8 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/io.netty.versions.properties"
         }
     }
 }
@@ -81,6 +83,16 @@ dependencies {
 
     // ML Kit
     implementation(libs.mlkit.face.detection)
+
+    // Image Loading
+    implementation(libs.coil.compose)
+
+    // Ktor Server (embedded)
+    implementation("io.ktor:ktor-server-core:2.3.12")
+    implementation("io.ktor:ktor-server-netty:2.3.12")
+    implementation("io.ktor:ktor-server-content-negotiation:2.3.12")
+    implementation("io.ktor:ktor-serialization-gson:2.3.12")
+    implementation("io.ktor:ktor-server-cors:2.3.12")
 
     // Testing
     testImplementation(libs.junit)

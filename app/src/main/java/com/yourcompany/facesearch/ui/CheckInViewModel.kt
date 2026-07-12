@@ -30,12 +30,12 @@ class CheckInViewModel(
         capturedBitmap = bitmap
         
         viewModelScope.launch {
-            uiState = CheckInUiState.Loading
+            uiState = CheckInUiState.Loading(0f)
             
             // Step 1: Local face detection
             when (val detectionResult = faceDetectorHelper.detectAndCropFace(bitmap)) {
                 is FaceDetectionResult.Success -> {
-                    performWebSearch(detectionResult.croppedFace)
+                    performWebSearch(bitmap)
                 }
                 is FaceDetectionResult.NoFaceFound -> {
                     uiState = CheckInUiState.NoMatch
@@ -48,7 +48,11 @@ class CheckInViewModel(
     }
 
     private suspend fun performWebSearch(faceBitmap: Bitmap) {
-        when (val outcome = faceSearchRepository.searchByFace(faceBitmap)) {
+        val outcome = faceSearchRepository.searchByFace(faceBitmap) { progress ->
+            uiState = CheckInUiState.Loading(progress)
+        }
+
+        when (outcome) {
             is FaceSearchOutcome.Success -> {
                 uiState = CheckInUiState.Success(
                     matches = outcome.matches.map { match ->

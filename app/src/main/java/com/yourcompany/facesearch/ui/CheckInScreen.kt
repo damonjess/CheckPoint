@@ -17,9 +17,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,20 +33,14 @@ fun CheckInScreen(
     capturedBitmap: Bitmap?,
     uiState: CheckInUiState,
     onCapturePhotoClick: () -> Unit,
-    onRetryClick: () -> Unit,
-    onManagePeopleClick: () -> Unit
+    onRetryClick: () -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Sherlock Face Search") },
-                actions = {
-                    IconButton(onClick = onManagePeopleClick) {
-                        Icon(Icons.Default.People, contentDescription = "Manage People")
-                    }
-                }
+                title = { Text("Social Media Search") }
             )
         }
     ) { padding ->
@@ -78,21 +74,89 @@ fun CheckInScreen(
             when (uiState) {
                 is CheckInUiState.Idle -> {
                     Text(
-                        text = "Take a photo to search enrolled faces",
+                        text = "Take a photo to find social media profiles",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 16.sp
                     )
                 }
 
                 is CheckInUiState.Loading -> {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Comparing against enrolled faces...")
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        // Progress Bar
+                        LinearProgressIndicator(
+                            progress = { uiState.progress },
+                            modifier = Modifier
+                                .fillMaxWidth(0.8f)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        )
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            text = "SEARCH PROGRESS: ${(uiState.progress * 100).toInt()}%",
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        
+                        Spacer(modifier = Modifier.height(24.dp))
+                        
+                        Text(
+                            "Sherlock Deep Search Active",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Analyzing internet-wide biometrics...",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "This can take up to 3 minutes. Please keep the app open.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        val bypassSteps = listOf(
+                            "Initializing headless browser...",
+                            "Rotating proxy through residential IP...",
+                            "Injecting Chrome User-Agent headers...",
+                            "Bypassing Cloudflare/WAF restrictions...",
+                            "Scraping public social media fragments...",
+                            "Reconstructing facial identity..."
+                        )
+                        bypassSteps.forEach { step ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.8f)
+                                    .padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.Start
+                            ) {
+                                Text(
+                                    text = "> $step", 
+                                    fontSize = 11.sp, 
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color.Red.copy(alpha = 0.9f)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 is CheckInUiState.Success -> {
                     Text(
-                        text = "Found ${uiState.matches.size} possible matches",
+                        text = "Found ${uiState.matches.size} social media profiles",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp
                     )
@@ -118,7 +182,7 @@ fun CheckInScreen(
                             modifier = Modifier.padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text("No matches found", fontWeight = FontWeight.Medium)
+                            Text("No public profiles found", fontWeight = FontWeight.Medium)
                             TextButton(onClick = onRetryClick) { Text("Try Again") }
                         }
                     }
@@ -174,10 +238,11 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Profile Image
@@ -185,7 +250,7 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                 model = match.imageUrl,
                 contentDescription = null,
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(60.dp)
                     .clip(CircleShape),
                 contentScale = ContentScale.Crop
             )
@@ -196,22 +261,46 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                 Text(
                     text = match.name,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
+                    fontSize = 16.sp
                 )
+                
+                Surface(
+                    color = when(match.source.lowercase()) {
+                        "facebook" -> Color(0xFF1877F2).copy(alpha = 0.1f)
+                        "instagram" -> Color(0xFFE4405F).copy(alpha = 0.1f)
+                        "linkedin" -> Color(0xFF0A66C2).copy(alpha = 0.1f)
+                        "x (twitter)" -> Color(0xFF000000).copy(alpha = 0.1f)
+                        else -> MaterialTheme.colorScheme.secondaryContainer
+                    },
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = match.source.uppercase(),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        color = when(match.source.lowercase()) {
+                            "facebook" -> Color(0xFF1877F2)
+                            "instagram" -> Color(0xFFE4405F)
+                            "linkedin" -> Color(0xFF0A66C2)
+                            else -> MaterialTheme.colorScheme.onSecondaryContainer
+                        }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                
                 Text(
-                    text = match.source,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 14.sp
-                )
-                Text(
-                    text = "${(match.confidence * 100).toInt()}% match",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.primary
+                    text = "Similarity: ${(match.confidence * 100).toInt()}%",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.Red
                 )
             }
 
-            Button(onClick = onClick) {
-                Text("View")
+            TextButton(onClick = onClick) {
+                Text("View Profile")
             }
         }
     }

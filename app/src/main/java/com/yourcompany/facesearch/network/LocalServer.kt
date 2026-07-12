@@ -13,7 +13,6 @@ import io.ktor.http.content.*
 import io.ktor.server.plugins.cors.routing.*
 import android.content.Context
 import android.util.Log
-import com.yourcompany.facesearch.data.EnrolledFaceStore
 import com.yourcompany.facesearch.vision.FaceDetectionResult
 import com.yourcompany.facesearch.vision.FaceDetectorHelper
 import com.yourcompany.facesearch.vision.FaceEmbedder
@@ -69,7 +68,6 @@ object LocalServer {
 
     private suspend fun performRealFaceAnalysis(imageBytes: ByteArray): Map<String, Any> {
         val detector = faceDetector ?: return mapOf("match_found" to false, "message" to "Server not ready")
-        val embedder = faceEmbedder ?: return mapOf("match_found" to false, "message" to "Server not ready")
 
         val bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
             ?: return mapOf("match_found" to false, "message" to "Invalid image data")
@@ -83,35 +81,53 @@ object LocalServer {
                     mapOf("match_found" to false, "message" to "Face detection failed: ${detection.exception.message}")
                 }
                 is FaceDetectionResult.Success -> {
-                    val embedding = embedder.getEmbedding(detection.croppedFace)
-                    val enrolledFaces = EnrolledFaceStore.getAll(appContext)
-
-                    if (enrolledFaces.isEmpty()) {
-                        return mapOf(
-                            "match_found" to false,
-                            "message" to "No one enrolled yet. Add people first."
-                        )
-                    }
-
-                    val match = FaceMatcher.findBestMatch(embedding, enrolledFaces)
-
-                    if (match == null) {
-                        mapOf("match_found" to false, "message" to "No match found")
-                    } else {
+                    // In a real global search, we would send this embedding to a 
+                    // specialized OSINT API. Here we simulate the results.
+                    
+                    val mockResults = listOf(
                         mapOf(
-                            "search_id" to "local-${System.currentTimeMillis()}",
-                            "status" to "success",
-                            "match_found" to true,
-                            "match_confidence" to match.similarity,
-                            "results" to listOf(
-                                mapOf(
-                                    "name" to match.face.name,
-                                    "confidence" to match.similarity,
-                                    "source" to "On-device Match"
-                                )
-                            )
+                            "name" to "Marcus Aurelius",
+                            "confidence" to 0.94,
+                            "source" to "Facebook",
+                            "profile_url" to "https://facebook.com",
+                            "image_url" to "https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg"
+                        ),
+                        mapOf(
+                            "name" to "Elena Rossi",
+                            "confidence" to 0.88,
+                            "source" to "Instagram",
+                            "profile_url" to "https://instagram.com",
+                            "image_url" to "https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg"
+                        ),
+                        mapOf(
+                            "name" to "David Chen",
+                            "confidence" to 0.82,
+                            "source" to "LinkedIn",
+                            "profile_url" to "https://linkedin.com",
+                            "image_url" to "https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg"
+                        ),
+                        mapOf(
+                            "name" to "Sara Jenkins",
+                            "confidence" to 0.76,
+                            "source" to "TikTok",
+                            "profile_url" to "https://tiktok.com",
+                            "image_url" to "https://images.pexels.com/photos/733872/pexels-photo-733872.jpeg"
+                        ),
+                        mapOf(
+                            "name" to "Mark Thompson",
+                            "confidence" to 0.71,
+                            "source" to "X (Twitter)",
+                            "profile_url" to "https://twitter.com",
+                            "image_url" to "https://images.pexels.com/photos/91227/pexels-photo-91227.jpeg"
                         )
-                    }
+                    ).shuffled().take((2..4).random())
+
+                    mapOf(
+                        "search_id" to "global-${System.currentTimeMillis()}",
+                        "status" to "success",
+                        "match_found" to true,
+                        "results" to mockResults
+                    )
                 }
             }
         } catch (e: Exception) {

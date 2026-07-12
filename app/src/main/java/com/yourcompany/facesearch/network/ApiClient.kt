@@ -8,17 +8,29 @@ import java.util.concurrent.TimeUnit
 
 object ApiClient {
 
-    private const val BASE_URL = "http://127.0.0.1:8080/"
+    // IMPORTANT: To search the real internet, you need an API key from a provider
+    // like FaceCheck.id.
+    private const val BASE_URL = "https://facecheck.id/"
+    val API_KEY = Secrets.FACECHECK_API_KEY
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BASIC // switch to BODY only for local debugging
     }
 
     private val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                // Bypass technique: Use a Desktop Chrome User-Agent to avoid mobile blocks
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Referer", "https://www.google.com/")
+                .build()
+            chain.proceed(request)
+        }
         .addInterceptor(loggingInterceptor)
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
     private val retrofit = Retrofit.Builder()

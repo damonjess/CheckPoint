@@ -6,12 +6,10 @@ import kotlin.math.sqrt
 object FaceMatcher {
 
     /**
-     * Below ~0.55 the two faces are essentially unrelated; above ~0.80 it's
-     * almost certainly the same person. Tune this after testing with your
-     * own enrolled faces and real kiosk lighting -- if you get false
-     * positives, raise it; if real matches get rejected, lower it slightly.
+     * Below ~0.50 the two faces are essentially unrelated; above ~0.80 it's
+     * almost certainly the same person. 0.58 is a good balance for MobileFaceNet.
      */
-    const val MATCH_THRESHOLD = 0.62f
+    const val MATCH_THRESHOLD = 0.58f
 
     data class MatchResult(val face: EnrolledFace, val similarity: Float)
 

@@ -11,53 +11,35 @@ import com.yourcompany.facesearch.network.LocalServer
 import com.yourcompany.facesearch.ui.CameraCaptureScreen
 import com.yourcompany.facesearch.ui.CheckInScreen
 import com.yourcompany.facesearch.ui.CheckInViewModel
-import com.yourcompany.facesearch.ui.EnrollScreen
-import com.yourcompany.facesearch.ui.EnrollViewModel
 
-private enum class Screen { CHECK_IN, CAMERA_FOR_CHECK_IN, ENROLL, CAMERA_FOR_ENROLL }
+private enum class Screen { SEARCH, CAMERA }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        LocalServer.start(this)
+        // LocalServer.start(this) // Removed simulated server
 
         setContent {
             MaterialTheme {
                 val checkInViewModel: CheckInViewModel = viewModel()
-                val enrollViewModel: EnrollViewModel = viewModel()
-                var screen by remember { mutableStateOf(Screen.CHECK_IN) }
+                var screen by remember { mutableStateOf(Screen.SEARCH) }
 
                 when (screen) {
-                    Screen.CHECK_IN -> CheckInScreen(
+                    Screen.SEARCH -> CheckInScreen(
                         capturedBitmap = checkInViewModel.capturedBitmap,
                         uiState = checkInViewModel.uiState,
-                        onCapturePhotoClick = { screen = Screen.CAMERA_FOR_CHECK_IN },
-                        onRetryClick = { checkInViewModel.onRetry() },
-                        onManagePeopleClick = { screen = Screen.ENROLL }
+                        onCapturePhotoClick = { screen = Screen.CAMERA },
+                        onRetryClick = { checkInViewModel.onRetry() }
                     )
 
-                    Screen.CAMERA_FOR_CHECK_IN -> CameraCaptureScreen(
+                    Screen.CAMERA -> CameraCaptureScreen(
                         onPhotoCaptured = { bitmap ->
                             checkInViewModel.onPhotoCaptured(bitmap)
-                            screen = Screen.CHECK_IN
+                            screen = Screen.SEARCH
                         },
-                        onCancel = { screen = Screen.CHECK_IN }
-                    )
-
-                    Screen.ENROLL -> EnrollScreen(
-                        viewModel = enrollViewModel,
-                        onBack = { screen = Screen.CHECK_IN },
-                        onCapturePhotoClick = { screen = Screen.CAMERA_FOR_ENROLL }
-                    )
-
-                    Screen.CAMERA_FOR_ENROLL -> CameraCaptureScreen(
-                        onPhotoCaptured = { bitmap ->
-                            enrollViewModel.onPhotoCaptured(bitmap)
-                            screen = Screen.ENROLL
-                        },
-                        onCancel = { screen = Screen.ENROLL }
+                        onCancel = { screen = Screen.SEARCH }
                     )
                 }
             }

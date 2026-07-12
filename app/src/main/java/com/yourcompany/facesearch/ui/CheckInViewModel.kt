@@ -30,7 +30,7 @@ class CheckInViewModel(
         capturedBitmap = bitmap
         
         viewModelScope.launch {
-            uiState = CheckInUiState.Loading(0f)
+            uiState = CheckInUiState.Loading(0f, listOf("Initializing local optics..."))
             
             // Step 1: Local face detection
             when (val detectionResult = faceDetectorHelper.detectAndCropFace(bitmap)) {
@@ -48,8 +48,14 @@ class CheckInViewModel(
     }
 
     private suspend fun performWebSearch(faceBitmap: Bitmap) {
-        val outcome = faceSearchRepository.searchByFace(faceBitmap) { progress ->
-            uiState = CheckInUiState.Loading(progress)
+        val logs = mutableListOf<String>()
+        
+        val outcome = faceSearchRepository.searchByFace(faceBitmap) { progress, newLog ->
+            if (newLog.isNotBlank() && (logs.isEmpty() || logs.last() != newLog)) {
+                logs.add(newLog)
+                if (logs.size > 8) logs.removeAt(0) // Keep last 8 logs
+            }
+            uiState = CheckInUiState.Loading(progress, logs.toList())
         }
 
         when (outcome) {

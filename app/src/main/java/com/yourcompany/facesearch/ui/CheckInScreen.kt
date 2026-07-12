@@ -1,6 +1,8 @@
 package com.yourcompany.facesearch.ui
 
 import android.graphics.Bitmap
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -13,12 +15,16 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
@@ -40,7 +46,7 @@ fun CheckInScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Social Media Search") }
+                title = { Text("Sherlock Deep Search") }
             )
         }
     ) { padding ->
@@ -54,8 +60,10 @@ fun CheckInScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Captured Photo Preview
-            PhotoPreview(bitmap = capturedBitmap)
+            PhotoPreview(
+                bitmap = capturedBitmap,
+                isScanning = uiState is CheckInUiState.Loading
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -85,15 +93,14 @@ fun CheckInScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        // Progress Bar
                         LinearProgressIndicator(
                             progress = { uiState.progress },
                             modifier = Modifier
                                 .fillMaxWidth(0.8f)
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(4.dp)),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            color = Color.Red,
+                            trackColor = Color.Red.copy(alpha = 0.1f),
                         )
                         
                         Spacer(modifier = Modifier.height(12.dp))
@@ -103,51 +110,59 @@ fun CheckInScreen(
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = Color.Red
                         )
                         
                         Spacer(modifier = Modifier.height(24.dp))
                         
-                        Text(
-                            "Sherlock Deep Search Active",
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Analyzing internet-wide biometrics...",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "This can take up to 3 minutes. Please keep the app open.",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.error,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        val bypassSteps = listOf(
-                            "Initializing headless browser...",
-                            "Rotating proxy through residential IP...",
-                            "Injecting Chrome User-Agent headers...",
-                            "Bypassing Cloudflare/WAF restrictions...",
-                            "Scraping public social media fragments...",
-                            "Reconstructing facial identity..."
-                        )
-                        bypassSteps.forEach { step ->
-                            Row(
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color.Black),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red.copy(alpha = 0.3f))
+                        ) {
+                            Column(
                                 modifier = Modifier
-                                    .fillMaxWidth(0.8f)
-                                    .padding(vertical = 2.dp),
-                                horizontalArrangement = Arrangement.Start
+                                    .padding(12.dp)
+                                    .fillMaxSize()
                             ) {
                                 Text(
-                                    text = "> $step", 
-                                    fontSize = 11.sp, 
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color.Red.copy(alpha = 0.9f)
+                                    "SHERLOCK OSINT CONSOLE v2.1",
+                                    color = Color.Red,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                uiState.logs.forEach { log ->
+                                    Text(
+                                        text = "> $log",
+                                        color = Color.Red.copy(alpha = 0.9f),
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(vertical = 1.dp)
+                                    )
+                                }
+                                
+                                // Blinking cursor effect
+                                val infiniteTransition = rememberInfiniteTransition(label = "cursor")
+                                val alpha by infiniteTransition.animateFloat(
+                                    initialValue = 0f,
+                                    targetValue = 1f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(500),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "cursorAlpha"
+                                )
+                                Text(
+                                    text = "> _",
+                                    color = Color.Red.copy(alpha = alpha),
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
                                 )
                             }
                         }
@@ -207,28 +222,90 @@ fun CheckInScreen(
 }
 
 @Composable
-private fun PhotoPreview(bitmap: Bitmap?) {
+private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false) {
+    val infiniteTransition = rememberInfiniteTransition(label = "scanning")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotation"
+    )
+
     Box(
-        modifier = Modifier
-            .size(200.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.size(220.dp),
         contentAlignment = Alignment.Center
     ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Your photo",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Icon(
-                imageVector = Icons.Default.Person,
-                contentDescription = null,
-                modifier = Modifier.size(80.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        if (isScanning) {
+            Canvas(modifier = Modifier.fillMaxSize().rotate(rotation)) {
+                drawArc(
+                    brush = Brush.sweepGradient(
+                        colors = listOf(
+                            Color.Red.copy(alpha = 0.1f),
+                            Color.Red,
+                            Color.Red.copy(alpha = 0.1f)
+                        )
+                    ),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .size(200.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Your photo",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                
+                if (isScanning) {
+                    val scanLineY by infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 200.dp.value,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1500, easing = LinearOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "scanLine"
+                    )
+                    
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .offset(y = scanLineY.dp - 100.dp)
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color.Red,
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+                }
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier.size(80.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -245,7 +322,6 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Profile Image
             AsyncImage(
                 model = match.imageUrl,
                 contentDescription = null,

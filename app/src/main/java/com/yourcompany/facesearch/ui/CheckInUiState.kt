@@ -2,7 +2,10 @@ package com.yourcompany.facesearch.ui
 
 sealed class CheckInUiState {
     object Idle : CheckInUiState()
-    data class Loading(val progress: Float = 0f) : CheckInUiState()
+    data class Loading(
+        val progress: Float = 0f,
+        val logs: List<String> = emptyList()
+    ) : CheckInUiState()
     data class Success(val matches: List<WebMatchDisplay>) : CheckInUiState()
     object NoMatch : CheckInUiState()
     data class Error(val message: String) : CheckInUiState()

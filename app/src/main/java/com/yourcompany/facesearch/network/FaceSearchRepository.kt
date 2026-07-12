@@ -31,18 +31,26 @@ class FaceSearchRepository(
      */
     suspend fun searchByFace(
         faceBitmap: Bitmap,
-        onProgress: (Float) -> Unit
+        onUpdate: (progress: Float, log: String) -> Unit
     ): FaceSearchOutcome = withContext(Dispatchers.IO) {
         try {
             if (ApiClient.API_KEY.isBlank()) {
                 return@withContext FaceSearchOutcome.ApiError(401, "API Key is missing in Secrets.kt")
             }
 
-            onProgress(0.05f)
+            onUpdate(0.05f, "Initializing Sherlock Secure Connection...")
+            delay(500)
+            onUpdate(0.10f, "Encrypting biometric data packet...")
 
             // Step 1: Upload the face image
             val multipart = bitmapToMultipart(faceBitmap)
-            val uploadResponse = api.uploadFace(ApiClient.API_KEY, multipart)
+            onUpdate(0.15f, "Uploading probe image to global neural network...")
+            
+            val uploadResponse = try {
+                api.uploadFace(ApiClient.API_KEY, multipart)
+            } catch (e: Exception) {
+                return@withContext FaceSearchOutcome.NetworkError(e)
+            }
 
             if (!uploadResponse.isSuccessful) {
                 return@withContext FaceSearchOutcome.ApiError(
@@ -54,63 +62,66 @@ class FaceSearchRepository(
             val searchId = uploadResponse.body()?.id_search ?: 
                 return@withContext FaceSearchOutcome.UnknownError(Exception("No search ID returned"))
 
-            onProgress(0.15f)
+            onUpdate(0.20f, "Probe received. ID: ${searchId.take(8)}...")
+            onUpdate(0.25f, "Bypassing social media scrap-filters...")
 
-            // Step 2: Poll for results (Internet searches take time)
-            // Increased max attempts to 60 (with 3s delay = ~180 seconds / 3 minutes total)
-            // Internet-wide facial recognition scans can be very intensive.
-            val maxAttempts = 60
+            // Step 2: Poll for results
+            // Increased to 100 attempts * 3s = 300 seconds (5 minutes)
+            val maxAttempts = 100
             var attempts = 0
+            var lastStatus = ""
+            
             while (attempts < maxAttempts) {
                 delay(3000) 
                 attempts++
                 
-                // Calculate progress from 15% to 98%
-                val pollingProgress = 0.15f + (0.83f * (attempts.toFloat() / maxAttempts))
-                onProgress(pollingProgress)
-
-                val response = api.getSearchResults(
-                    ApiClient.API_KEY, 
-                    SearchRequest(id_search = searchId, testing_mode = true)
-                )
+                val pollingProgress = 0.25f + (0.70f * (attempts.toFloat() / maxAttempts))
+                
+                val response = try {
+                    api.getSearchResults(
+                        ApiClient.API_KEY, 
+                        SearchRequest(id_search = searchId, testing_mode = true)
+                    )
+                } catch (e: IOException) {
+                    onUpdate(pollingProgress, "Network jitter detected. Re-establishing link...")
+                    continue // Try again
+                }
 
                 if (response.isSuccessful) {
                     val body = response.body()
                     if (body != null) {
-                        // In some cases, results might be delivered piece-meal or only at the end.
+                        val currentStatus = body.status ?: "processing"
+                        if (currentStatus != lastStatus) {
+                            onUpdate(pollingProgress, "Engine Status: ${currentStatus.uppercase()}")
+                            lastStatus = currentStatus
+                        }
+
+                        if (body.message != null && body.message.isNotBlank()) {
+                            onUpdate(pollingProgress, "Remote: ${body.message}")
+                        }
+
                         if (!body.results.isNullOrEmpty()) {
-                            onProgress(1.0f)
+                            onUpdate(1.0f, "Matches recovered. Finalizing report...")
                             return@withContext FaceSearchOutcome.Success(body.results)
                         }
                         
-                        // Check if the search is officially finished
-                        if (body.status?.lowercase() == "completed") {
-                            if (body.results.isNullOrEmpty()) {
-                                return@withContext FaceSearchOutcome.NoMatches
+                        if (currentStatus.lowercase() == "completed") {
+                            onUpdate(1.0f, "Scan finished. Generating results...")
+                            return@withContext if (body.results.isNullOrEmpty()) {
+                                FaceSearchOutcome.NoMatches
                             } else {
-                                return@withContext FaceSearchOutcome.Success(body.results)
+                                FaceSearchOutcome.Success(body.results)
                             }
                         }
-                        
-                        // If the API returns a specific error message in the body
-                        if (body.message != null && body.status?.lowercase() == "error") {
-                            return@withContext FaceSearchOutcome.ApiError(response.code(), body.message)
-                        }
                     }
-                } else if (response.code() != 404 && response.code() != 429) {
-                    // If we get a hard error that isn't a "Not Found" (still processing) 
-                    // or "Too Many Requests" (rate limit), we should probably stop.
-                    return@withContext FaceSearchOutcome.ApiError(
-                        response.code(),
-                        response.errorBody()?.string() ?: "Server error during polling"
-                    )
+                } else if (response.code() == 429) {
+                    onUpdate(pollingProgress, "Rate limit reached. Cooling down engine...")
+                    delay(5000)
                 }
             }
 
-            FaceSearchOutcome.ApiError(408, "Deep Search timed out. The internet is large, and the engines are busy. Please try again in a moment.")
+            FaceSearchOutcome.ApiError(408, "Deep Search reached max duration (5m). Please check history later.")
 
-        } catch (e: IOException) {
-            FaceSearchOutcome.NetworkError(e)
         } catch (e: Exception) {
             FaceSearchOutcome.UnknownError(e)
         }

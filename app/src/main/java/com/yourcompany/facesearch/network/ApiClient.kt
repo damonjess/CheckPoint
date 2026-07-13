@@ -9,7 +9,7 @@ import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
 
 interface ApifyApiService {
-    @POST("v2/acts/nkactors~face-search/run-sync-get-dataset-items")
+    @POST("v2/acts/mikolabs~face-search-ai/run-sync-get-dataset-items")
     suspend fun searchFace(
         @Header("Authorization") bearerToken: String,
         @Body input: ApifyFaceInput
@@ -23,9 +23,9 @@ object ApiClient {
     val API_KEY = Secrets.SERP_API_KEY
 
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
     val faceSearchApi: FaceSearchApi by lazy {

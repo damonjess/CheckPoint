@@ -35,16 +35,23 @@ class CheckInViewModel(
         capturedBitmap = bitmap
         
         viewModelScope.launch {
-            uiState = CheckInUiState.Loading(0f, listOf("Initializing local optics..."))
+            val logs = mutableListOf("Initializing local optics...")
+            uiState = CheckInUiState.Loading(0.1f, logs.toList())
             
             // Step 1: Local face detection
             when (val detectionResult = faceDetectorHelper.detectAndCropFace(bitmap)) {
                 is FaceDetectionResult.Success -> {
-                    uiState = CheckInUiState.Loading(0.1f, listOf("Hosting probe image safely..."))
+                    logs.add("Face detected. Optimizing probe...")
+                    uiState = CheckInUiState.Loading(0.25f, logs.toList())
+                    
+                    logs.add("Hosting probe image safely (ImgBB)...")
+                    uiState = CheckInUiState.Loading(0.4f, logs.toList())
+                    
                     val publicUrl = imageUploadRepository.uploadImage(detectionResult.croppedFace)
                     
                     if (publicUrl != null) {
-                        performWebSearch(publicUrl)
+                        logs.add("Cloud hosting successful.")
+                        performWebSearch(publicUrl, logs)
                     } else {
                         uiState = CheckInUiState.Error("Image hosting failed. Please try again.")
                     }
@@ -59,11 +66,14 @@ class CheckInViewModel(
         }
     }
 
-    private suspend fun performWebSearch(imageUrl: String) {
-        val logs = mutableListOf("Connecting to Apify biometric crawler...")
-        uiState = CheckInUiState.Loading(0.4f, logs.toList())
+    private suspend fun performWebSearch(imageUrl: String, logs: MutableList<String>) {
+        logs.add("Connecting to Apify biometric crawler...")
+        uiState = CheckInUiState.Loading(0.6f, logs.toList())
 
         try {
+            logs.add("Awaiting biometric analysis (this may take 30-60s)...")
+            uiState = CheckInUiState.Loading(0.85f, logs.toList())
+
             val apifyInput = ApifyFaceInput(imageUrl = imageUrl)
             
             // Make sure to clean any potential accidental quotes and format as a Bearer string
@@ -75,6 +85,10 @@ class CheckInViewModel(
             )
 
             if (searchResults.isNotEmpty()) {
+                logs.add("Search complete. Found ${searchResults.size} matches.")
+                uiState = CheckInUiState.Loading(1.0f, logs.toList())
+                kotlinx.coroutines.delay(500)
+
                 uiState = CheckInUiState.Success(
                     matches = searchResults.map { result ->
                         val sourceDomain = try {
@@ -84,12 +98,19 @@ class CheckInViewModel(
                             "Social Profile"
                         }
 
+                        // Extract string if it's a primitive, otherwise pass the raw JsonElement
+                        val imageSource = if (result.image?.isJsonPrimitive == true) {
+                            result.image.asString
+                        } else {
+                            result.image
+                        }
+
                         WebMatchDisplay(
                             name = "Matched Profile",
                             source = sourceDomain,
                             profileUrl = result.url,
                             score = result.score,
-                            imageUrl = result.image
+                            imageUrl = imageSource
                         )
                     }
                 )

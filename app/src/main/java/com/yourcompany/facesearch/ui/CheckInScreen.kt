@@ -352,11 +352,12 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Bind item.imageUrl (from SerpApi thumbnail) to Coil AsyncImage
             AsyncImage(
                 model = match.imageUrl,
-                contentDescription = null,
+                contentDescription = "Profile photo",
                 modifier = Modifier
-                    .size(60.dp)
+                    .size(64.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentScale = ContentScale.Crop
@@ -368,9 +369,11 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                 Text(
                     text = match.name,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    fontSize = 16.sp,
+                    maxLines = 1
                 )
                 
+                // Bind item.source to the text badge for native social platform showcase
                 Surface(
                     color = when {
                         match.source.contains("facebook", ignoreCase = true) -> Color(0xFF1877F2).copy(alpha = 0.1f)
@@ -379,6 +382,7 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                         match.source.contains("twitter", ignoreCase = true) || match.source.contains(" x.", ignoreCase = true) -> Color(0xFF000000).copy(alpha = 0.1f)
                         match.source.contains("pinterest", ignoreCase = true) -> Color(0xFFE60023).copy(alpha = 0.1f)
                         match.source.contains("youtube", ignoreCase = true) -> Color(0xFFFF0000).copy(alpha = 0.1f)
+                        match.source.contains("tiktok", ignoreCase = true) -> Color(0xFF000000).copy(alpha = 0.1f)
                         else -> MaterialTheme.colorScheme.secondaryContainer
                     },
                     shape = RoundedCornerShape(4.dp)
@@ -395,6 +399,7 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                             match.source.contains("linkedin", ignoreCase = true) -> Color(0xFF0A66C2)
                             match.source.contains("pinterest", ignoreCase = true) -> Color(0xFFE60023)
                             match.source.contains("youtube", ignoreCase = true) -> Color(0xFFFF0000)
+                            match.source.contains("tiktok", ignoreCase = true) -> Color(0xFFEE1D52)
                             else -> MaterialTheme.colorScheme.onSecondaryContainer
                         }
                     )
@@ -403,15 +408,15 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                 Spacer(modifier = Modifier.height(4.dp))
                 
                 Text(
-                    text = "Similarity: ${match.score}%",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Amber
+                    text = "Source: ${match.source}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
+            // Bind item.profileUrl (from SerpApi link) to View Profile action
             TextButton(onClick = onClick) {
-                Text("View Profile")
+                Text("View Profile", fontWeight = FontWeight.Bold)
             }
         }
     }

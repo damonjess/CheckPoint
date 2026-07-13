@@ -5,28 +5,38 @@ import retrofit2.Response
 import retrofit2.http.GET
 import retrofit2.http.Query
 
-interface FaceSearchApi {
-    @GET("search")
-    suspend fun searchGoogle(
-        @Query("engine") engine: String,
-        @Query("api_key") apiKey: String,
-        @Query("image_url") imageUrl: String? = null,
-        @Query("url") url: String? = null
-    ): Response<SerpApiResponse>
+interface SerpApiService {
+    @GET("search.json")
+    suspend fun searchGoogleLens(
+        @Query("engine") engine: String = "google_lens",      // Configures SerpApi engine
+        @Query("url") imageUrl: String,                       // The hosted image to match
+        @Query("api_key") apiKey: String                      // Pulls your SERP_API_KEY
+    ): Response<SerpLensResponse>
 }
 
-data class SerpApiResponse(
-    @SerializedName("image_results") val imageResults: List<SerpApiMatch>?,
-    @SerializedName("inline_images") val inlineImages: List<InlineImage>?,
-    @SerializedName("visual_matches") val visualMatches: List<VisualMatch>?,
-    @SerializedName("knowledge_graph") val knowledgeGraph: KnowledgeGraph?
+data class SerpLensResponse(
+    @SerializedName("visual_matches")
+    val visualMatches: List<SerpVisualMatch>?,
+    @SerializedName("knowledge_graph")
+    val knowledgeGraph: KnowledgeGraph? = null,
+    @SerializedName("image_results")
+    val imageResults: List<SerpApiMatch>? = null,
+    @SerializedName("inline_images")
+    val inlineImages: List<InlineImage>? = null
 )
 
-data class VisualMatch(
+data class SerpVisualMatch(
+    @SerializedName("title")
     val title: String?,
-    val link: String?,
-    val source: String?,
-    val thumbnail: String?
+    
+    @SerializedName("link")
+    val link: String?, // The direct social media link (View Profile target)
+    
+    @SerializedName("source")
+    val source: String?, // Shows "Instagram", "Facebook", "LinkedIn", etc.
+    
+    @SerializedName("thumbnail")
+    val thumbnail: String? // The image profile link to fix the gray circles
 )
 
 data class KnowledgeGraph(

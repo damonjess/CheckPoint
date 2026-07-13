@@ -3,18 +3,7 @@ package com.yourcompany.facesearch.network
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.Body
-import retrofit2.http.Header
-import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
-
-interface ApifyApiService {
-    @POST("v2/acts/mikolabs~face-search-ai/run-sync-get-dataset-items")
-    suspend fun searchFace(
-        @Header("Authorization") bearerToken: String,
-        @Body input: ApifyFaceInput
-    ): List<FaceMatchResult>
-}
 
 object ApiClient {
     private const val BASE_URL = "https://serpapi.com/"
@@ -28,13 +17,14 @@ object ApiClient {
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    val faceSearchApi: FaceSearchApi by lazy {
+    // Main SerpApi instance
+    val serpApiService: SerpApiService by lazy {
         Retrofit.Builder()
             .baseUrl(BASE_URL)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
-            .create(FaceSearchApi::class.java)
+            .create(SerpApiService::class.java)
     }
 
     val imageUploadApi: ImageUploadApi by lazy {
@@ -44,14 +34,5 @@ object ApiClient {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(ImageUploadApi::class.java)
-    }
-
-    val apifyApi: ApifyApiService by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://api.apify.com/")
-            .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(ApifyApiService::class.java)
     }
 }

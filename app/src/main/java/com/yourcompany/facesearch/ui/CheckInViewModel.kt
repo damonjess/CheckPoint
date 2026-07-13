@@ -8,8 +8,6 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.yourcompany.facesearch.network.ApiClient
-import com.yourcompany.facesearch.network.ApifyFaceInput
-import com.yourcompany.facesearch.network.FaceSearchOutcome
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.ImageUploadRepository
 import com.yourcompany.facesearch.network.Secrets
@@ -67,58 +65,28 @@ class CheckInViewModel(
     }
 
     private suspend fun performWebSearch(imageUrl: String, logs: MutableList<String>) {
-        logs.add("Connecting to Apify biometric crawler...")
-        uiState = CheckInUiState.Loading(0.6f, logs.toList())
+        logs.add("Querying Google Lens neural engine...")
+        uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
-        try {
-            logs.add("Awaiting biometric analysis (this may take 30-60s)...")
-            uiState = CheckInUiState.Loading(0.85f, logs.toList())
+        val visualMatches = faceSearchRepository.performFaceSearch(imageUrl)
 
-            val apifyInput = ApifyFaceInput(imageUrl = imageUrl)
-            
-            // Make sure to clean any potential accidental quotes and format as a Bearer string
-            val formattedToken = "Bearer ${Secrets.APIFY_API_TOKEN.trim().replace("\"", "")}"
-            
-            val searchResults = ApiClient.apifyApi.searchFace(
-                bearerToken = formattedToken,
-                input = apifyInput
+        if (visualMatches.isNotEmpty()) {
+            logs.add("Analysis complete. Targets located.")
+            uiState = CheckInUiState.Loading(1.0f, logs.toList())
+
+            uiState = CheckInUiState.Success(
+                matches = visualMatches.map { result ->
+                    WebMatchDisplay(
+                        name = result.title ?: "Matched Profile",
+                        source = result.source ?: "Public Record",
+                        profileUrl = result.link ?: "",
+                        score = 100, // SerpApi provides high relevance matches
+                        imageUrl = result.thumbnail
+                    )
+                }
             )
-
-            if (searchResults.isNotEmpty()) {
-                logs.add("Search complete. Found ${searchResults.size} matches.")
-                uiState = CheckInUiState.Loading(1.0f, logs.toList())
-                kotlinx.coroutines.delay(500)
-
-                uiState = CheckInUiState.Success(
-                    matches = searchResults.map { result ->
-                        val sourceDomain = try {
-                            val uri = android.net.Uri.parse(result.url)
-                            uri.host?.replace("www.", "") ?: "Social Profile"
-                        } catch (e: Exception) {
-                            "Social Profile"
-                        }
-
-                        // Extract string if it's a primitive, otherwise pass the raw JsonElement
-                        val imageSource = if (result.image?.isJsonPrimitive == true) {
-                            result.image.asString
-                        } else {
-                            result.image
-                        }
-
-                        WebMatchDisplay(
-                            name = "Matched Profile",
-                            source = sourceDomain,
-                            profileUrl = result.url,
-                            score = result.score,
-                            imageUrl = imageSource
-                        )
-                    }
-                )
-            } else {
-                uiState = CheckInUiState.NoMatch
-            }
-        } catch (e: Exception) {
-            uiState = CheckInUiState.Error(e.message ?: "Apify search failed")
+        } else {
+            uiState = CheckInUiState.NoMatch
         }
     }
 

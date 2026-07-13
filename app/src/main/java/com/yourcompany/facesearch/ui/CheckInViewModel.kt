@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.yourcompany.facesearch.network.FaceSearchOutcome
 import com.yourcompany.facesearch.network.FaceSearchRepository
+import com.yourcompany.facesearch.network.ImageUploadRepository
 import com.yourcompany.facesearch.vision.FaceDetectionResult
 import com.yourcompany.facesearch.vision.FaceDetectorHelper
 import kotlinx.coroutines.launch
@@ -19,6 +20,7 @@ class CheckInViewModel(
 
     private val faceDetectorHelper = FaceDetectorHelper(application)
     private val faceSearchRepository = FaceSearchRepository()
+    private val imageUploadRepository = ImageUploadRepository()
 
     var uiState by mutableStateOf<CheckInUiState>(CheckInUiState.Idle)
         private set
@@ -33,11 +35,16 @@ class CheckInViewModel(
             uiState = CheckInUiState.Loading(0f, listOf("Initializing local optics..."))
             
             // Step 1: Local face detection
-            when (faceDetectorHelper.detectAndCropFace(bitmap)) {
+            when (val detectionResult = faceDetectorHelper.detectAndCropFace(bitmap)) {
                 is FaceDetectionResult.Success -> {
-                    // For now, using a placeholder URL. 
-                    // In a real app, you'd upload the bitmap to a service like Imgur/ImgBB first.
-                    performWebSearch("https://upload.wikimedia.org/wikipedia/commons/8/89/Portrait_Placeholder.png")
+                    uiState = CheckInUiState.Loading(0.1f, listOf("Hosting probe image safely..."))
+                    val publicUrl = imageUploadRepository.uploadImage(detectionResult.croppedFace)
+                    
+                    if (publicUrl != null) {
+                        performWebSearch(publicUrl)
+                    } else {
+                        uiState = CheckInUiState.Error("Image hosting failed. Please try again.")
+                    }
                 }
                 is FaceDetectionResult.NoFaceFound -> {
                     uiState = CheckInUiState.NoMatch

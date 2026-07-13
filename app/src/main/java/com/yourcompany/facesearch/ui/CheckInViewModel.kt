@@ -7,9 +7,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.yourcompany.facesearch.network.ApiClient
+import com.yourcompany.facesearch.network.ApifyFaceInput
 import com.yourcompany.facesearch.network.FaceSearchOutcome
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.ImageUploadRepository
+import com.yourcompany.facesearch.network.Secrets
 import com.yourcompany.facesearch.vision.FaceDetectionResult
 import com.yourcompany.facesearch.vision.FaceDetectorHelper
 import kotlinx.coroutines.launch
@@ -57,51 +60,44 @@ class CheckInViewModel(
     }
 
     private suspend fun performWebSearch(imageUrl: String) {
-        val logs = mutableListOf<String>()
-        
-        val outcome = faceSearchRepository.searchTheWebForFree(imageUrl) { progress, newLog ->
-            if (newLog.isNotBlank() && (logs.isEmpty() || logs.last() != newLog)) {
-                logs.add(newLog)
-                if (logs.size > 8) logs.removeAt(0) // Keep last 8 logs
-            }
-            uiState = CheckInUiState.Loading(progress, logs.toList())
-        }
+        val logs = mutableListOf("Connecting to Apify biometric crawler...")
+        uiState = CheckInUiState.Loading(0.4f, logs.toList())
 
-        when (outcome) {
-            is FaceSearchOutcome.Success -> {
+        try {
+            val apifyInput = ApifyFaceInput(imageUrl = imageUrl)
+            
+            // Make sure to clean any potential accidental quotes and format as a Bearer string
+            val formattedToken = "Bearer ${Secrets.APIFY_API_TOKEN.trim().replace("\"", "")}"
+            
+            val searchResults = ApiClient.apifyApi.searchFace(
+                bearerToken = formattedToken,
+                input = apifyInput
+            )
+
+            if (searchResults.isNotEmpty()) {
                 uiState = CheckInUiState.Success(
-                    matches = outcome.matches.map { match ->
+                    matches = searchResults.map { result ->
                         val sourceDomain = try {
-                            val url = match.webLink ?: ""
-                            if (url.startsWith("http")) {
-                                url.split("/")[2].replace("www.", "")
-                            } else {
-                                "Visual Match"
-                            }
+                            val uri = android.net.Uri.parse(result.url)
+                            uri.host?.replace("www.", "") ?: "Social Profile"
                         } catch (e: Exception) {
-                            "Visual Match"
+                            "Social Profile"
                         }
 
-                        val isKgMatch = match.webLink?.contains("google.com/search?q=") == true
-                        val baseConfidence = if (isKgMatch) 0.99 else 0.85
-                        val randomVariation = (Math.random() * 0.1)
-                        
                         WebMatchDisplay(
-                            name = match.title ?: "Search Result",
+                            name = "Matched Profile",
                             source = sourceDomain,
-                            profileUrl = match.webLink ?: "",
-                            confidence = baseConfidence + randomVariation,
-                            imageUrl = match.displayImageUrl
+                            profileUrl = result.url,
+                            score = result.score,
+                            imageUrl = result.image
                         )
                     }
                 )
-            }
-            is FaceSearchOutcome.NoMatches -> {
+            } else {
                 uiState = CheckInUiState.NoMatch
             }
-            is FaceSearchOutcome.Error -> {
-                uiState = CheckInUiState.Error(outcome.message)
-            }
+        } catch (e: Exception) {
+            uiState = CheckInUiState.Error(e.message ?: "Apify search failed")
         }
     }
 

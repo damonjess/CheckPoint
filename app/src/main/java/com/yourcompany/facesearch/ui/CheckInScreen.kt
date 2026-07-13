@@ -403,7 +403,7 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                 Spacer(modifier = Modifier.height(4.dp))
                 
                 Text(
-                    text = "Similarity: ${(match.confidence * 100).toInt()}%",
+                    text = "Similarity: ${match.score}%",
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     color = Amber

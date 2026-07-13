@@ -12,8 +12,9 @@ val localProperties = Properties().apply {
         localPropertiesFile.inputStream().use { load(it) }
     }
 }
-val serpApiKey = localProperties.getProperty("SERP_API_KEY") ?: "\"\""
-val imgbbApiKey = localProperties.getProperty("IMGBB_API_KEY") ?: "\"\""
+val serpApiKey = localProperties.getProperty("SERP_API_KEY") ?: ""
+val imgbbApiKey = localProperties.getProperty("IMGBB_API_KEY") ?: ""
+val apifyApiToken = localProperties.getProperty("APIFY_API_TOKEN") ?: ""
 
 android {
     namespace = "com.yourcompany.facesearch"
@@ -28,8 +29,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
-        buildConfigField("String", "SERP_API_KEY", serpApiKey)
-        buildConfigField("String", "IMGBB_API_KEY", imgbbApiKey)
+        buildConfigField("String", "SERP_API_KEY", "\"$serpApiKey\"")
+        buildConfigField("String", "IMGBB_API_KEY", "\"$imgbbApiKey\"")
+        buildConfigField("String", "APIFY_API_TOKEN", "\"$apifyApiToken\"")
     }
 
     buildTypes {

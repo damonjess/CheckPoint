@@ -16,6 +16,6 @@ data class WebMatchDisplay(
     val name: String,
     val source: String,
     val profileUrl: String,
-    val confidence: Double,
+    val score: Int,
     val imageUrl: Any? = null
 )

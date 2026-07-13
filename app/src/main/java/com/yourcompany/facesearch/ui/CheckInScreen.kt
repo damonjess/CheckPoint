@@ -201,7 +201,7 @@ fun CheckInScreen(
                     }
                 }
 
-                is CheckInUiState.NoMatch -> {
+                is CheckInUiState.NoFaceDetected -> {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                         modifier = Modifier.fillMaxWidth()
@@ -210,8 +210,25 @@ fun CheckInScreen(
                             modifier = Modifier.padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text("No public profiles found", fontWeight = FontWeight.Medium)
+                            Text("No face detected", fontWeight = FontWeight.Bold)
+                            Text("Please make sure your face is clearly visible and well-lit.", fontSize = 14.sp)
                             TextButton(onClick = onRetryClick) { Text("Try Again") }
+                        }
+                    }
+                }
+
+                is CheckInUiState.NoMatch -> {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("No public profiles found", fontWeight = FontWeight.Bold)
+                            Text("Search completed successfully, but no matching social media profiles were located on the public web.", fontSize = 14.sp)
+                            TextButton(onClick = onRetryClick) { Text("Search Another Photo") }
                         }
                     }
                 }

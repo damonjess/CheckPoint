@@ -7,16 +7,37 @@ import retrofit2.http.Query
 
 interface FaceSearchApi {
     @GET("search")
-    suspend fun searchGoogleReverseImage(
-        @Query("engine") engine: String = "google_reverse_image",
+    suspend fun searchGoogle(
+        @Query("engine") engine: String,
         @Query("api_key") apiKey: String,
-        @Query("image_url") imageUrl: String
+        @Query("image_url") imageUrl: String? = null,
+        @Query("url") url: String? = null
     ): Response<SerpApiResponse>
 }
 
 data class SerpApiResponse(
     @SerializedName("image_results") val imageResults: List<SerpApiMatch>?,
-    @SerializedName("inline_images") val inlineImages: List<InlineImage>? // Captures visual image frames
+    @SerializedName("inline_images") val inlineImages: List<InlineImage>?,
+    @SerializedName("visual_matches") val visualMatches: List<VisualMatch>?,
+    @SerializedName("knowledge_graph") val knowledgeGraph: KnowledgeGraph?
+)
+
+data class VisualMatch(
+    val title: String?,
+    val link: String?,
+    val source: String?,
+    val thumbnail: String?
+)
+
+data class KnowledgeGraph(
+    val title: String?,
+    val subtitle: String?,
+    val description: String?,
+    @SerializedName("header_images") val headerImages: List<HeaderImage>?
+)
+
+data class HeaderImage(
+    val image: String?
 )
 
 data class SerpApiMatch(

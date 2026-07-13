@@ -7,6 +7,7 @@ sealed class CheckInUiState {
         val logs: List<String> = emptyList()
     ) : CheckInUiState()
     data class Success(val matches: List<WebMatchDisplay>) : CheckInUiState()
+    object NoFaceDetected : CheckInUiState()
     object NoMatch : CheckInUiState()
     data class Error(val message: String) : CheckInUiState()
 }

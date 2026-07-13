@@ -7,10 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.Preview
+import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -19,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,15 +30,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
-/**
- * Full-screen CameraX capture flow for the front-desk kiosk.
- *
- * Handles the CAMERA runtime permission itself: shows a rationale + request
- * button if not yet granted, and only starts the preview once granted.
- *
- * On successful capture, calls [onPhotoCaptured] with the resulting Bitmap
- * and returns control to the caller. [onCancel] is used for the close button.
- */
 @Composable
 fun CameraCaptureScreen(
     onPhotoCaptured: (Bitmap) -> Unit,
@@ -94,41 +83,47 @@ private fun CameraPreviewWithCapture(
     val imageCapture = remember { ImageCapture.Builder().build() }
     var isCapturing by remember { mutableStateOf(false) }
     var captureError by remember { mutableStateOf<String?>(null) }
+    
+    // State to track which camera is currently active
+    var lensFacing by remember { mutableIntStateOf(CameraSelector.LENS_FACING_FRONT) }
+
+    val previewView = remember { PreviewView(context) }
+
+    // Re-bind camera whenever lensFacing changes
+    LaunchedEffect(lensFacing) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+            
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
+
+            val cameraSelector = CameraSelector.Builder()
+                .requireLensFacing(lensFacing)
+                .build()
+
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    preview,
+                    imageCapture
+                )
+            } catch (e: Exception) {
+                captureError = "Unable to start camera: ${e.message}"
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                val previewView = PreviewView(ctx)
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-
-                cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
-
-                    val preview = Preview.Builder().build().also {
-                        it.setSurfaceProvider(previewView.surfaceProvider)
-                    }
-
-                    val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
-
-                    try {
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            cameraSelector,
-                            preview,
-                            imageCapture
-                        )
-                    } catch (e: Exception) {
-                        captureError = "Unable to start camera: ${e.message}"
-                    }
-                }, ContextCompat.getMainExecutor(ctx))
-
-                previewView
-            }
+            factory = { previewView }
         )
 
-        // Close button, top-start
+        // Close button (Top-Start)
         IconButton(
             onClick = onCancel,
             modifier = Modifier
@@ -137,6 +132,23 @@ private fun CameraPreviewWithCapture(
                 .background(Color.Black.copy(alpha = 0.4f), CircleShape)
         ) {
             Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White)
+        }
+
+        // Switch Camera button (Top-End)
+        IconButton(
+            onClick = {
+                lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+                    CameraSelector.LENS_FACING_BACK
+                } else {
+                    CameraSelector.LENS_FACING_FRONT
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+                .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+        ) {
+            Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Switch Camera", tint = Color.White)
         }
 
         captureError?.let { message ->
@@ -150,7 +162,7 @@ private fun CameraPreviewWithCapture(
             )
         }
 
-        // Capture button, bottom-center
+        // Capture button (Bottom-Center)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -166,6 +178,7 @@ private fun CameraPreviewWithCapture(
                         capturePhoto(
                             imageCapture = imageCapture,
                             executor = cameraExecutor,
+                            lensFacing = lensFacing, // Pass current camera to handler
                             onSuccess = { bitmap ->
                                 isCapturing = false
                                 onPhotoCaptured(bitmap)
@@ -219,21 +232,17 @@ private fun PermissionRationale(
     }
 }
 
-/**
- * Triggers an ImageCapture and converts the resulting JPEG bytes into a
- * correctly-rotated, correctly-mirrored Bitmap (front camera captures come
- * back mirrored and need both EXIF rotation and a horizontal flip applied).
- */
 private fun capturePhoto(
     imageCapture: ImageCapture,
     executor: Executor,
+    lensFacing: Int,
     onSuccess: (Bitmap) -> Unit,
     onError: (String) -> Unit
 ) {
     imageCapture.takePicture(
         executor,
         object : ImageCapture.OnImageCapturedCallback() {
-            override fun onCaptureSuccess(image: androidx.camera.core.ImageProxy) {
+            override fun onCaptureSuccess(image: ImageProxy) {
                 try {
                     val buffer = image.planes[0].buffer
                     val bytes = ByteArray(buffer.remaining())
@@ -244,9 +253,11 @@ private fun capturePhoto(
 
                     val matrix = Matrix().apply {
                         postRotate(rotationDegrees.toFloat())
-                        // Front camera preview is mirrored; flip horizontally
-                        // so the captured photo matches what the user saw.
-                        postScale(-1f, 1f, rawBitmap.width / 2f, rawBitmap.height / 2f)
+                        
+                        // Only flip horizontally if using the front camera
+                        if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+                            postScale(-1f, 1f, rawBitmap.width / 2f, rawBitmap.height / 2f)
+                        }
                     }
 
                     val correctedBitmap = Bitmap.createBitmap(

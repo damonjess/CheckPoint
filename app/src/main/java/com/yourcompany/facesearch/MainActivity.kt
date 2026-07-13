@@ -4,9 +4,15 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.android.gms.tflite.java.TfLite
 import com.yourcompany.facesearch.network.LocalServer
 import com.yourcompany.facesearch.ui.CameraCaptureScreen
 import com.yourcompany.facesearch.ui.CheckInScreen
@@ -19,28 +25,40 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // LocalServer.start(this) // Removed simulated server
+        val isTfLiteInitialized = mutableStateOf(false)
+        TfLite.initialize(this).addOnCompleteListener {
+            isTfLiteInitialized.value = true
+        }
 
         setContent {
-            MaterialTheme {
-                val checkInViewModel: CheckInViewModel = viewModel()
-                var screen by remember { mutableStateOf(Screen.SEARCH) }
+            if (isTfLiteInitialized.value) {
+                MaterialTheme {
+                    val checkInViewModel: CheckInViewModel = viewModel()
+                    var screen by remember { mutableStateOf(Screen.SEARCH) }
 
-                when (screen) {
-                    Screen.SEARCH -> CheckInScreen(
-                        capturedBitmap = checkInViewModel.capturedBitmap,
-                        uiState = checkInViewModel.uiState,
-                        onCapturePhotoClick = { screen = Screen.CAMERA },
-                        onRetryClick = { checkInViewModel.onRetry() }
-                    )
+                    when (screen) {
+                        Screen.SEARCH -> CheckInScreen(
+                            capturedBitmap = checkInViewModel.capturedBitmap,
+                            uiState = checkInViewModel.uiState,
+                            onCapturePhotoClick = { screen = Screen.CAMERA },
+                            onRetryClick = { checkInViewModel.onRetry() }
+                        )
 
-                    Screen.CAMERA -> CameraCaptureScreen(
-                        onPhotoCaptured = { bitmap ->
-                            checkInViewModel.onPhotoCaptured(bitmap)
-                            screen = Screen.SEARCH
-                        },
-                        onCancel = { screen = Screen.SEARCH }
-                    )
+                        Screen.CAMERA -> CameraCaptureScreen(
+                            onPhotoCaptured = { bitmap ->
+                                checkInViewModel.onPhotoCaptured(bitmap)
+                                screen = Screen.SEARCH
+                            },
+                            onCancel = { screen = Screen.SEARCH }
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
                 }
             }
         }

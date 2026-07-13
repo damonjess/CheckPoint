@@ -55,10 +55,6 @@ android {
         buildConfig = true // Ensure BuildConfig generation is enabled
     }
 
-    androidResources {
-        noCompress += "tflite"
-    }
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -104,14 +100,15 @@ dependencies {
     // ML Kit
     implementation(libs.mlkit.face.detection)
 
+    // TensorFlow Lite (Play Services)
+    implementation(libs.play.services.tflite.java)
+    implementation(libs.play.services.tflite.support)
+
     // Coroutines (for async calls)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
 
 
-
-    // TensorFlow Lite (on-device face embeddings)
-    implementation(libs.tensorflow.lite)
 
     // Image Loading
     implementation(libs.coil.compose)

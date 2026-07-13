@@ -2,7 +2,8 @@ package com.yourcompany.facesearch.vision
 
 import android.content.Context
 import android.graphics.Bitmap
-import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.InterpreterApi
+import org.tensorflow.lite.InterpreterFactory
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -10,12 +11,6 @@ import java.nio.channels.FileChannel
 
 /**
  * Wraps the bundled MobileFaceNet TFLite model.
- *
- * Input:  a 112x112 RGB face crop (already tightly cropped around the face)
- * Output: a 192-dimensional embedding vector. Two embeddings from the same
- * person's face end up close together (high cosine similarity); different
- * people end up far apart. Confirmed via the model's own metadata:
- * input [1,112,112,3] float32, output [1,192] float32.
  */
 class FaceEmbedder(context: Context) {
 
@@ -25,7 +20,10 @@ class FaceEmbedder(context: Context) {
         const val EMBEDDING_SIZE = 192
     }
 
-    private val interpreter: Interpreter = Interpreter(loadModelFile(context))
+    private val interpreter: InterpreterApi = InterpreterFactory().create(
+        loadModelFile(context), 
+        InterpreterApi.Options().setRuntime(InterpreterApi.Options.TfLiteRuntime.FROM_SYSTEM_ONLY)
+    )
 
     fun getEmbedding(faceBitmap: Bitmap): FloatArray {
         val resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true)
@@ -45,7 +43,6 @@ class FaceEmbedder(context: Context) {
         bitmap.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
 
         for (pixel in pixels) {
-            // Normalize to [-1, 1], matching how MobileFaceNet was trained.
             buffer.putFloat(((pixel shr 16 and 0xFF) - 127.5f) / 128f) // R
             buffer.putFloat(((pixel shr 8 and 0xFF) - 127.5f) / 128f)  // G
             buffer.putFloat(((pixel and 0xFF) - 127.5f) / 128f)        // B
@@ -55,7 +52,6 @@ class FaceEmbedder(context: Context) {
         return buffer
     }
 
-    /** Cosine similarity is more stable when both vectors are unit length. */
     private fun l2Normalize(vector: FloatArray): FloatArray {
         var normSq = 0f
         for (v in vector) normSq += v * v

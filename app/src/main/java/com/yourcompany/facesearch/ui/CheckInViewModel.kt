@@ -11,15 +11,16 @@ import com.yourcompany.facesearch.network.ApiClient
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.ImageUploadRepository
 import com.yourcompany.facesearch.network.Secrets
-import com.yourcompany.facesearch.vision.FaceDetectionResult
-import com.yourcompany.facesearch.vision.FaceDetectorHelper
+import com.yourcompany.facesearch.vision.NativeFaceCropper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class CheckInViewModel(
     application: Application
 ) : AndroidViewModel(application) {
 
-    private val faceDetectorHelper = FaceDetectorHelper(application)
+    private val nativeFaceCropper = NativeFaceCropper()
     private val faceSearchRepository = FaceSearchRepository()
     private val imageUploadRepository = ImageUploadRepository()
 
@@ -36,30 +37,28 @@ class CheckInViewModel(
             val logs = mutableListOf("Initializing local optics...")
             uiState = CheckInUiState.Loading(0.1f, logs.toList())
             
-            // Step 1: Local face detection
-            when (val detectionResult = faceDetectorHelper.detectAndCropFace(bitmap)) {
-                is FaceDetectionResult.Success -> {
-                    logs.add("Face detected. Optimizing probe...")
-                    uiState = CheckInUiState.Loading(0.25f, logs.toList())
-                    
-                    logs.add("Hosting probe image safely (ImgBB)...")
-                    uiState = CheckInUiState.Loading(0.4f, logs.toList())
-                    
-                    val publicUrl = imageUploadRepository.uploadImage(detectionResult.croppedFace)
-                    
-                    if (publicUrl != null) {
-                        logs.add("Cloud hosting successful.")
-                        performWebSearch(publicUrl, logs)
-                    } else {
-                        uiState = CheckInUiState.Error("Image hosting failed. Please try again.")
-                    }
+            // Step 1: Local face detection via ML Kit
+            try {
+                val croppedFace = withContext(Dispatchers.Default) {
+                    nativeFaceCropper.cropToFace(bitmap)
                 }
-                is FaceDetectionResult.NoFaceFound -> {
-                    uiState = CheckInUiState.NoFaceDetected
+                
+                logs.add("Face detected. Optimizing probe...")
+                uiState = CheckInUiState.Loading(0.25f, logs.toList())
+                
+                logs.add("Hosting probe image safely (ImgBB)...")
+                uiState = CheckInUiState.Loading(0.4f, logs.toList())
+                
+                val publicUrl = imageUploadRepository.uploadImage(croppedFace)
+                
+                if (publicUrl != null) {
+                    logs.add("Cloud hosting successful.")
+                    performWebSearch(publicUrl, logs)
+                } else {
+                    uiState = CheckInUiState.Error("Image hosting failed. Please try again.")
                 }
-                is FaceDetectionResult.Error -> {
-                    uiState = CheckInUiState.Error("Face detection failed. Try again.")
-                }
+            } catch (e: Exception) {
+                uiState = CheckInUiState.Error("Face detection failed: ${e.message}")
             }
         }
     }
@@ -97,6 +96,5 @@ class CheckInViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        faceDetectorHelper.release()
     }
 }

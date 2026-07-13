@@ -28,6 +28,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Tells Google Play Services to auto-download the face detection model -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="face" />
+
     </application>
 
 </manifest>

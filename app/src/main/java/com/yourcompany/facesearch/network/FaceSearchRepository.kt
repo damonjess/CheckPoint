@@ -35,11 +35,13 @@ class FaceSearchRepository(
                 if (!textResults.isNullOrEmpty()) {
                     val unifiedList = mutableListOf<UnifiedSearchResult>()
                     
-                    // Match up textual reference info with image thumbnails positionally
                     for (i in textResults.indices) {
                         val textItem = textResults[i]
-                        // Fallback safely if there are fewer image boxes than text rows
+                        
+                        // Look for a fallback image if positional matching comes up blank
                         val imageThumbnail = visualImages?.getOrNull(i)?.thumbnail 
+                            ?: visualImages?.firstOrNull()?.thumbnail // Quick fallback to avoid empty spaces
+                            ?: "https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg" // Shared stock fallback placeholder
 
                         unifiedList.add(
                             UnifiedSearchResult(

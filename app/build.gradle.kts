@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+// Read local.properties
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+val serpApiKey = localProperties.getProperty("SERP_API_KEY") ?: "\"\""
 
 android {
     namespace = "com.yourcompany.facesearch"
@@ -15,6 +26,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        buildConfigField("String", "SERP_API_KEY", serpApiKey)
     }
 
     buildTypes {
@@ -35,6 +48,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true // Ensure BuildConfig generation is enabled
     }
 
     androidResources {

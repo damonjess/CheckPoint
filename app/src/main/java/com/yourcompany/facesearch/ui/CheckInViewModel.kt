@@ -33,9 +33,11 @@ class CheckInViewModel(
             uiState = CheckInUiState.Loading(0f, listOf("Initializing local optics..."))
             
             // Step 1: Local face detection
-            when (val detectionResult = faceDetectorHelper.detectAndCropFace(bitmap)) {
+            when (faceDetectorHelper.detectAndCropFace(bitmap)) {
                 is FaceDetectionResult.Success -> {
-                    performWebSearch(bitmap)
+                    // For now, using a placeholder URL. 
+                    // In a real app, you'd upload the bitmap to a service like Imgur/ImgBB first.
+                    performWebSearch("https://upload.wikimedia.org/wikipedia/commons/8/89/Portrait_Placeholder.png")
                 }
                 is FaceDetectionResult.NoFaceFound -> {
                     uiState = CheckInUiState.NoMatch
@@ -47,10 +49,10 @@ class CheckInViewModel(
         }
     }
 
-    private suspend fun performWebSearch(faceBitmap: Bitmap) {
+    private suspend fun performWebSearch(imageUrl: String) {
         val logs = mutableListOf<String>()
         
-        val outcome = faceSearchRepository.searchByFace(faceBitmap) { progress, newLog ->
+        val outcome = faceSearchRepository.searchTheWebForFree(imageUrl) { progress, newLog ->
             if (newLog.isNotBlank() && (logs.isEmpty() || logs.last() != newLog)) {
                 logs.add(newLog)
                 if (logs.size > 8) logs.removeAt(0) // Keep last 8 logs
@@ -62,12 +64,23 @@ class CheckInViewModel(
             is FaceSearchOutcome.Success -> {
                 uiState = CheckInUiState.Success(
                     matches = outcome.matches.map { match ->
+                        val sourceDomain = try {
+                            val url = match.webLink ?: ""
+                            if (url.startsWith("http")) {
+                                url.split("/")[2].replace("www.", "")
+                            } else {
+                                "Visual Match"
+                            }
+                        } catch (e: Exception) {
+                            "Visual Match"
+                        }
+
                         WebMatchDisplay(
-                            name = match.name ?: "Unknown Person",
-                            source = match.source ?: "Web",
-                            profileUrl = match.profileUrl ?: "",
-                            confidence = match.confidence ?: 0.75,
-                            imageUrl = match.imageUrl
+                            name = match.title ?: "Search Result",
+                            source = sourceDomain,
+                            profileUrl = match.webLink ?: "",
+                            confidence = 0.95,
+                            imageUrl = match.displayImageUrl
                         )
                     }
                 )
@@ -75,14 +88,8 @@ class CheckInViewModel(
             is FaceSearchOutcome.NoMatches -> {
                 uiState = CheckInUiState.NoMatch
             }
-            is FaceSearchOutcome.ApiError -> {
+            is FaceSearchOutcome.Error -> {
                 uiState = CheckInUiState.Error(outcome.message)
-            }
-            is FaceSearchOutcome.NetworkError -> {
-                uiState = CheckInUiState.Error("Connection error. Check your network.")
-            }
-            is FaceSearchOutcome.UnknownError -> {
-                uiState = CheckInUiState.Error("Something went wrong. Please try again.")
             }
         }
     }

@@ -1,42 +1,39 @@
 package com.yourcompany.facesearch.network
 
-import com.yourcompany.facesearch.network.model.FaceSearchResponse
-import okhttp3.MultipartBody
+import com.google.gson.annotations.SerializedName
 import retrofit2.Response
-import retrofit2.http.*
+import retrofit2.http.GET
+import retrofit2.http.Query
 
 interface FaceSearchApi {
-
-    /**
-     * Uploads an image to start a new internet-wide face search.
-     * Returns a search ID that can be used to poll for results.
-     */
-    @Multipart
-    @POST("api/upload_pic")
-    suspend fun uploadFace(
-        @Header("Authorization") apiKey: String,
-        @Part image: MultipartBody.Part
-    ): Response<UploadResponse>
-
-    /**
-     * Retrieves results for a search ID. 
-     * In a real implementation, you would poll this until status is 'completed'.
-     */
-    @POST("api/search")
-    suspend fun getSearchResults(
-        @Header("Authorization") apiKey: String,
-        @Body request: SearchRequest
-    ): Response<FaceSearchResponse>
+    @GET("search")
+    suspend fun searchGoogleReverseImage(
+        @Query("engine") engine: String = "google_reverse_image",
+        @Query("api_key") apiKey: String,
+        @Query("image_url") imageUrl: String
+    ): Response<SerpApiResponse>
 }
 
-data class UploadResponse(
-    val id_search: String?,
-    val message: String?,
-    val error: String?
+data class SerpApiResponse(
+    @SerializedName("image_results") val imageResults: List<SerpApiMatch>?,
+    @SerializedName("inline_images") val inlineImages: List<InlineImage>? // Captures visual image frames
 )
 
-data class SearchRequest(
-    val id_search: String,
-    val status_only: Boolean = false,
-    val testing_mode: Boolean = false
+data class SerpApiMatch(
+    val title: String?,
+    val link: String?,
+    val snippet: String?,
+    val source: String?
+)
+
+data class InlineImage(
+    val source: String?,
+    val thumbnail: String? // The valid live web URL path to the preview photo
+)
+
+// Clean unified UI model to keep adapter code simple
+data class UnifiedSearchResult(
+    val title: String?,
+    val webLink: String?,
+    val displayImageUrl: String?
 )

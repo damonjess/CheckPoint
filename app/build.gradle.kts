@@ -83,12 +83,14 @@ dependencies {
     implementation(libs.retrofit.converter.gson)
     implementation(libs.okhttp.logging.interceptor)
 
+    // ML Kit
+    implementation(libs.mlkit.face.detection)
+
     // Coroutines (for async calls)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
 
-    // ML Kit
-    implementation(libs.mlkit.face.detection)
+
 
     // TensorFlow Lite (on-device face embeddings)
     implementation(libs.tensorflow.lite)

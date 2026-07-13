@@ -6,5 +6,5 @@ package com.yourcompany.facesearch.network
  * so your keys are never uploaded to GitHub or shared.
  */
 object Secrets {
-    const val FACECHECK_API_KEY = "zBN/ScSxloFIlXBPM23Vqqu9zyB035fvJrbUzRKKzT8IzpDf/9h5wJg5ocfkdwZMoRGVRWLtMUQ="
+    const val SERP_API_KEY = "109b04a8d6dadaa8c097e304daa60d589bb9444e6cd7af55cac38e34efb9f055"
 }

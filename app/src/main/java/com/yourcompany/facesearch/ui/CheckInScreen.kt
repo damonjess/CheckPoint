@@ -8,8 +8,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.People
@@ -32,6 +34,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+
+// High-contrast Amber for better readability
+private val Amber = Color(0xFFFFB000)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,6 +94,13 @@ fun CheckInScreen(
                 }
 
                 is CheckInUiState.Loading -> {
+                    val consoleScrollState = rememberScrollState()
+                    
+                    // Auto-scroll to bottom when new logs arrive
+                    LaunchedEffect(uiState.logs.size) {
+                        consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
+                    }
+
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth()
@@ -99,8 +111,8 @@ fun CheckInScreen(
                                 .fillMaxWidth(0.8f)
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(4.dp)),
-                            color = Color.Red,
-                            trackColor = Color.Red.copy(alpha = 0.1f),
+                            color = Amber,
+                            trackColor = Amber.copy(alpha = 0.1f),
                         )
                         
                         Spacer(modifier = Modifier.height(12.dp))
@@ -110,7 +122,7 @@ fun CheckInScreen(
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = Color.Red
+                            color = Amber
                         )
                         
                         Spacer(modifier = Modifier.height(24.dp))
@@ -121,16 +133,17 @@ fun CheckInScreen(
                                 .fillMaxWidth()
                                 .height(200.dp),
                             shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red.copy(alpha = 0.3f))
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
                         ) {
                             Column(
                                 modifier = Modifier
                                     .padding(12.dp)
                                     .fillMaxSize()
+                                    .verticalScroll(consoleScrollState)
                             ) {
                                 Text(
                                     "SHERLOCK OSINT CONSOLE v2.1",
-                                    color = Color.Red,
+                                    color = Amber,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
@@ -140,7 +153,7 @@ fun CheckInScreen(
                                 uiState.logs.forEach { log ->
                                     Text(
                                         text = "> $log",
-                                        color = Color.Red.copy(alpha = 0.9f),
+                                        color = Amber.copy(alpha = 0.9f),
                                         fontSize = 11.sp,
                                         fontFamily = FontFamily.Monospace,
                                         modifier = Modifier.padding(vertical = 1.dp)
@@ -160,7 +173,7 @@ fun CheckInScreen(
                                 )
                                 Text(
                                     text = "> _",
-                                    color = Color.Red.copy(alpha = alpha),
+                                    color = Amber.copy(alpha = alpha),
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace
                                 )
@@ -243,9 +256,9 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false) {
                 drawArc(
                     brush = Brush.sweepGradient(
                         colors = listOf(
-                            Color.Red.copy(alpha = 0.1f),
-                            Color.Red,
-                            Color.Red.copy(alpha = 0.1f)
+                            Amber.copy(alpha = 0.1f),
+                            Amber,
+                            Amber.copy(alpha = 0.1f)
                         )
                     ),
                     startAngle = 0f,
@@ -291,7 +304,7 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false) {
                                 brush = Brush.verticalGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        Color.Red,
+                                        Amber,
                                         Color.Transparent
                                     )
                                 )
@@ -327,7 +340,8 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                 contentDescription = null,
                 modifier = Modifier
                     .size(60.dp)
-                    .clip(CircleShape),
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentScale = ContentScale.Crop
             )
 
@@ -341,11 +355,13 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                 )
                 
                 Surface(
-                    color = when(match.source.lowercase()) {
-                        "facebook" -> Color(0xFF1877F2).copy(alpha = 0.1f)
-                        "instagram" -> Color(0xFFE4405F).copy(alpha = 0.1f)
-                        "linkedin" -> Color(0xFF0A66C2).copy(alpha = 0.1f)
-                        "x (twitter)" -> Color(0xFF000000).copy(alpha = 0.1f)
+                    color = when {
+                        match.source.contains("facebook", ignoreCase = true) -> Color(0xFF1877F2).copy(alpha = 0.1f)
+                        match.source.contains("instagram", ignoreCase = true) -> Color(0xFFE4405F).copy(alpha = 0.1f)
+                        match.source.contains("linkedin", ignoreCase = true) -> Color(0xFF0A66C2).copy(alpha = 0.1f)
+                        match.source.contains("twitter", ignoreCase = true) || match.source.contains(" x.", ignoreCase = true) -> Color(0xFF000000).copy(alpha = 0.1f)
+                        match.source.contains("pinterest", ignoreCase = true) -> Color(0xFFE60023).copy(alpha = 0.1f)
+                        match.source.contains("youtube", ignoreCase = true) -> Color(0xFFFF0000).copy(alpha = 0.1f)
                         else -> MaterialTheme.colorScheme.secondaryContainer
                     },
                     shape = RoundedCornerShape(4.dp)
@@ -356,10 +372,12 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Black,
                         fontFamily = FontFamily.Monospace,
-                        color = when(match.source.lowercase()) {
-                            "facebook" -> Color(0xFF1877F2)
-                            "instagram" -> Color(0xFFE4405F)
-                            "linkedin" -> Color(0xFF0A66C2)
+                        color = when {
+                            match.source.contains("facebook", ignoreCase = true) -> Color(0xFF1877F2)
+                            match.source.contains("instagram", ignoreCase = true) -> Color(0xFFE4405F)
+                            match.source.contains("linkedin", ignoreCase = true) -> Color(0xFF0A66C2)
+                            match.source.contains("pinterest", ignoreCase = true) -> Color(0xFFE60023)
+                            match.source.contains("youtube", ignoreCase = true) -> Color(0xFFFF0000)
                             else -> MaterialTheme.colorScheme.onSecondaryContainer
                         }
                     )
@@ -371,7 +389,7 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                     text = "Similarity: ${(match.confidence * 100).toInt()}%",
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Color.Red
+                    color = Amber
                 )
             }
 

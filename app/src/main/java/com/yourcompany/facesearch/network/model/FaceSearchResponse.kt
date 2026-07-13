@@ -3,38 +3,21 @@ package com.yourcompany.facesearch.network.model
 import com.google.gson.annotations.SerializedName
 
 data class FaceSearchResponse(
-    @SerializedName("search_id")
-    val searchId: String? = null,
+    val status: String?,
+    val progress: Int?,
+    val message: String?,
+    val error: String?,
+    val output: SearchOutput? // Nested data envelope where results actually live
+)
 
-    @SerializedName("status")
-    val status: String? = null,
-
-    @SerializedName("match_found")
-    val matchFound: Boolean = false,
-
-    @SerializedName("match_confidence")
-    val matchConfidence: Double? = null,
-
-    @SerializedName("results")
-    val results: List<WebMatch>? = null,
-
-    @SerializedName("message")
-    val message: String? = null
+data class SearchOutput(
+    val items: List<WebMatch>?, // The true list array containing search items
+    @SerializedName("tookSeconds") val tookSeconds: Double?
 )
 
 data class WebMatch(
-    @SerializedName("name")
-    val name: String? = null,
-
-    @SerializedName("confidence")
-    val confidence: Double? = null,
-
-    @SerializedName("source")
-    val source: String? = null,
-
-    @SerializedName("profile_url")
-    val profileUrl: String? = null,
-
-    @SerializedName("image_url")
-    val imageUrl: String? = null
+    val base64: String?,    // Thumbnail data string
+    val url: String?,       // Direct internet link profile reference
+    val score: Int?,        // Biometric similarity score index (0-100)
+    val group: Int?
 )

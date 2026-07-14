@@ -1,0 +1,244 @@
+--- PROJECT: CheckPoint ---
+--- FILE: build.gradle.kts (Root) ---
+// Location: C:/Users/Damon/AndroidStudioProjects/CheckPoint/build.gradle.kts
+// (File content would be here)
+
+--- FILE: app/build.gradle.kts ---
+// Location: C:/Users/Damon/AndroidStudioProjects/CheckPoint/app/build.gradle.kts
+// (File content would be here)
+
+--- FILE: app/src/main/java/com/yourcompany/facesearch/vision/FaceEmbedder.kt ---
+package com.yourcompany.facesearch.vision
+
+import android.content.Context
+import android.graphics.Bitmap
+import org.tensorflow.lite.InterpreterApi
+import org.tensorflow.lite.InterpreterFactory
+import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.channels.FileChannel
+
+/**
+ * Wraps the bundled MobileFaceNet TFLite model.
+ */
+class FaceEmbedder(context: Context) {
+
+    companion object {
+        private const val MODEL_FILE = "mobilefacenet.tflite"
+        const val INPUT_SIZE = 112
+        const val EMBEDDING_SIZE = 192
+    }
+
+    private val interpreter: InterpreterApi = InterpreterFactory().create(
+        loadModelFile(context),
+        InterpreterApi.Options().setRuntime(InterpreterApi.Options.TfLiteRuntime.FROM_SYSTEM_ONLY)
+    )
+
+    fun getEmbedding(faceBitmap: Bitmap): FloatArray {
+        val resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true)
+        val inputBuffer = bitmapToByteBuffer(resized)
+        val output = Array(1) { FloatArray(EMBEDDING_SIZE) }
+
+        interpreter.run(inputBuffer, output)
+
+        return l2Normalize(output[0])
+    }
+
+    private fun bitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
+        val buffer = ByteBuffer.allocateDirect(4 * INPUT_SIZE * INPUT_SIZE * 3)
+        buffer.order(ByteOrder.nativeOrder())
+
+        val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
+        bitmap.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
+
+        for (pixel in pixels) {
+            buffer.putFloat(((pixel shr 16 and 0xFF) - 127.5f) / 128f) // R
+            buffer.putFloat(((pixel shr 8 and 0xFF) - 127.5f) / 128f)  // G
+            buffer.putFloat(((pixel and 0xFF) - 127.5f) / 128f)        // B
+        }
+
+        buffer.rewind()
+        return buffer
+    }
+
+    private fun l2Normalize(vector: FloatArray): FloatArray {
+        var normSq = 0f
+        for (v in vector) normSq += v * v
+        val norm = kotlin.math.sqrt(normSq).coerceAtLeast(1e-8f)
+        return FloatArray(vector.size) { vector[it] / norm }
+    }
+
+    private fun loadModelFile(context: Context): ByteBuffer {
+        val assetFileDescriptor = context.assets.openFd(MODEL_FILE)
+        val inputStream = FileInputStream(assetFileDescriptor.fileDescriptor)
+        val fileChannel = inputStream.channel
+        val startOffset = assetFileDescriptor.startOffset
+        val declaredLength = assetFileDescriptor.declaredLength
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+    }
+
+    fun close() {
+        interpreter.close()
+    }
+}
+
+--- FILE: app/src/main/java/com/yourcompany/facesearch/network/FaceSearchRepository.kt ---
+package com.yourcompany.facesearch.network
+
+class FaceSearchRepository(
+    private val apiService: SerpApiService = ApiClient.serpApiService,
+    private val serpApiKey: String = ApiClient.API_KEY
+) {
+    suspend fun performFaceSearch(
+        uploadedImageUrl: String,
+        engine: String = "google_lens",
+        keywordHint: String? = null,
+        onLog: (String) -> Unit = {}
+    ): List<SerpVisualMatch> {
+        val allResults = mutableListOf<SerpVisualMatch>()
+
+        // --- STEP 1: DEFINE ENGINE WATERFALL ---
+        val waterfall = mutableListOf(engine)
+        listOf("bing_visual_search", "google_lens", "yandex_images").forEach {
+            if (!waterfall.contains(it)) waterfall.add(it)
+        }
+
+        val cleanHint = keywordHint?.trim() ?: ""
+
+        for (currentEngine in waterfall) {
+            try {
+                val readableEngine = currentEngine.replace("_", " ").uppercase()
+                onLog("PROBING $readableEngine...")
+
+                // --- STEP 2: EXECUTE REQUEST ---
+                if (currentEngine != waterfall.first()) {
+                    kotlinx.coroutines.delay(1200)
+                }
+
+                val supportsHint = currentEngine == "google_lens"
+                val activeHint = if (supportsHint && cleanHint.isNotEmpty()) cleanHint else null
+
+                var response = try {
+                    apiService.searchVisual(
+                        engine = currentEngine,
+                        imageUrl = uploadedImageUrl,
+                        query = activeHint,
+                        apiKey = serpApiKey
+                    )
+                } catch (e: java.net.SocketTimeoutException) {
+                    onLog("COMM ERROR: $readableEngine timed out.")
+                    continue
+                } catch (e: Exception) {
+                    onLog("COMM ERROR: $readableEngine network failure.")
+                    continue
+                }
+
+                if (response.isSuccessful && (response.body()?.visualMatches.isNullOrEmpty()) && activeHint != null) {
+                    onLog("No results with hint. Retrying $readableEngine (Raw)...")
+                    response = try {
+                        apiService.searchVisual(
+                            engine = currentEngine,
+                            imageUrl = uploadedImageUrl,
+                            query = null,
+                            apiKey = serpApiKey
+                        )
+                    } catch (e: Exception) {
+                        onLog("COMM ERROR: $readableEngine retry failed.")
+                        continue
+                    }
+                }
+
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    val engineResults = mutableListOf<SerpVisualMatch>()
+
+                    body?.visualMatches?.let { engineResults.addAll(it) }
+                    body?.imageResults?.map {
+                        SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail)
+                    }?.let { engineResults.addAll(it) }
+                    body?.inlineImages?.map {
+                        SerpVisualMatch(title = "Visual Match", link = it.source, source = it.source, thumbnail = it.thumbnail)
+                    }?.let { engineResults.addAll(it) }
+
+                    if (engineResults.isNotEmpty()) {
+                        allResults.addAll(engineResults)
+                        onLog("Found ${engineResults.size} leads via $readableEngine.")
+                        if (allResults.size > 15) break
+                    } else {
+                        onLog("$readableEngine: No direct visual matches.")
+                    }
+                } else {
+                    val errorBody = response.errorBody()?.string() ?: ""
+                    when {
+                        errorBody.contains("Account limit", true) -> onLog("API LIMIT REACHED.")
+                        response.code() == 400 -> {
+                            onLog("$readableEngine recalibrating...")
+                            val retryResponse = try {
+                                apiService.searchVisual(currentEngine, uploadedImageUrl, null, serpApiKey)
+                            } catch (e: Exception) { null }
+
+                            if (retryResponse?.isSuccessful == true) {
+                                retryResponse.body()?.visualMatches?.let { allResults.addAll(it) }
+                                onLog("Recovery successful via $readableEngine.")
+                            } else {
+                                onLog("Node $readableEngine rejected request.")
+                            }
+                        }
+                        response.code() == 429 -> onLog("$readableEngine: Too many requests.")
+                        else -> onLog("Node $readableEngine busy (${response.code()}).")
+                    }
+                }
+            } catch (e: Exception) {
+                val readableEngine = currentEngine.replace("_", " ").uppercase()
+                onLog("COMM ERROR: $readableEngine error.")
+            }
+        }
+
+        if (allResults.isEmpty()) return emptyList()
+
+        // --- STEP 3: CYBER-SCORING ---
+        val firstName = cleanHint.split(" ").getOrNull(0)?.lowercase() ?: ""
+        val lastName = cleanHint.split(" ").getOrNull(1)?.lowercase() ?: ""
+        val fullName = cleanHint.replace("facebook", "", true)
+            .replace("instagram", "", true)
+            .replace("linkedin", "", true).trim().lowercase()
+
+        return allResults.map { match ->
+            var score = 0
+            val title = match.title?.lowercase() ?: ""
+            val link = match.link?.lowercase() ?: ""
+            val source = match.source?.lowercase() ?: ""
+
+            if (fullName.length > 2 && title.contains(fullName)) score += 2000
+            if (firstName.isNotEmpty() && title.contains(firstName)) score += 500
+            if (lastName.isNotEmpty() && title.contains(lastName)) score += 500
+
+            val isSocial = link.contains("facebook.com") ||
+                           link.contains("instagram.com") ||
+                           link.contains("linkedin.com") ||
+                           link.contains("twitter.com") ||
+                           link.contains("x.com") ||
+                           source.contains("facebook") ||
+                           source.contains("instagram") ||
+                           source.contains("linkedin")
+
+            if (isSocial) score += 800
+            if (match.thumbnail != null) score += 300
+            if (link.contains("people/") || link.contains("profile.php") || link.contains("/in/")) score += 400
+
+            if (fullName.isNotEmpty()) {
+                if (title.contains("on this day") || title.contains("history")) score -= 1000
+            }
+
+            match.copy(score = score)
+        }
+        .sortedByDescending { it.score }
+        .distinctBy { it.link }
+    }
+}
+
+--- TFLITE MODEL INFO ---
+- yolo: yolov8n_float32.tflite (Location: app/src/main/assets/yolov8n_float32.tflite)
+- tensor: mobilefacenet.tflite (Location: app/src/main/assets/mobilefacenet.tflite)
+- Usage: MobileFaceNet is used in FaceEmbedder.kt for 192-dim facial embeddings.

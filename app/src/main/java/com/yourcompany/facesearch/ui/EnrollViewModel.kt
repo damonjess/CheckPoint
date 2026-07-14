@@ -52,9 +52,13 @@ class EnrollViewModel(application: Application) : AndroidViewModel(application) 
             when (val detection = faceDetectorHelper.detectAndCropFace(bitmap)) {
                 is FaceDetectionResult.Success -> {
                     val embedding = faceEmbedder.getEmbedding(detection.croppedFace)
-                    EnrolledFaceStore.addFace(context, name.trim(), embedding)
-                    pendingBitmap = null
-                    onSaved()
+                    if (embedding != null) {
+                        EnrolledFaceStore.addFace(context, name.trim(), embedding)
+                        pendingBitmap = null
+                        onSaved()
+                    } else {
+                        errorMessage = "Photo quality too low for biometric enrollment."
+                    }
                 }
                 is FaceDetectionResult.NoFaceFound -> {
                     errorMessage = "No face detected in that photo. Try again with better lighting."

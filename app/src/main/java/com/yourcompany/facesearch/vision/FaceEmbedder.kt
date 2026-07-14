@@ -2,8 +2,7 @@ package com.yourcompany.facesearch.vision
 
 import android.content.Context
 import android.graphics.Bitmap
-import org.tensorflow.lite.InterpreterApi
-import org.tensorflow.lite.InterpreterFactory
+import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -20,12 +19,13 @@ class FaceEmbedder(context: Context) {
         const val EMBEDDING_SIZE = 192
     }
 
-    private val interpreter: InterpreterApi = InterpreterFactory().create(
-        loadModelFile(context), 
-        InterpreterApi.Options().setRuntime(InterpreterApi.Options.TfLiteRuntime.FROM_SYSTEM_ONLY)
-    )
+    private val interpreter: Interpreter by lazy {
+        Interpreter(loadModelFile(context))
+    }
 
-    fun getEmbedding(faceBitmap: Bitmap): FloatArray {
+    fun getEmbedding(faceBitmap: Bitmap): FloatArray? {
+        if (!isGoodQuality(faceBitmap)) return null
+
         val resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true)
         val inputBuffer = bitmapToByteBuffer(resized)
         val output = Array(1) { FloatArray(EMBEDDING_SIZE) }
@@ -33,6 +33,22 @@ class FaceEmbedder(context: Context) {
         interpreter.run(inputBuffer, output)
 
         return l2Normalize(output[0])
+    }
+
+    private fun isGoodQuality(bitmap: Bitmap): Boolean {
+        // Simple brightness/contrast check
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        
+        var brightnessSum = 0f
+        for (pixel in pixels) {
+            val r = (pixel shr 16 and 0xFF)
+            val g = (pixel shr 8 and 0xFF)
+            val b = (pixel and 0xFF)
+            brightnessSum += (0.299f * r + 0.587f * g + 0.114f * b)
+        }
+        val avgBrightness = brightnessSum / pixels.size
+        return avgBrightness in 40f..220f // avoid too dark/bright
     }
 
     private fun bitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {

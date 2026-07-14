@@ -54,6 +54,7 @@ mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", ve
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 play-services-tflite-java = { group = "com.google.android.gms", name = "play-services-tflite-java", version.ref = "playServicesTflite" }
 play-services-tflite-support = { group = "com.google.android.gms", name = "play-services-tflite-support", version.ref = "playServicesTflite" }
+tensorflow_lite = { group = "org.tensorflow", name = "tensorflow-lite", version = "2.16.1" }
 
 
 [plugins]

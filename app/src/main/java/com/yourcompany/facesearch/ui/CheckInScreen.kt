@@ -52,11 +52,14 @@ fun CheckInScreen(
     uiState: CheckInUiState,
     searchMode: SearchMode,
     targetHint: String,
+    debugMode: Boolean,
     onTargetHintChange: (String) -> Unit,
     onSearchModeChange: (SearchMode) -> Unit,
+    onDebugModeChange: (Boolean) -> Unit,
     onCapturePhotoClick: () -> Unit,
     onSelectGalleryClick: () -> Unit,
-    onRetryClick: () -> Unit
+    onRetryClick: () -> Unit,
+    onConfirmFreeSearch: (Bitmap) -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
 
@@ -127,14 +130,27 @@ fun CheckInScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // OSINT Mode Selector
-            Text(
-                "SEARCH ENGINE PROFILE",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.align(Alignment.Start)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "SEARCH ENGINE PROFILE",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("DEBUG", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Amber)
+                    Switch(
+                        checked = debugMode,
+                        onCheckedChange = onDebugModeChange,
+                        modifier = Modifier.scale(0.6f)
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(8.dp))
             
             Row(
@@ -169,9 +185,34 @@ fun CheckInScreen(
                     onClick = { onSearchModeChange(SearchMode.RAW) },
                     enabled = uiState !is CheckInUiState.Loading
                 )
+                ModeChip(
+                    label = "Free",
+                    icon = Icons.Default.FilterCenterFocus,
+                    selected = searchMode == SearchMode.FREE,
+                    onClick = { onSearchModeChange(SearchMode.FREE) },
+                    enabled = uiState !is CheckInUiState.Loading
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            if (searchMode == SearchMode.FREE && capturedBitmap != null && uiState !is CheckInUiState.Loading) {
+                Button(
+                    onClick = { onConfirmFreeSearch(capturedBitmap) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        "🔍 Free Search - My Photos Only",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
 
             // Main Content Area
             Box(modifier = Modifier.weight(1f)) {
@@ -238,6 +279,15 @@ fun CheckInScreen(
                         }
                     }
 
+                    is CheckInUiState.Confirming -> {
+                        FaceSearchConfirmScreen(
+                            croppedBitmap = uiState.faceBitmap,
+                            nameHint = targetHint,
+                            onConfirm = { onConfirmFreeSearch(uiState.faceBitmap) },
+                            onCancel = onRetryClick
+                        )
+                    }
+
                     is CheckInUiState.Success -> {
                         Column(modifier = Modifier.fillMaxSize()) {
                             Text(
@@ -252,6 +302,7 @@ fun CheckInScreen(
                                 items(uiState.matches) { match ->
                                     MatchCard(
                                         match = match,
+                                        debugMode = debugMode,
                                         onClick = { uriHandler.openUri(match.profileUrl) }
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
@@ -423,7 +474,7 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false, size: and
 }
 
 @Composable
-private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
+private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -453,6 +504,16 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                     fontSize = 16.sp,
                     maxLines = 1
                 )
+                
+                if (debugMode) {
+                    Text(
+                        text = "SCORE: ${match.score}",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Amber,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 
                 Surface(
                     color = when {

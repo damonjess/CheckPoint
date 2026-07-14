@@ -28,7 +28,7 @@ class FacePreprocessor(context: Context) {
         interpreter = InterpreterFactory().create(modelBuffer, options)
     }
 
-    fun cropFace(originalBitmap: Bitmap): Bitmap {
+    fun cropFace(originalBitmap: Bitmap, confidenceThreshold: Float = 0.45f): Bitmap? {
         val imageProcessor = ImageProcessor.Builder()
             .add(ResizeOp(640, 640, ResizeOp.ResizeMethod.BILINEAR))
             .add(NormalizeOp(0f, 255f))
@@ -41,7 +41,8 @@ class FacePreprocessor(context: Context) {
 
         interpreter.run(processedImage.buffer, outputBuffer)
 
-        val bestBox = parseBestFaceBoundingBox(outputBuffer, originalBitmap.width, originalBitmap.height)
+        val bestBox = parseBestFaceBoundingBox(outputBuffer, originalBitmap.width, originalBitmap.height, confidenceThreshold)
+            ?: return null
 
         return Bitmap.createBitmap(
             originalBitmap,
@@ -52,16 +53,21 @@ class FacePreprocessor(context: Context) {
         )
     }
 
-    private fun parseBestFaceBoundingBox(output: Array<Array<FloatArray>>, imgWidth: Int, imgHeight: Int): RectF {
+    private fun parseBestFaceBoundingBox(
+        output: Array<Array<FloatArray>>, 
+        imgWidth: Int, 
+        imgHeight: Int,
+        confidenceThreshold: Float
+    ): RectF? {
         var maxConfidence = 0.0f
-        var bestBox = RectF(0f, 0f, imgWidth.toFloat(), imgHeight.toFloat())
+        var bestBox: RectF? = null
 
         // Iterate through all 8400 candidate detections
         for (i in 0 until 8400) {
             // Index 4 is the confidence score for "person" in COCO models
             val confidence = output[0][4][i] 
             
-            if (confidence > maxConfidence && confidence > 0.45f) { // 45% threshold
+            if (confidence > maxConfidence && confidence > confidenceThreshold) {
                 maxConfidence = confidence
                 
                 // Convert normalized YOLO center coordinates to absolute pixel coordinates

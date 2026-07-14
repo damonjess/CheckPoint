@@ -21,6 +21,46 @@ class NativeFaceCropper {
             .build()
     )
 
+    /**
+     * QUALITY GATE: Validates if the face is suitable for a high-quality search.
+     */
+    suspend fun validateFaceQuality(bitmap: Bitmap): FaceQualityResult = suspendCancellableCoroutine { continuation ->
+        val image = InputImage.fromBitmap(bitmap, 0)
+        detector.process(image)
+            .addOnSuccessListener { faces ->
+                if (faces.isEmpty()) {
+                    continuation.resume(FaceQualityResult(false, "No face detected in probe."))
+                    return@addOnSuccessListener
+                }
+
+                val face = faces[0]
+                val box = face.boundingBox
+                
+                // 1. Minimum Size Check (Face should be at least 15% of the frame)
+                val faceArea = box.width() * box.height()
+                val bitmapArea = bitmap.width * bitmap.height
+                val coverage = faceArea.toFloat() / bitmapArea
+                
+                if (coverage < 0.05f) {
+                    continuation.resume(FaceQualityResult(false, "Face too small. Please move closer."))
+                    return@addOnSuccessListener
+                }
+
+                // 2. Head Tilt Check
+                if (Math.abs(face.headEulerAngleY) > 35) {
+                    continuation.resume(FaceQualityResult(false, "Head turned too far. Face the camera directly."))
+                    return@addOnSuccessListener
+                }
+
+                continuation.resume(FaceQualityResult(true, "Quality Pass"))
+            }
+            .addOnFailureListener {
+                continuation.resume(FaceQualityResult(false, "Analysis engine failure."))
+            }
+    }
+
+    data class FaceQualityResult(val isGood: Boolean, val message: String)
+
     suspend fun cropAndAlignFace(bitmap: Bitmap): Bitmap = suspendCancellableCoroutine { continuation ->
         val image = InputImage.fromBitmap(bitmap, 0)
         
@@ -30,26 +70,36 @@ class NativeFaceCropper {
                     val face = faces[0]
                     val box = face.boundingBox
 
-                    // 1. ADD PADDING
-                    val paddingX = (box.width() * 0.15f).toInt()
-                    val paddingY = (box.height() * 0.15f).toInt()
+                    // 1. IMPROVED ALIGNMENT USING LANDMARKS
+                    val leftEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.LEFT_EYE)
+                    val rightEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.RIGHT_EYE)
+                    
+                    val rotationMatrix = Matrix()
+                    if (leftEye != null && rightEye != null) {
+                        val deltaX = (rightEye.position.x - leftEye.position.x).toDouble()
+                        val deltaY = (rightEye.position.y - leftEye.position.y).toDouble()
+                        val angle = Math.toDegrees(Math.atan2(deltaY, deltaX)).toFloat()
+                        rotationMatrix.postRotate(-angle, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
+                    } else {
+                        // Fallback to Euler angle if landmarks are missing
+                        rotationMatrix.postRotate(-face.headEulerAngleZ, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
+                    }
+
+                    // 2. ADD DYNAMIC PADDING (More padding for better context if needed)
+                    val paddingFactor = 0.25f
+                    val paddingX = (box.width() * paddingFactor).toInt()
+                    val paddingY = (box.height() * paddingFactor).toInt()
 
                     val left = (box.left - paddingX).coerceAtLeast(0)
                     val top = (box.top - paddingY).coerceAtLeast(0)
                     val width = (box.width() + (paddingX * 2)).coerceAtMost(bitmap.width - left)
                     val height = (box.height() + (paddingY * 2)).coerceAtMost(bitmap.height - top)
 
-                    // 2. CROP FIRST
-                    var cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
+                    // 3. CROP AND APPLY ALIGNMENT
+                    val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
+                    val aligned = Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, rotationMatrix, true)
 
-                    // 3. ROTATE SECOND
-                    val rotZ = face.headEulerAngleZ 
-                    if (Math.abs(rotZ) > 2.0f) { 
-                        val matrix = Matrix().apply { postRotate(-rotZ) }
-                        cropped = Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, matrix, true)
-                    }
-
-                    continuation.resume(cropped)
+                    continuation.resume(aligned)
                 } else {
                     continuation.resume(bitmap) 
                 }

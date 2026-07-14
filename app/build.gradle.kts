@@ -101,13 +101,16 @@ dependencies {
     // Highly accurate, local on-device face analysis 
     implementation(libs.mlkit.face.detection)
 
-    // TensorFlow Lite (Play Services)
-    implementation(libs.play.services.tflite.java)
-    implementation(libs.play.services.tflite.support)
+    // TensorFlow Lite (Standalone)
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
 
     // Coroutines (for async calls)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
+
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
 
 
 

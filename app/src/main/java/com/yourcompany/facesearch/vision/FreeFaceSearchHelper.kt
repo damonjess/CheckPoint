@@ -10,62 +10,66 @@ import java.io.FileOutputStream
 
 class FreeFaceSearchHelper(private val context: Context) {
 
-    fun searchMyPhoto(photoBitmap: Bitmap, myName: String? = null) {
-        // Improved: Larger, higher quality crop
-        val processedBitmap = prepareImageForSearch(photoBitmap)
-        
-        val imageUri = saveToCache(processedBitmap)
-        
-        openSearchEngines(imageUri, myName)
+    fun searchMyPhoto(photoBitmap: Bitmap, myName: String? = null, engineIndex: Int? = null) {
+        val goodBitmap = ImageEnhancer.prepareImageForSearch(photoBitmap)
+        val uri = saveImage(goodBitmap)
+
+        // Open engines
+        openEngines(uri, myName, engineIndex)
     }
 
-    private fun prepareImageForSearch(original: Bitmap): Bitmap {
-        // Make sure the image is large enough for good results
-        val targetWidth = if (original.width < 600) 800 else original.width
+    fun openGoogleLensOnly(bitmap: Bitmap, nameHint: String?) {
+        val uri = saveImage(ImageEnhancer.prepareImageForSearch(bitmap))
         
-        return if (original.width != targetWidth) {
-            val scale = targetWidth.toFloat() / original.width
-            Bitmap.createScaledBitmap(original, targetWidth, (original.height * scale).toInt(), true)
-        } else {
-            original
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(Uri.parse("https://lens.google.com/upload"), "image/jpeg")
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            context.startActivity(Intent.createChooser(intent, "Open Google Lens"))
         }
     }
 
-    private fun saveToCache(bitmap: Bitmap): Uri {
-        val cacheDir = File(context.cacheDir, "face_search")
-        cacheDir.mkdirs()
-        val file = File(cacheDir, "my_photo_${System.currentTimeMillis()}.jpg")
-
+    private fun saveImage(bitmap: Bitmap): Uri {
+        val file = File(context.cacheDir, "search_photo.jpg")
         FileOutputStream(file).use {
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it)   // Good balance
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it)
         }
-
         return FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
     }
 
-    private fun openSearchEngines(imageUri: Uri, nameHint: String?) {
-        val engines = listOf(
-            // Google Lens - Best for faces
-            "https://lens.google.com/upload",
-            // Bing Visual Search
-            "https://www.bing.com/images/searchbyimage",
-            // Yandex - Strong on people
+    private fun openEngines(uri: Uri, name: String?, engineIndex: Int? = null) {
+        val urls = listOf(
+            "https://lens.google.com/upload",           // Best for faces
+            "https://www.bing.com/images/searchbyimage", 
             "https://yandex.com/images/search"
         )
 
-        engines.forEachIndexed { index, url ->
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(Uri.parse(url), "image/jpeg")
-                    putExtra(Intent.EXTRA_STREAM, imageUri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                try {
-                    context.startActivity(intent)
-                } catch (e: Exception) {
-                    context.startActivity(Intent.createChooser(intent, "Open in Browser"))
-                }
-            }, (index * 1600L))
+        if (engineIndex != null && engineIndex in urls.indices) {
+            launchIntent(urls[engineIndex], uri)
+        } else {
+            urls.forEachIndexed { i, url ->
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    launchIntent(url, uri)
+                }, (i * 1500L))
+            }
+        }
+    }
+
+    private fun launchIntent(url: String, uri: Uri) {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(Uri.parse(url), "image/jpeg")
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            context.startActivity(Intent.createChooser(intent, "Open Search"))
         }
     }
 }

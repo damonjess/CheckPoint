@@ -51,10 +51,6 @@ class CheckInViewModel(
 
     var searchMode by mutableStateOf(SearchMode.PRECISION)
 
-    fun setSearchMode(mode: SearchMode) {
-        searchMode = mode
-    }
-    
     var debugMode by mutableStateOf(false)
     
     private var sourceEmbedding: FloatArray? = null
@@ -183,7 +179,8 @@ class CheckInViewModel(
                 logs.add("Hosting probe image safely (ImgBB)...")
                 uiState = CheckInUiState.Loading(0.4f, logs.toList())
                 
-                val publicUrl = imageUploadRepository.uploadImage(processedBitmap)
+                val uploadBitmap = ImageEnhancer.prepareImageForSearch(processedBitmap)
+                val publicUrl = imageUploadRepository.uploadImage(uploadBitmap)
                 
                 if (publicUrl != null) {
                     logs.add("Cloud hosting successful.")
@@ -198,21 +195,12 @@ class CheckInViewModel(
     }
 
     private suspend fun performWebSearch(imageUrl: String, logs: MutableList<String>) {
-        val engine = when (searchMode) {
-            SearchMode.BYPASS -> "yandex_images"
-            SearchMode.HYPER -> "bing_visual_search"
-            else -> "google_lens"
-        }
-        
         logs.add("Engaging Deep OSINT Waterfall...")
         uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
         val visualMatches = faceSearchRepository.performFaceSearch(
             uploadedImageUrl = imageUrl, 
-            engine = engine,
             keywordHint = if (targetHint.isNotBlank()) targetHint else null,
-            sourceEmbedding = sourceEmbedding,
-            embedder = { faceEmbedder.getEmbedding(it) },
             onLog = { logMsg ->
                 logs.add(logMsg)
                 val newProgress = (uiState as? CheckInUiState.Loading)?.progress?.plus(0.05f)?.coerceAtMost(0.95f) ?: 0.8f
@@ -266,6 +254,15 @@ class CheckInViewModel(
         viewModelScope.launch {
             uiState = CheckInUiState.Loading(1.0f, listOf("Launching browser-based search nodes..."))
             freeSearch.searchMyPhoto(bitmap, targetHint)
+            delay(1000)
+            uiState = CheckInUiState.Idle
+        }
+    }
+
+    fun onGoogleLensOnlySearch(bitmap: Bitmap) {
+        viewModelScope.launch {
+            uiState = CheckInUiState.Loading(1.0f, listOf("Launching Google Lens node..."))
+            freeSearch.openGoogleLensOnly(bitmap, targetHint)
             delay(1000)
             uiState = CheckInUiState.Idle
         }

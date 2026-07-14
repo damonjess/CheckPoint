@@ -16,17 +16,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.FilterCenterFocus
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
@@ -43,7 +50,12 @@ private val Amber = Color(0xFFFFB000)
 fun CheckInScreen(
     capturedBitmap: Bitmap?,
     uiState: CheckInUiState,
+    searchMode: SearchMode,
+    targetHint: String,
+    onTargetHintChange: (String) -> Unit,
+    onSearchModeChange: (SearchMode) -> Unit,
     onCapturePhotoClick: () -> Unit,
+    onSelectGalleryClick: () -> Unit,
     onRetryClick: () -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
@@ -59,191 +71,205 @@ fun CheckInScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(24.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            Spacer(modifier = Modifier.height(16.dp))
-
             PhotoPreview(
                 bitmap = capturedBitmap,
-                isScanning = uiState is CheckInUiState.Loading
+                isScanning = uiState is CheckInUiState.Loading,
+                size = if (uiState is CheckInUiState.Success || uiState is CheckInUiState.Loading) 100.dp else 180.dp
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            Button(
-                onClick = onCapturePhotoClick,
-                modifier = Modifier.fillMaxWidth(0.8f),
-                enabled = uiState !is CheckInUiState.Loading
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Default.CameraAlt, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(if (capturedBitmap == null) "Take Photo" else "New Search")
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            when (uiState) {
-                is CheckInUiState.Idle -> {
-                    Text(
-                        text = "Take a photo to find social media profiles",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 16.sp
-                    )
+                Button(
+                    onClick = onCapturePhotoClick,
+                    modifier = Modifier.weight(1f),
+                    enabled = uiState !is CheckInUiState.Loading
+                ) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (capturedBitmap == null) "Camera" else "New", maxLines = 1)
                 }
 
-                is CheckInUiState.Loading -> {
-                    val consoleScrollState = rememberScrollState()
-                    
-                    // Auto-scroll to bottom when new logs arrive
-                    LaunchedEffect(uiState.logs.size) {
-                        consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
+                OutlinedButton(
+                    onClick = onSelectGalleryClick,
+                    modifier = Modifier.weight(1f),
+                    enabled = uiState !is CheckInUiState.Loading
+                ) {
+                    Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Gallery", maxLines = 1)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // OSINT Keyword Pivot
+            OutlinedTextField(
+                value = targetHint,
+                onValueChange = onTargetHintChange,
+                label = { Text("OSINT TARGET HINT (Name, City, ID)") },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("e.g. John Doe Facebook") },
+                singleLine = true,
+                enabled = uiState !is CheckInUiState.Loading,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Amber,
+                    focusedLabelColor = Amber
+                )
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // OSINT Mode Selector
+            Text(
+                "SEARCH ENGINE PROFILE",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.align(Alignment.Start)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                ModeChip(
+                    label = "Bypass",
+                    icon = Icons.Default.Security,
+                    selected = searchMode == SearchMode.BYPASS,
+                    onClick = { onSearchModeChange(SearchMode.BYPASS) },
+                    enabled = uiState !is CheckInUiState.Loading
+                )
+                ModeChip(
+                    label = "Hyper",
+                    icon = Icons.Default.Bolt,
+                    selected = searchMode == SearchMode.HYPER,
+                    onClick = { onSearchModeChange(SearchMode.HYPER) },
+                    enabled = uiState !is CheckInUiState.Loading
+                )
+                ModeChip(
+                    label = "Social",
+                    icon = Icons.Default.People,
+                    selected = searchMode == SearchMode.SOCIAL,
+                    onClick = { onSearchModeChange(SearchMode.SOCIAL) },
+                    enabled = uiState !is CheckInUiState.Loading
+                )
+                ModeChip(
+                    label = "Raw",
+                    icon = Icons.Default.Image,
+                    selected = searchMode == SearchMode.RAW,
+                    onClick = { onSearchModeChange(SearchMode.RAW) },
+                    enabled = uiState !is CheckInUiState.Loading
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Main Content Area
+            Box(modifier = Modifier.weight(1f)) {
+                when (uiState) {
+                    is CheckInUiState.Idle -> {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Select mode & scan to begin search",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 14.sp
+                            )
+                        }
                     }
 
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        LinearProgressIndicator(
-                            progress = { uiState.progress },
-                            modifier = Modifier
-                                .fillMaxWidth(0.8f)
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp)),
-                            color = Amber,
-                            trackColor = Amber.copy(alpha = 0.1f),
-                        )
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        Text(
-                            text = "SEARCH PROGRESS: ${(uiState.progress * 100).toInt()}%",
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = Amber
-                        )
-                        
-                        Spacer(modifier = Modifier.height(24.dp))
-                        
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = Color.Black),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .padding(12.dp)
-                                    .fillMaxSize()
-                                    .verticalScroll(consoleScrollState)
+                    is CheckInUiState.Loading -> {
+                        val consoleScrollState = rememberScrollState()
+                        LaunchedEffect(uiState.logs.size) {
+                            consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
+                        }
+
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            LinearProgressIndicator(
+                                progress = { uiState.progress },
+                                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                                color = Amber,
+                                trackColor = Amber.copy(alpha = 0.1f),
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "SEARCH PROGRESS: ${(uiState.progress * 100).toInt()}% | MODE: ${searchMode.name}",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Amber
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                                modifier = Modifier.fillMaxSize(),
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
                             ) {
-                                Text(
-                                    "SHERLOCK OSINT CONSOLE v2.1",
-                                    color = Amber,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                
-                                uiState.logs.forEach { log ->
+                                Column(
+                                    modifier = Modifier.padding(12.dp).fillMaxSize().verticalScroll(consoleScrollState)
+                                ) {
                                     Text(
-                                        text = "> $log",
-                                        color = Amber.copy(alpha = 0.9f),
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.padding(vertical = 1.dp)
+                                        "SHERLOCK OSINT CONSOLE v2.1",
+                                        color = Amber,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
                                     )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    uiState.logs.forEach { log ->
+                                        Text(
+                                            text = "> $log",
+                                            color = Amber.copy(alpha = 0.9f),
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    BlinkingCursor()
                                 }
-                                
-                                // Blinking cursor effect
-                                val infiniteTransition = rememberInfiniteTransition(label = "cursor")
-                                val alpha by infiniteTransition.animateFloat(
-                                    initialValue = 0f,
-                                    targetValue = 1f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(500),
-                                        repeatMode = RepeatMode.Reverse
-                                    ),
-                                    label = "cursorAlpha"
-                                )
-                                Text(
-                                    text = "> _",
-                                    color = Amber.copy(alpha = alpha),
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
                             }
                         }
                     }
-                }
 
-                is CheckInUiState.Success -> {
-                    Text(
-                        text = "Found ${uiState.matches.size} social media profiles",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    LazyColumn {
-                        items(uiState.matches) { match ->
-                            MatchCard(
-                                match = match,
-                                onClick = { uriHandler.openUri(match.profileUrl) }
+                    is CheckInUiState.Success -> {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Text(
+                                text = "FOUND ${uiState.matches.size} MATCHES",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 14.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.height(12.dp))
+                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                items(uiState.matches) { match ->
+                                    MatchCard(
+                                        match = match,
+                                        onClick = { uriHandler.openUri(match.profileUrl) }
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                }
+                            }
                         }
                     }
-                }
 
-                is CheckInUiState.NoFaceDetected -> {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text("No face detected", fontWeight = FontWeight.Bold)
-                            Text("Please make sure your face is clearly visible and well-lit.", fontSize = 14.sp)
-                            TextButton(onClick = onRetryClick) { Text("Try Again") }
-                        }
+                    is CheckInUiState.NoFaceDetected -> {
+                        ErrorState("No face detected", "Try HYPER or RAW mode if precision fails.", onRetryClick)
                     }
-                }
 
-                is CheckInUiState.NoMatch -> {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text("No public profiles found", fontWeight = FontWeight.Bold)
-                            Text("Search completed successfully, but no matching social media profiles were located on the public web.", fontSize = 14.sp)
-                            TextButton(onClick = onRetryClick) { Text("Search Another Photo") }
-                        }
+                    is CheckInUiState.NoMatch -> {
+                        ErrorState("No matches found", "Try switching to BYPASS mode to use the OSINT engine.", onRetryClick)
                     }
-                }
 
-                is CheckInUiState.Error -> {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(uiState.message)
-                            TextButton(onClick = onRetryClick) { Text("Retry") }
-                        }
+                    is CheckInUiState.Error -> {
+                        ErrorState("Search Error", uiState.message, onRetryClick)
                     }
                 }
             }
@@ -252,7 +278,71 @@ fun CheckInScreen(
 }
 
 @Composable
-private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false) {
+private fun ModeChip(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        enabled = enabled,
+        label = { 
+            Text(
+                text = label, 
+                fontSize = 10.sp, 
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false
+            ) 
+        },
+        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp)) },
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun BlinkingCursor() {
+    val infiniteTransition = rememberInfiniteTransition(label = "cursor")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(500),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cursorAlpha"
+    )
+    Text(
+        text = "> _",
+        color = Amber.copy(alpha = alpha),
+        fontSize = 11.sp,
+        fontFamily = FontFamily.Monospace
+    )
+}
+
+@Composable
+private fun ErrorState(title: String, message: String, onRetry: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(title, fontWeight = FontWeight.Bold)
+            Text(message, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            TextButton(onClick = onRetry) { Text("Try Again") }
+        }
+    }
+}
+
+@Composable
+private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false, size: androidx.compose.ui.unit.Dp = 180.dp) {
     val infiniteTransition = rememberInfiniteTransition(label = "scanning")
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -265,18 +355,14 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false) {
     )
 
     Box(
-        modifier = Modifier.size(220.dp),
+        modifier = Modifier.size(size + 16.dp),
         contentAlignment = Alignment.Center
     ) {
         if (isScanning) {
             Canvas(modifier = Modifier.fillMaxSize().rotate(rotation)) {
                 drawArc(
                     brush = Brush.sweepGradient(
-                        colors = listOf(
-                            Amber.copy(alpha = 0.1f),
-                            Amber,
-                            Amber.copy(alpha = 0.1f)
-                        )
+                        colors = listOf(Amber.copy(alpha = 0.1f), Amber, Amber.copy(alpha = 0.1f))
                     ),
                     startAngle = 0f,
                     sweepAngle = 360f,
@@ -288,7 +374,7 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false) {
 
         Box(
             modifier = Modifier
-                .size(200.dp)
+                .size(size)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
@@ -304,7 +390,7 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false) {
                 if (isScanning) {
                     val scanLineY by infiniteTransition.animateFloat(
                         initialValue = 0f,
-                        targetValue = 200.dp.value,
+                        targetValue = size.value,
                         animationSpec = infiniteRepeatable(
                             animation = tween(1500, easing = LinearOutSlowInEasing),
                             repeatMode = RepeatMode.Reverse
@@ -316,14 +402,10 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(2.dp)
-                            .offset(y = scanLineY.dp - 100.dp)
+                            .offset(y = scanLineY.dp - (size / 2))
                             .background(
                                 brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        Amber,
-                                        Color.Transparent
-                                    )
+                                    colors = listOf(Color.Transparent, Amber, Color.Transparent)
                                 )
                             )
                     )
@@ -332,7 +414,7 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false) {
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = null,
-                    modifier = Modifier.size(80.dp),
+                    modifier = Modifier.size(size * 0.4f),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -352,7 +434,6 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Bind item.imageUrl (from SerpApi thumbnail) to Coil AsyncImage
             AsyncImage(
                 model = match.imageUrl,
                 contentDescription = "Profile photo",
@@ -373,7 +454,6 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                     maxLines = 1
                 )
                 
-                // Bind item.source to the text badge for native social platform showcase
                 Surface(
                     color = when {
                         match.source.contains("facebook", ignoreCase = true) -> Color(0xFF1877F2).copy(alpha = 0.1f)
@@ -414,7 +494,6 @@ private fun MatchCard(match: WebMatchDisplay, onClick: () -> Unit) {
                 )
             }
 
-            // Bind item.profileUrl (from SerpApi link) to View Profile action
             TextButton(onClick = onClick) {
                 Text("View Profile", fontWeight = FontWeight.Bold)
             }

@@ -7,10 +7,11 @@ import retrofit2.http.Query
 
 interface SerpApiService {
     @GET("search.json")
-    suspend fun searchGoogleLens(
-        @Query("engine") engine: String = "google_lens",      // Configures SerpApi engine
-        @Query("url") imageUrl: String,                       // The hosted image to match
-        @Query("api_key") apiKey: String                      // Pulls your SERP_API_KEY
+    suspend fun searchVisual(
+        @Query("engine") engine: String,
+        @Query("url") imageUrl: String,
+        @Query("q") query: String? = null,                    // OSINT Keyword Hint
+        @Query("api_key") apiKey: String
     ): Response<SerpLensResponse>
 }
 
@@ -36,7 +37,9 @@ data class SerpVisualMatch(
     val source: String?, // Shows "Instagram", "Facebook", "LinkedIn", etc.
     
     @SerializedName("thumbnail")
-    val thumbnail: String? // The image profile link to fix the gray circles
+    val thumbnail: String?, // The image profile link to fix the gray circles
+
+    val score: Int = 0
 )
 
 data class KnowledgeGraph(
@@ -54,7 +57,8 @@ data class SerpApiMatch(
     val title: String?,
     val link: String?,
     val snippet: String?,
-    val source: String?
+    val source: String?,
+    val thumbnail: String?
 )
 
 data class InlineImage(

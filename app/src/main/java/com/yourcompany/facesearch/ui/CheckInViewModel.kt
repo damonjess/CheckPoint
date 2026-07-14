@@ -11,10 +11,19 @@ import com.yourcompany.facesearch.network.ApiClient
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.ImageUploadRepository
 import com.yourcompany.facesearch.network.Secrets
+import com.yourcompany.facesearch.vision.ImageEnhancer
 import com.yourcompany.facesearch.vision.NativeFaceCropper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+enum class SearchMode {
+    PRECISION,  // Tight face crop
+    BYPASS,     // Yandex Engine + Camouflage Filter (Deep OSINT)
+    SOCIAL,     // Square crop, High Contrast, Social Priority
+    HYPER,      // Multi-Probe Composite (Bypass All Filters)
+    RAW         // Full image
+}
 
 class CheckInViewModel(
     application: Application
@@ -30,6 +39,10 @@ class CheckInViewModel(
     var capturedBitmap by mutableStateOf<Bitmap?>(null)
         private set
 
+    var targetHint by mutableStateOf("")
+
+    var searchMode by mutableStateOf(SearchMode.PRECISION)
+
     fun onPhotoCaptured(bitmap: Bitmap) {
         capturedBitmap = bitmap
         
@@ -37,19 +50,53 @@ class CheckInViewModel(
             val logs = mutableListOf("Initializing local optics...")
             uiState = CheckInUiState.Loading(0.1f, logs.toList())
             
-            // Step 1: Local face detection via ML Kit
+            // Step 1: Local face detection / Optimization
             try {
-                val croppedFace = withContext(Dispatchers.Default) {
-                    nativeFaceCropper.cropToFace(bitmap)
+                val processedBitmap = when (searchMode) {
+                    SearchMode.RAW -> {
+                        logs.add("Raw mode: Using full image...")
+                        bitmap
+                    }
+                    SearchMode.BYPASS -> {
+                        logs.add("Engaging Deep Dorking Bypass...")
+                        logs.add("Switching to Yandex/Bing OSINT nodes...")
+                        withContext(Dispatchers.Default) {
+                            val cropped = nativeFaceCropper.cropContextual(bitmap)
+                            ImageEnhancer.applyCamouflage(cropped)
+                        }
+                    }
+                    SearchMode.HYPER -> {
+                        logs.add("Engaging Cyber-Security Hyper-Probe...")
+                        logs.add("Extracting structural facial fingerprint...")
+                        withContext(Dispatchers.Default) {
+                            val probe = nativeFaceCropper.createHyperProbe(bitmap)
+                            ImageEnhancer.applyStructuralFingerprint(probe)
+                        }
+                    }
+                    SearchMode.SOCIAL -> {
+                        logs.add("Social mode: Boosting profile markers...")
+                        withContext(Dispatchers.Default) {
+                            val socialCrop = nativeFaceCropper.cropSocial(bitmap)
+                            ImageEnhancer.applyDeepOSINT(socialCrop)
+                        }
+                    }
+                    SearchMode.PRECISION -> {
+                        logs.add("Precision mode: Tight face alignment...")
+                        withContext(Dispatchers.Default) {
+                            nativeFaceCropper.cropAndAlignFace(bitmap)
+                        }
+                    }
                 }
                 
-                logs.add("Face detected. Optimizing probe...")
+                if (searchMode != SearchMode.RAW) {
+                    logs.add("Optimization complete. Probe ready.")
+                }
                 uiState = CheckInUiState.Loading(0.25f, logs.toList())
                 
                 logs.add("Hosting probe image safely (ImgBB)...")
                 uiState = CheckInUiState.Loading(0.4f, logs.toList())
                 
-                val publicUrl = imageUploadRepository.uploadImage(croppedFace)
+                val publicUrl = imageUploadRepository.uploadImage(processedBitmap)
                 
                 if (publicUrl != null) {
                     logs.add("Cloud hosting successful.")
@@ -64,26 +111,38 @@ class CheckInViewModel(
     }
 
     private suspend fun performWebSearch(imageUrl: String, logs: MutableList<String>) {
-        logs.add("Querying Google Lens neural engine...")
+        val engine = if (searchMode == SearchMode.BYPASS || searchMode == SearchMode.HYPER) "yandex_images" else "google_lens"
+        
+        logs.add("Engaging Deep OSINT Waterfall...")
         uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
-        val visualMatches = faceSearchRepository.performFaceSearch(imageUrl)
+        val visualMatches = faceSearchRepository.performFaceSearch(
+            uploadedImageUrl = imageUrl, 
+            engine = engine,
+            keywordHint = if (targetHint.isNotBlank()) targetHint else null,
+            onLog = { logMsg ->
+                logs.add(logMsg)
+                // Dynamically update progress as we pivot
+                val newProgress = (uiState as? CheckInUiState.Loading)?.progress?.plus(0.05f)?.coerceAtMost(0.95f) ?: 0.8f
+                uiState = CheckInUiState.Loading(newProgress, logs.toList())
+            }
+        )
 
         if (visualMatches.isNotEmpty()) {
             logs.add("Analysis complete. Targets located.")
             uiState = CheckInUiState.Loading(1.0f, logs.toList())
 
-            uiState = CheckInUiState.Success(
-                matches = visualMatches.map { result ->
-                    WebMatchDisplay(
-                        name = result.title ?: "Matched Profile",
-                        source = result.source ?: "Public Record",
-                        profileUrl = result.link ?: "",
-                        score = 100, // SerpApi provides high relevance matches
-                        imageUrl = result.thumbnail
-                    )
-                }
-            )
+            val mappedMatches = visualMatches.map { result ->
+                WebMatchDisplay(
+                    name = result.title ?: "Matched Profile",
+                    source = result.source ?: "Public Record",
+                    profileUrl = result.link ?: "",
+                    score = result.score,
+                    imageUrl = result.thumbnail
+                )
+            }.sortedByDescending { it.score }
+
+            uiState = CheckInUiState.Success(matches = mappedMatches)
         } else {
             uiState = CheckInUiState.NoMatch
         }

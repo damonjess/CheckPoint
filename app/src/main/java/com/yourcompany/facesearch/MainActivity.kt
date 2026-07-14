@@ -1,9 +1,16 @@
 package com.yourcompany.facesearch
 
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,11 +43,40 @@ class MainActivity : ComponentActivity() {
                     val checkInViewModel: CheckInViewModel = viewModel()
                     var screen by remember { mutableStateOf(Screen.SEARCH) }
 
+                    val galleryLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.PickVisualMedia()
+                    ) { uri ->
+                        uri?.let {
+                            try {
+                                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                    val source = ImageDecoder.createSource(contentResolver, it)
+                                    ImageDecoder.decodeBitmap(source)
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    MediaStore.Images.Media.getBitmap(contentResolver, it)
+                                }
+                                val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+                                checkInViewModel.onPhotoCaptured(softwareBitmap)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    }
+
                     when (screen) {
                         Screen.SEARCH -> CheckInScreen(
                             capturedBitmap = checkInViewModel.capturedBitmap,
                             uiState = checkInViewModel.uiState,
+                            searchMode = checkInViewModel.searchMode,
+                            targetHint = checkInViewModel.targetHint,
+                            onTargetHintChange = { checkInViewModel.targetHint = it },
+                            onSearchModeChange = { checkInViewModel.searchMode = it },
                             onCapturePhotoClick = { screen = Screen.CAMERA },
+                            onSelectGalleryClick = {
+                                galleryLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
                             onRetryClick = { checkInViewModel.onRetry() }
                         )
 

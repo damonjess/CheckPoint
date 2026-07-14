@@ -98,6 +98,7 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
 
     // ML Kit
+    // Highly accurate, local on-device face analysis 
     implementation(libs.mlkit.face.detection)
 
     // TensorFlow Lite (Play Services)

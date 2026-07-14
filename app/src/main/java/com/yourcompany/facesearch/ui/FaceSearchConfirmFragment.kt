@@ -14,6 +14,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import com.yourcompany.facesearch.R
+import com.yourcompany.facesearch.vision.FreeFaceSearchHelper
 import java.io.File
 import java.io.FileOutputStream
 
@@ -55,6 +56,7 @@ class FaceSearchConfirmFragment : Fragment() {
 
         val tvName: TextView = view.findViewById(R.id.tv_name_hint)
         val btnSearch: Button = view.findViewById(R.id.btn_start_search)
+        val btnGoogleLens: Button = view.findViewById(R.id.btn_google_lens_only)
         val btnCancel: Button = view.findViewById(R.id.btn_cancel)
 
         myNameHint = arguments?.getString(ARG_NAME_HINT)
@@ -66,8 +68,16 @@ class FaceSearchConfirmFragment : Fragment() {
 
         val btnFreeSearch: Button = view.findViewById(R.id.btn_free_search)
         btnFreeSearch.setOnClickListener {
-            viewModel.setSearchMode(SearchMode.FREE)
+            viewModel.searchMode = SearchMode.FREE
             showPhotoSourceDialog()
+        }
+
+        btnGoogleLens.setOnClickListener {
+            val bitmap = croppedBitmap ?: return@setOnClickListener
+            
+            val helper = FreeFaceSearchHelper(requireContext())
+            helper.openGoogleLensOnly(bitmap, "damon kirby")
+            parentFragmentManager.popBackStack()
         }
 
         btnSearch.setOnClickListener {

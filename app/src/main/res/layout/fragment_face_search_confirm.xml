@@ -49,6 +49,17 @@
         android:padding="12dp" />
 
     <Button
+        android:id="@+id/btn_google_lens_only"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🎯 Direct Google Lens Search"
+        android:textSize="16sp"
+        android:backgroundTint="#4285F4"
+        android:textColor="#FFFFFF"
+        android:layout_margin="16dp"
+        android:padding="12dp"/>
+
+    <Button
         android:id="@+id/btn_cancel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

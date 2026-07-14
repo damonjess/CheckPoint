@@ -21,6 +21,7 @@ fun FaceSearchConfirmScreen(
     croppedBitmap: Bitmap,
     nameHint: String?,
     onConfirm: () -> Unit,
+    onGoogleLensOnly: () -> Unit,
     onCancel: () -> Unit
 ) {
     Column(
@@ -63,6 +64,16 @@ fun FaceSearchConfirmScreen(
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB000))
         ) {
             Text("Launch Free Search", color = Color.Black, fontWeight = FontWeight.Bold)
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = onGoogleLensOnly,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4))
+        ) {
+            Text("🎯 Direct Google Lens Search", color = Color.White, fontWeight = FontWeight.Bold)
         }
         
         Spacer(modifier = Modifier.height(8.dp))

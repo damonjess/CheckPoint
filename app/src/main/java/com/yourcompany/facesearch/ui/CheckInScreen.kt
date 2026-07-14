@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -59,7 +60,8 @@ fun CheckInScreen(
     onCapturePhotoClick: () -> Unit,
     onSelectGalleryClick: () -> Unit,
     onRetryClick: () -> Unit,
-    onConfirmFreeSearch: (Bitmap) -> Unit
+    onConfirmFreeSearch: (Bitmap) -> Unit,
+    onGoogleLensOnlySearch: (Bitmap) -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
 
@@ -154,8 +156,10 @@ fun CheckInScreen(
             Spacer(modifier = Modifier.height(8.dp))
             
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ModeChip(
                     label = "Bypass",
@@ -284,6 +288,7 @@ fun CheckInScreen(
                             croppedBitmap = uiState.faceBitmap,
                             nameHint = targetHint,
                             onConfirm = { onConfirmFreeSearch(uiState.faceBitmap) },
+                            onGoogleLensOnly = { onGoogleLensOnlySearch(uiState.faceBitmap) },
                             onCancel = onRetryClick
                         )
                     }

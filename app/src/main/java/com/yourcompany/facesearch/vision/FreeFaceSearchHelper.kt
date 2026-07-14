@@ -8,18 +8,18 @@ import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 
-class FreeFaceSearchHelper(private val context: Context) {
+class FreeFaceSearchHelper(private val context: Context, private val cropper: NativeFaceCropper) {
 
-    fun searchMyPhoto(photoBitmap: Bitmap, myName: String? = null, engineIndex: Int? = null) {
-        val goodBitmap = ImageEnhancer.prepareImageForSearch(photoBitmap)
+    suspend fun searchMyPhoto(photoBitmap: Bitmap, myName: String? = null, engineIndex: Int? = null) {
+        val goodBitmap = cropper.prepareFaceForSearch(photoBitmap)
         val uri = saveImage(goodBitmap)
 
         // Open engines
         openEngines(uri, myName, engineIndex)
     }
 
-    fun openGoogleLensOnly(bitmap: Bitmap, nameHint: String?) {
-        val uri = saveImage(ImageEnhancer.prepareImageForSearch(bitmap))
+    suspend fun openGoogleLensOnly(bitmap: Bitmap, nameHint: String?) {
+        val uri = saveImage(cropper.prepareFaceForSearch(bitmap))
         
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(Uri.parse("https://lens.google.com/upload"), "image/jpeg")

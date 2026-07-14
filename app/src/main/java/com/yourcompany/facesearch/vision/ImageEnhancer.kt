@@ -84,20 +84,4 @@ object ImageEnhancer {
     }
 
     fun applyDeepOSINT(bitmap: Bitmap): Bitmap = enhance(bitmap)
-
-    /**
-     * High-Quality Image Preprocessing for Search Engines
-     */
-    fun prepareImageForSearch(original: Bitmap): Bitmap {
-        // Resize to good resolution for reverse search
-        val targetWidth = 1200
-        val scale = targetWidth.toFloat() / original.width
-
-        return Bitmap.createScaledBitmap(
-            original,
-            targetWidth,
-            (original.height * scale).toInt(),
-            true
-        )
-    }
 }

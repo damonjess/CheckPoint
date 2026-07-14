@@ -14,7 +14,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import com.yourcompany.facesearch.R
-import com.yourcompany.facesearch.vision.FreeFaceSearchHelper
 import java.io.File
 import java.io.FileOutputStream
 
@@ -74,9 +73,7 @@ class FaceSearchConfirmFragment : Fragment() {
 
         btnGoogleLens.setOnClickListener {
             val bitmap = croppedBitmap ?: return@setOnClickListener
-            
-            val helper = FreeFaceSearchHelper(requireContext())
-            helper.openGoogleLensOnly(bitmap, "damon kirby")
+            viewModel.onGoogleLensOnlySearch(bitmap, myNameHint)
             parentFragmentManager.popBackStack()
         }
 

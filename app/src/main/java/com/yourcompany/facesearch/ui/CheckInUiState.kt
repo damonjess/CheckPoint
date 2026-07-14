@@ -11,7 +11,7 @@ sealed class CheckInUiState {
     data class Success(val matches: List<WebMatchDisplay>) : CheckInUiState()
     data class Confirming(val faceBitmap: Bitmap) : CheckInUiState()
     object NoFaceDetected : CheckInUiState()
-    object NoMatch : CheckInUiState()
+    data class NoMatch(val logs: List<String> = emptyList()) : CheckInUiState()
     data class Error(val message: String) : CheckInUiState()
 }
 

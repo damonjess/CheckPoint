@@ -61,6 +61,46 @@ class NativeFaceCropper {
 
     data class FaceQualityResult(val isGood: Boolean, val message: String)
 
+    suspend fun prepareFaceForSearch(original: Bitmap): Bitmap {
+        // Step 1: Tight face crop (use your YOLO or NativeFaceCropper)
+        val faceCrop = getTightFaceCrop(original) ?: original  // fallback
+
+        // Step 2: High resolution + good quality for face recognition
+        val targetSize = 1024
+        val scaled = Bitmap.createScaledBitmap(
+            faceCrop,
+            targetSize,
+            (targetSize * faceCrop.height / faceCrop.width),
+            true
+        )
+
+        return scaled
+    }
+
+    suspend fun getTightFaceCrop(bitmap: Bitmap): Bitmap? = suspendCancellableCoroutine { continuation ->
+        val image = InputImage.fromBitmap(bitmap, 0)
+        detector.process(image)
+            .addOnSuccessListener { faces ->
+                if (faces.isNotEmpty()) {
+                    val box = faces[0].boundingBox
+                    val left = box.left.coerceAtLeast(0)
+                    val top = box.top.coerceAtLeast(0)
+                    val width = box.width().coerceAtMost(bitmap.width - left)
+                    val height = box.height().coerceAtMost(bitmap.height - top)
+                    if (width > 0 && height > 0) {
+                        continuation.resume(Bitmap.createBitmap(bitmap, left, top, width, height))
+                    } else {
+                        continuation.resume(null)
+                    }
+                } else {
+                    continuation.resume(null)
+                }
+            }
+            .addOnFailureListener {
+                continuation.resume(null)
+            }
+    }
+
     suspend fun cropAndAlignFace(bitmap: Bitmap): Bitmap = suspendCancellableCoroutine { continuation ->
         val image = InputImage.fromBitmap(bitmap, 0)
         

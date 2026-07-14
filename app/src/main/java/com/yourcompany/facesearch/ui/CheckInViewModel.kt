@@ -39,7 +39,7 @@ class CheckInViewModel(
     private val imageUploadRepository = ImageUploadRepository()
     private val apifyRepository = ApifyRepository()
     private val faceEmbedder = FaceEmbedder(application)
-    private val freeSearch = FreeFaceSearchHelper(application)
+    private val freeSearch = FreeFaceSearchHelper(application, nativeFaceCropper)
 
     var uiState by mutableStateOf<CheckInUiState>(CheckInUiState.Idle)
         private set
@@ -68,8 +68,9 @@ class CheckInViewModel(
         targetHint = nameHint ?: ""
         when (searchMode) {
             SearchMode.FREE -> {
-                val helper = FreeFaceSearchHelper(getApplication())
-                helper.searchMyPhoto(bitmap, nameHint)
+                viewModelScope.launch {
+                    freeSearch.searchMyPhoto(bitmap, nameHint)
+                }
             }
             else -> {
                 onPhotoCaptured(bitmap)
@@ -83,6 +84,12 @@ class CheckInViewModel(
         viewModelScope.launch {
             val logs = mutableListOf("Initializing local optics...")
             uiState = CheckInUiState.Loading(0.1f, logs.toList())
+            
+            // Log memory state
+            val maxMemory = Runtime.getRuntime().maxMemory() / 1024 / 1024
+            val totalMemory = Runtime.getRuntime().totalMemory() / 1024 / 1024
+            logs.add("System: Memory $totalMemory MB / $maxMemory MB")
+            uiState = CheckInUiState.Loading(0.15f, logs.toList())
             
             // Step 1: Quality Gate
             if (searchMode != SearchMode.RAW) {
@@ -179,7 +186,7 @@ class CheckInViewModel(
                 logs.add("Hosting probe image safely (ImgBB)...")
                 uiState = CheckInUiState.Loading(0.4f, logs.toList())
                 
-                val uploadBitmap = ImageEnhancer.prepareImageForSearch(processedBitmap)
+                val uploadBitmap = nativeFaceCropper.prepareFaceForSearch(processedBitmap)
                 val publicUrl = imageUploadRepository.uploadImage(uploadBitmap)
                 
                 if (publicUrl != null) {
@@ -241,7 +248,7 @@ class CheckInViewModel(
 
             uiState = CheckInUiState.Success(matches = mappedMatches)
         } else {
-            uiState = CheckInUiState.NoMatch
+            uiState = CheckInUiState.NoMatch(logs.toList())
         }
     }
 
@@ -252,17 +259,20 @@ class CheckInViewModel(
 
     fun onConfirmFreeSearch(bitmap: Bitmap) {
         viewModelScope.launch {
+            val original = capturedBitmap ?: bitmap
             uiState = CheckInUiState.Loading(1.0f, listOf("Launching browser-based search nodes..."))
-            freeSearch.searchMyPhoto(bitmap, targetHint)
+            freeSearch.searchMyPhoto(original, targetHint)
             delay(1000)
             uiState = CheckInUiState.Idle
         }
     }
 
-    fun onGoogleLensOnlySearch(bitmap: Bitmap) {
+    fun onGoogleLensOnlySearch(bitmap: Bitmap, nameHint: String? = null) {
+        if (nameHint != null) targetHint = nameHint
         viewModelScope.launch {
+            val original = capturedBitmap ?: bitmap
             uiState = CheckInUiState.Loading(1.0f, listOf("Launching Google Lens node..."))
-            freeSearch.openGoogleLensOnly(bitmap, targetHint)
+            freeSearch.openGoogleLensOnly(original, targetHint)
             delay(1000)
             uiState = CheckInUiState.Idle
         }

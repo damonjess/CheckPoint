@@ -321,7 +321,53 @@ fun CheckInScreen(
                     }
 
                     is CheckInUiState.NoMatch -> {
-                        ErrorState("No matches found", "Try switching to BYPASS mode to use the OSINT engine.", onRetryClick)
+                        val scrollState = rememberScrollState()
+                        Column(
+                            modifier = Modifier.fillMaxSize().verticalScroll(scrollState),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            ErrorState(
+                                title = "No Results Found", 
+                                message = "The search engines returned no visual matches for \"$targetHint\".", 
+                                onRetry = onRetryClick
+                            )
+
+                            if (debugMode && uiState.logs.isNotEmpty()) {
+                                Text(
+                                    "SHERLOCK OSINT CONSOLE",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Amber,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color.Black),
+                                    modifier = Modifier.fillMaxWidth().height(300.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
+                                ) {
+                                    val logScroll = rememberScrollState()
+                                    Column(modifier = Modifier.padding(12.dp).verticalScroll(logScroll)) {
+                                        uiState.logs.forEach { log ->
+                                            Text(text = "> $log", color = Amber, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            Button(
+                                onClick = { capturedBitmap?.let { onConfirmFreeSearch(it) } },
+                                modifier = Modifier.fillMaxWidth().height(56.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Switch to Browser Search (Free)", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                            
+                            Spacer(modifier = Modifier.height(32.dp))
+                        }
                     }
 
                     is CheckInUiState.Error -> {
@@ -490,15 +536,34 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = match.imageUrl,
-                contentDescription = "Profile photo",
+            Box(
                 modifier = Modifier
                     .size(64.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = ContentScale.Crop
-            )
+                contentAlignment = Alignment.Center
+            ) {
+                if (match.imageUrl != null) {
+                    AsyncImage(
+                        model = match.imageUrl,
+                        contentDescription = "Profile photo",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = when {
+                            match.source.contains("linkedin", ignoreCase = true) -> Icons.Default.People
+                            match.source.contains("facebook", ignoreCase = true) -> Icons.Default.People
+                            match.source.contains("instagram", ignoreCase = true) -> Icons.Default.CameraAlt
+                            else -> Icons.Default.Person
+                        },
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.width(16.dp))
 
@@ -518,6 +583,14 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
                         color = Amber,
                         fontWeight = FontWeight.Bold
                     )
+                    if (match.imageUrl != null) {
+                        Text(
+                            text = "IMG: ${match.imageUrl.toString().take(30)}...",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.Gray
+                        )
+                    }
                 }
                 
                 Surface(

@@ -9,7 +9,8 @@ interface SerpApiService {
     @GET("search.json")
     suspend fun searchVisual(
         @Query("engine") engine: String,
-        @Query("url") imageUrl: String,
+        @Query("url") imageUrl: String? = null,
+        @Query("image_url") googleImageUrl: String? = null,    // For google_reverse_image
         @Query("q") query: String? = null,                    // OSINT Keyword Hint
         @Query("api_key") apiKey: String
     ): Response<SerpLensResponse>
@@ -17,13 +18,17 @@ interface SerpApiService {
 
 data class SerpLensResponse(
     @SerializedName("visual_matches")
-    val visualMatches: List<SerpVisualMatch>?,
+    val visualMatches: List<SerpVisualMatch>? = null,
     @SerializedName("knowledge_graph")
     val knowledgeGraph: KnowledgeGraph? = null,
     @SerializedName("image_results")
     val imageResults: List<SerpApiMatch>? = null,
     @SerializedName("inline_images")
-    val inlineImages: List<InlineImage>? = null
+    val inlineImages: List<InlineImage>? = null,
+    @SerializedName("visual_search_results")
+    val visualSearchResults: List<SerpVisualMatch>? = null,
+    @SerializedName("organic_results")
+    val organicResults: List<SerpApiMatch>? = null
 )
 
 data class SerpVisualMatch(
@@ -58,7 +63,18 @@ data class SerpApiMatch(
     val link: String?,
     val snippet: String?,
     val source: String?,
-    val thumbnail: String?
+    val thumbnail: String?,
+    val favicon: String? = null,
+    @SerializedName("rich_snippet") val richSnippet: RichSnippet? = null
+)
+
+data class RichSnippet(
+    @SerializedName("top") val top: TopSnippet? = null
+)
+
+data class TopSnippet(
+    @SerializedName("detected_extensions") val detectedExtensions: Map<String, Any>? = null,
+    @SerializedName("thumbnail") val thumbnail: String? = null
 )
 
 data class InlineImage(

@@ -109,7 +109,7 @@ class NativeFaceCropper {
                     val finalWidth = targetWidth.coerceAtMost(bitmap.width - left)
                     val finalHeight = targetHeight.coerceAtMost(bitmap.height - top)
 
-                    var cropped = Bitmap.createBitmap(bitmap, left, top, finalWidth, finalHeight)
+                    val cropped = Bitmap.createBitmap(bitmap, left, top, finalWidth, finalHeight)
                     
                     val enhanced = ImageEnhancer.enhance(cropped)
                     continuation.resume(enhanced)

@@ -111,7 +111,11 @@ class CheckInViewModel(
     }
 
     private suspend fun performWebSearch(imageUrl: String, logs: MutableList<String>) {
-        val engine = if (searchMode == SearchMode.BYPASS || searchMode == SearchMode.HYPER) "yandex_images" else "google_lens"
+        val engine = when (searchMode) {
+            SearchMode.BYPASS -> "yandex_images"
+            SearchMode.HYPER -> "bing_visual_search"
+            else -> "google_lens"
+        }
         
         logs.add("Engaging Deep OSINT Waterfall...")
         uiState = CheckInUiState.Loading(0.7f, logs.toList())

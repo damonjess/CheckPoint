@@ -17,11 +17,11 @@ object ImageEnhancer {
         
         // 1. Keep colors but boost saturation (helps engines identify skin tones vs background)
         val colorMatrix = ColorMatrix()
-        colorMatrix.setSaturation(1.3f) 
+        colorMatrix.setSaturation(1.1f) 
         
         // 2. High Contrast Curve
-        val contrast = 1.3f
-        val brightness = 10f
+        val contrast = 1.1f
+        val brightness = 0f
         val matrix = floatArrayOf(
             contrast, 0f, 0f, 0f, brightness,
             0f, contrast, 0f, 0f, brightness,

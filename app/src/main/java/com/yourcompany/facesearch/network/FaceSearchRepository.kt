@@ -15,7 +15,7 @@ class FaceSearchRepository(
         // --- STEP 1: DEFINE ENGINE WATERFALL ---
         // We prioritize the engine selected by the user, then fallback to others.
         val waterfall = mutableListOf(engine)
-        listOf("yandex_images", "google_lens", "bing_visual_search").forEach {
+        listOf("bing_visual_search", "google_lens", "yandex_images").forEach {
             if (!waterfall.contains(it)) waterfall.add(it)
         }
 
@@ -27,6 +27,11 @@ class FaceSearchRepository(
                 onLog("PROBING $readableEngine...")
                 
                 // --- STEP 2: EXECUTE REQUEST ---
+                // Add a small delay between engines to avoid rate limiting
+                if (currentEngine != waterfall.first()) {
+                    kotlinx.coroutines.delay(800)
+                }
+
                 val response = apiService.searchVisual(
                     engine = currentEngine,
                     imageUrl = uploadedImageUrl,
@@ -55,13 +60,20 @@ class FaceSearchRepository(
                             onLog("Multiple social markers detected. Finalizing.")
                             break
                         }
+                    } else {
+                        onLog("$readableEngine found no direct links.")
                     }
                 } else {
-                    onLog("Node $readableEngine busy. Redirecting...")
+                    val errorBody = response.errorBody()?.string() ?: ""
+                    if (errorBody.contains("Account limit reached", ignoreCase = true)) {
+                        onLog("API LIMIT REACHED. Check credits.")
+                    } else {
+                        onLog("Node $readableEngine busy (Code: ${response.code()}).")
+                    }
                 }
             } catch (e: Exception) {
                 val readableEngine = currentEngine.replace("_", " ").uppercase()
-                onLog("COMM ERROR: $readableEngine unreachable.")
+                onLog("COMM ERROR: $readableEngine timed out.")
             }
         }
 
@@ -79,7 +91,6 @@ class FaceSearchRepository(
             val title = match.title?.lowercase() ?: ""
             val link = match.link?.lowercase() ?: ""
             val source = match.source?.lowercase() ?: ""
-            val combined = "$title $link"
 
             // 1. Exact Name Matching (High Weight)
             if (fullName.length > 2 && title.contains(fullName)) score += 2000
@@ -95,19 +106,25 @@ class FaceSearchRepository(
                            link.contains("twitter.com") || 
                            link.contains("x.com") ||
                            source.contains("facebook") ||
-                           source.contains("instagram")
+                           source.contains("instagram") ||
+                           source.contains("linkedin")
             
             if (isSocial) score += 800
             
-            // 4. Specific profile patterns (Avoid generic group pages)
+            // 4. Visual Similarities (Always score visually related hits even if name is missing)
+            if (match.thumbnail != null) score += 300
+            
+            // 5. Specific profile patterns
             if (link.contains("people/") || link.contains("profile.php") || link.contains("/in/")) score += 400
             
-            // 5. Filter out historical/unrelated "On This Day" or news noise
-            if (title.contains("on this day") || title.contains("history")) score -= 1500
+            // 6. Filter out archival noise ONLY if we have a name to match against
+            if (fullName.isNotEmpty()) {
+                if (title.contains("on this day") || title.contains("history")) score -= 1000
+            }
 
             match.copy(score = score)
         }
-        .filter { it.score > 0 }
+        .filter { it.score > 0 || (fullName.isEmpty() && it.link != null) }
         .sortedByDescending { it.score }
         .distinctBy { it.link }
     }

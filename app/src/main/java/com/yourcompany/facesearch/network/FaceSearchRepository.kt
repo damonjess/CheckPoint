@@ -29,46 +29,46 @@ class FaceSearchRepository(
                 // --- STEP 2: EXECUTE REQUEST ---
                 // Add a small delay between engines to avoid rate limiting
                 if (currentEngine != waterfall.first()) {
-                    kotlinx.coroutines.delay(800)
+                    kotlinx.coroutines.delay(1000)
                 }
 
-                val response = apiService.searchVisual(
-                    engine = currentEngine,
-                    imageUrl = uploadedImageUrl,
-                    query = if (cleanHint.isNotEmpty()) cleanHint else null,
-                    apiKey = serpApiKey
-                )
+                val response = try {
+                    apiService.searchVisual(
+                        engine = currentEngine,
+                        imageUrl = uploadedImageUrl,
+                        query = if (cleanHint.isNotEmpty()) cleanHint else null,
+                        apiKey = serpApiKey
+                    )
+                } catch (e: Exception) {
+                    onLog("COMM ERROR: $readableEngine network failure.")
+                    continue
+                }
                 
                 if (response.isSuccessful) {
                     val body = response.body()
                     val engineResults = mutableListOf<SerpVisualMatch>()
                     
+                    // Unified extraction from all SerpApi possible result fields
                     body?.visualMatches?.let { engineResults.addAll(it) }
                     body?.imageResults?.map { 
                         SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail)
+                    }?.let { engineResults.addAll(it) }
+                    body?.inlineImages?.map {
+                        SerpVisualMatch(title = "Visual Match", link = it.source, source = it.source, thumbnail = it.thumbnail)
                     }?.let { engineResults.addAll(it) }
                     
                     if (engineResults.isNotEmpty()) {
                         allResults.addAll(engineResults)
                         onLog("Found ${engineResults.size} leads via $readableEngine.")
-                        
-                        // If we have strong social hits, we can stop the waterfall early
-                        if (engineResults.count { match -> 
-                            val l = match.link?.lowercase() ?: ""
-                            l.contains("facebook.com") || l.contains("instagram.com") || l.contains("linkedin.com")
-                        } >= 2) {
-                            onLog("Multiple social markers detected. Finalizing.")
-                            break
-                        }
                     } else {
-                        onLog("$readableEngine found no direct links.")
+                        onLog("$readableEngine: No direct visual matches.")
                     }
                 } else {
                     val errorBody = response.errorBody()?.string() ?: ""
-                    if (errorBody.contains("Account limit reached", ignoreCase = true)) {
-                        onLog("API LIMIT REACHED. Check credits.")
-                    } else {
-                        onLog("Node $readableEngine busy (Code: ${response.code()}).")
+                    when {
+                        errorBody.contains("Account limit", true) -> onLog("API LIMIT REACHED.")
+                        response.code() == 400 -> onLog("$readableEngine: Bad Request (Code: 400)")
+                        else -> onLog("Node $readableEngine busy (${response.code()}).")
                     }
                 }
             } catch (e: Exception) {
@@ -111,7 +111,7 @@ class FaceSearchRepository(
             
             if (isSocial) score += 800
             
-            // 4. Visual Similarities (Always score visually related hits even if name is missing)
+            // 4. Visual Similarities - Keep these even if names don't match
             if (match.thumbnail != null) score += 300
             
             // 5. Specific profile patterns
@@ -124,7 +124,6 @@ class FaceSearchRepository(
 
             match.copy(score = score)
         }
-        .filter { it.score > 0 || (fullName.isEmpty() && it.link != null) }
         .sortedByDescending { it.score }
         .distinctBy { it.link }
     }

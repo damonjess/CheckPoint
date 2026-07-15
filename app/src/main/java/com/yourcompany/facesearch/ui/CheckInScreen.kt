@@ -380,16 +380,16 @@ fun CheckInScreen(
                                 }
                             }
                             
-                            Button(
-                                onClick = { capturedBitmap?.let { onConfirmFreeSearch(it) } },
-                                modifier = Modifier.fillMaxWidth().height(56.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = Color.White)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Switch to Browser Search (Free)", color = Color.White, fontWeight = FontWeight.Bold)
-                            }
+                Button(
+                    onClick = { capturedBitmap?.let { onConfirmFreeSearch(it) } },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Switch to Browser Search (Free)", color = Color.White, fontWeight = FontWeight.Bold)
+                }
                             
                             Spacer(modifier = Modifier.height(32.dp))
                         }

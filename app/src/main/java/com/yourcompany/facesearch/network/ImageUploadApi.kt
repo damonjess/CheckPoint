@@ -23,5 +23,6 @@ data class ImgBBResponse(
 )
 
 data class ImgBBData(
-    val url: String?
+    val url: String?,
+    val display_url: String?
 )

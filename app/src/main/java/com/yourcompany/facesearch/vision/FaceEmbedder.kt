@@ -2,7 +2,8 @@ package com.yourcompany.facesearch.vision
 
 import android.content.Context
 import android.graphics.Bitmap
-import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.InterpreterApi
+import org.tensorflow.lite.InterpreterFactory
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -19,8 +20,10 @@ class FaceEmbedder(context: Context) {
         const val EMBEDDING_SIZE = 192
     }
 
-    private val interpreter: Interpreter by lazy {
-        Interpreter(loadModelFile(context))
+    private val interpreter: InterpreterApi by lazy {
+        val options = InterpreterApi.Options()
+            .setRuntime(InterpreterApi.Options.TfLiteRuntime.FROM_SYSTEM_ONLY)
+        InterpreterFactory().create(loadModelFile(context), options)
     }
 
     fun getEmbedding(faceBitmap: Bitmap): FloatArray? {

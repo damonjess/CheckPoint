@@ -48,9 +48,13 @@ class FaceSearchRepository(
 
                 if (response.isSuccessful) {
                     val body = response.body()
+                    android.util.Log.d("FaceSearch", "Response Body for $currentEngine: $body")
                     val engineResults = mutableListOf<SerpVisualMatch>()
 
+                    // Prioritize visual_matches (Google Lens specific)
                     body?.visualMatches?.let { engineResults.addAll(it) }
+                    
+                    // Add secondary result fields
                     body?.visualSearchResults?.let { engineResults.addAll(it) }
                     body?.imageResults?.let { results ->
                         engineResults.addAll(results.map {
@@ -80,8 +84,9 @@ class FaceSearchRepository(
                         onLog("No visual matches in $readable")
                     }
                 } else {
-                    val error = response.errorBody()?.string()?.take(50) ?: "Unknown error"
+                    val error = response.errorBody()?.string() ?: "Unknown error"
                     onLog("API ERROR on $readable: $error")
+                    android.util.Log.e("FaceSearch", "API Error on $currentEngine: $error")
                 }
             } catch (e: Exception) {
                 onLog("COMM ERROR on $currentEngine: ${e.message}")
@@ -92,6 +97,9 @@ class FaceSearchRepository(
 
         if (allResults.isEmpty()) {
             onLog("CRITICAL: Zero matches from all engines.")
+            android.util.Log.e("FaceSearch", "TOTAL RESULTS: 0 (Search failed or empty payload)")
+        } else {
+            android.util.Log.d("FaceSearch", "TOTAL RESULTS: ${allResults.size} raw matches found.")
         }
 
         // Scoring for matches
@@ -125,7 +133,7 @@ class FaceSearchRepository(
                 match.copy(score = score)
             }
             .sortedByDescending { it.score }
-            .filter { it.link != null || it.title != null }
-            .distinctBy { it.link ?: it.thumbnail ?: it.title }
+            .filter { it.link != null || it.title != null || it.thumbnail != null }
+            .distinctBy { it.link ?: it.title ?: it.thumbnail }
     }
 }

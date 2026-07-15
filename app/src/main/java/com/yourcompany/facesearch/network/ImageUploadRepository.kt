@@ -23,8 +23,20 @@ class ImageUploadRepository {
         return try {
             val response = api.upload(Secrets.IMGBB_API_KEY, body)
             if (response.isSuccessful) {
-                response.body()?.data?.url
+                val data = response.body()?.data
+                // ENFORCE DIRECT URL: SerpApi requires a direct image file stream (i.ibb.co)
+                // data.url is the raw original file. data.display_url is often a web-viewer.
+                val rawUrl = data?.url 
+                val displayUrl = data?.display_url
+                
+                Log.d("NetworkDebug", "ImgBB Raw URL: $rawUrl")
+                Log.d("NetworkDebug", "ImgBB Display URL: $displayUrl")
+                
+                val finalUrl = rawUrl ?: displayUrl
+                Log.d("NetworkDebug", "Final URL selected for SerpApi: $finalUrl")
+                finalUrl
             } else {
+                Log.e("NetworkDebug", "ImgBB Upload Failed: ${response.code()} ${response.errorBody()?.string()}")
                 null
             }
         } catch (e: Exception) {

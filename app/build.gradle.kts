@@ -101,10 +101,20 @@ dependencies {
     // Highly accurate, local on-device face analysis 
     implementation(libs.mlkit.face.detection)
 
-    // TensorFlow Lite (Standalone)
-    implementation("org.tensorflow:tensorflow-lite:2.14.0")
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
+    // MediaPipe GenAI (for Gemma)
+    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+
+    // 1. Google Play Services LiteRT (GMS version)
+    implementation("com.google.android.gms:play-services-tflite-java:16.5.0") {
+        // We MUST exclude the transitive legacy api dependency it drags in!
+        exclude(group = "org.tensorflow", module = "tensorflow-lite-api")
+    }
+
+    // 2. The local LiteRT runtime
+    implementation("com.google.ai.edge.litert:litert:1.4.1")
+    implementation("com.google.ai.edge.litert:litert-api:1.4.1")
+    implementation("com.google.ai.edge.litert:litert-gpu:1.4.1")
+    implementation("com.google.ai.edge.litert:litert-support:1.4.1")
 
     // Coroutines (for async calls)
     implementation(libs.kotlinx.coroutines.android)
@@ -132,4 +142,10 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+configurations.all {
+    // Ruthlessly prevent legacy TensorFlow Lite modules from entering the classpath
+    exclude(group = "org.tensorflow", module = "tensorflow-lite")
+    exclude(group = "org.tensorflow", module = "tensorflow-lite-api")
 }

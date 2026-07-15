@@ -8,7 +8,10 @@ sealed class CheckInUiState {
         val progress: Float = 0f,
         val logs: List<String> = emptyList()
     ) : CheckInUiState()
-    data class Success(val matches: List<WebMatchDisplay>) : CheckInUiState()
+    data class Success(
+        val matches: List<WebMatchDisplay>,
+        val gemmaAnalysis: String? = null
+    ) : CheckInUiState()
     data class Confirming(val faceBitmap: Bitmap) : CheckInUiState()
     object NoFaceDetected : CheckInUiState()
     data class NoMatch(val logs: List<String> = emptyList()) : CheckInUiState()

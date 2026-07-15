@@ -14,6 +14,7 @@ import com.yourcompany.facesearch.network.ImageUploadRepository
 import com.yourcompany.facesearch.network.Secrets
 import com.yourcompany.facesearch.vision.FaceEmbedder
 import com.yourcompany.facesearch.vision.FreeFaceSearchHelper
+import com.yourcompany.facesearch.vision.GemmaAnalyzer
 import com.yourcompany.facesearch.vision.ImageEnhancer
 import com.yourcompany.facesearch.vision.NativeFaceCropper
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +41,7 @@ class CheckInViewModel(
     private val apifyRepository = ApifyRepository()
     private val faceEmbedder = FaceEmbedder(application)
     private val freeSearch = FreeFaceSearchHelper(application, nativeFaceCropper)
+    private val gemmaAnalyzer = GemmaAnalyzer(application)
 
     var uiState by mutableStateOf<CheckInUiState>(CheckInUiState.Idle)
         private set
@@ -48,6 +50,10 @@ class CheckInViewModel(
         private set
 
     var targetHint by mutableStateOf("")
+
+    fun onTargetHintChange(newHint: String) {
+        targetHint = newHint
+    }
 
     var searchMode by mutableStateOf(SearchMode.PRECISION)
 
@@ -65,7 +71,7 @@ class CheckInViewModel(
     }
 
     fun onImageReady(bitmap: Bitmap, nameHint: String?) {
-        targetHint = nameHint ?: ""
+        targetHint = nameHint?.trim() ?: ""
         when (searchMode) {
             SearchMode.FREE -> {
                 viewModelScope.launch {
@@ -191,6 +197,9 @@ class CheckInViewModel(
                 
                 if (publicUrl != null) {
                     logs.add("Cloud hosting successful.")
+                    android.util.Log.d("NetworkDebug", "-----------------------------------------")
+                    android.util.Log.d("NetworkDebug", "TEST URL FOR SERPAPI PLAYGROUND: $publicUrl")
+                    android.util.Log.d("NetworkDebug", "-----------------------------------------")
                     performWebSearch(publicUrl, logs)
                 } else {
                     uiState = CheckInUiState.Error("Image hosting failed. Please try again.")
@@ -205,9 +214,10 @@ class CheckInViewModel(
         logs.add("Engaging Deep OSINT Waterfall...")
         uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
+        val trimmedHint = targetHint.trim()
         val visualMatches = faceSearchRepository.performFaceSearch(
             uploadedImageUrl = imageUrl, 
-            keywordHint = if (targetHint.isNotBlank()) targetHint else null,
+            keywordHint = if (trimmedHint.isNotBlank()) trimmedHint else null,
             onLog = { logMsg ->
                 logs.add(logMsg)
                 val newProgress = (uiState as? CheckInUiState.Loading)?.progress?.plus(0.05f)?.coerceAtMost(0.95f) ?: 0.8f
@@ -246,7 +256,16 @@ class CheckInViewModel(
                 )
             }.sortedByDescending { it.score }
 
-            uiState = CheckInUiState.Success(matches = mappedMatches)
+            var gemmaSummary: String? = null
+            if (searchMode == SearchMode.HYPER) {
+                logs.add("Engaging Gemma-3 LLM for Deep Signal Analysis...")
+                uiState = CheckInUiState.Loading(0.95f, logs.toList())
+                val leadTexts = mappedMatches.take(5).map { "${it.name} (${it.source}): ${it.profileUrl}" }
+                gemmaSummary = gemmaAnalyzer.analyzeSearchLeads(targetHint, leadTexts)
+                logs.add("Gemma Analysis Complete.")
+            }
+
+            uiState = CheckInUiState.Success(matches = mappedMatches, gemmaAnalysis = gemmaSummary)
         } else {
             uiState = CheckInUiState.NoMatch(logs.toList())
         }
@@ -268,7 +287,7 @@ class CheckInViewModel(
     }
 
     fun onGoogleLensOnlySearch(bitmap: Bitmap, nameHint: String? = null) {
-        if (nameHint != null) targetHint = nameHint
+        if (nameHint != null) targetHint = nameHint.trim()
         viewModelScope.launch {
             val original = capturedBitmap ?: bitmap
             uiState = CheckInUiState.Loading(1.0f, listOf("Launching Google Lens node..."))
@@ -280,5 +299,6 @@ class CheckInViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        gemmaAnalyzer.close()
     }
 }

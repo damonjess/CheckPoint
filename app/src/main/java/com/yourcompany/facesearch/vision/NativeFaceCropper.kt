@@ -62,11 +62,11 @@ class NativeFaceCropper {
     data class FaceQualityResult(val isGood: Boolean, val message: String)
 
     suspend fun prepareFaceForSearch(original: Bitmap): Bitmap {
-        // Step 1: Tight face crop (use your YOLO or NativeFaceCropper)
-        val faceCrop = getTightFaceCrop(original) ?: original  // fallback
+        // Step 1: Use ALIGNED face with moderate padding (Best for search engines)
+        val faceCrop = cropAndAlignFace(original) 
 
         // Step 2: High resolution + good quality for face recognition
-        val targetSize = 1024
+        val targetSize = 800 // 800-1000 is the sweet spot for SerpApi
         val scaled = Bitmap.createScaledBitmap(
             faceCrop,
             targetSize,
@@ -125,8 +125,9 @@ class NativeFaceCropper {
                         rotationMatrix.postRotate(-face.headEulerAngleZ, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
                     }
 
-                    // 2. ADD DYNAMIC PADDING (More padding for better context if needed)
-                    val paddingFactor = 0.25f
+                    // 2. ADD DYNAMIC PADDING (Increased to 45% for better context)
+                    // Google Lens performs significantly better when it can see hair and shoulders
+                    val paddingFactor = 0.45f
                     val paddingX = (box.width() * paddingFactor).toInt()
                     val paddingY = (box.height() * paddingFactor).toInt()
 

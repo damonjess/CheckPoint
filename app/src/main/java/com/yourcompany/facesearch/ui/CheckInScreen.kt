@@ -295,6 +295,32 @@ fun CheckInScreen(
 
                     is CheckInUiState.Success -> {
                         Column(modifier = Modifier.fillMaxSize()) {
+                            if (uiState.gemmaAnalysis != null) {
+                                Text(
+                                    text = "GEMMA-3 DEEP ANALYSIS",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Amber
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Amber.copy(alpha = 0.05f)),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f)),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(
+                                        text = uiState.gemmaAnalysis,
+                                        modifier = Modifier.padding(12.dp),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+
                             Text(
                                 text = "FOUND ${uiState.matches.size} MATCHES",
                                 fontWeight = FontWeight.Black,
@@ -333,24 +359,23 @@ fun CheckInScreen(
                                 onRetry = onRetryClick
                             )
 
-                            if (debugMode && uiState.logs.isNotEmpty()) {
-                                Text(
-                                    "SHERLOCK OSINT CONSOLE",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Amber,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = Color.Black),
-                                    modifier = Modifier.fillMaxWidth().height(300.dp),
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
-                                ) {
-                                    val logScroll = rememberScrollState()
-                                    Column(modifier = Modifier.padding(12.dp).verticalScroll(logScroll)) {
-                                        uiState.logs.forEach { log ->
-                                            Text(text = "> $log", color = Amber, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                                        }
+                            // Always show console logs if results are zero, so errors aren't hidden
+                            Text(
+                                "SHERLOCK OSINT CONSOLE",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Amber,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                                modifier = Modifier.fillMaxWidth().height(200.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
+                            ) {
+                                val logScroll = rememberScrollState()
+                                Column(modifier = Modifier.padding(12.dp).verticalScroll(logScroll)) {
+                                    uiState.logs.forEach { log ->
+                                        Text(text = "> $log", color = Amber, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                                     }
                                 }
                             }

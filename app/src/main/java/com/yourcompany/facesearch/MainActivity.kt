@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.tflite.java.TfLite
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -25,6 +26,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Initialize LiteRT (TensorFlow Lite) from Google Play Services
+        TfLite.initialize(this)
 
         setContent {
             MaterialTheme {
@@ -58,7 +62,7 @@ class MainActivity : ComponentActivity() {
                         searchMode = checkInViewModel.searchMode,
                         targetHint = checkInViewModel.targetHint,
                         debugMode = checkInViewModel.debugMode,
-                        onTargetHintChange = { checkInViewModel.targetHint = it },
+                        onTargetHintChange = { checkInViewModel.onTargetHintChange(it) },
                         onSearchModeChange = { checkInViewModel.searchMode = it },
                         onDebugModeChange = { checkInViewModel.debugMode = it },
                         onCapturePhotoClick = { screen = Screen.CAMERA },

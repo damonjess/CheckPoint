@@ -39,13 +39,15 @@ class FaceVerifier(context: Context) {
                 // 2. Generate embedding for result
                 val resultEmbedding = faceEmbedder.getEmbedding(resultFace)
                 
-                // 3. Compare embeddings
-                val similarity = FaceMatcher.cosineSimilarity(sourceEmbedding, resultEmbedding)
-                
                 // Clean up
                 if (resultFace != searchResultBitmap) {
                     resultFace.recycle()
                 }
+
+                if (resultEmbedding == null) return@withContext null
+                
+                // 3. Compare embeddings
+                val similarity = FaceMatcher.cosineSimilarity(sourceEmbedding, resultEmbedding)
                 
                 similarity.takeIf { it > SOFT_FILTER_THRESHOLD }
             } catch (e: Exception) {

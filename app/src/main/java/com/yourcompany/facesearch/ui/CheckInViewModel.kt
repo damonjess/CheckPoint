@@ -29,7 +29,8 @@ enum class SearchMode {
     HYPER,      // Multi-Probe Composite (Bypass All Filters)
     RAW,        // Full image
     FREE,       // Multi-Engine Web Browser Search (No API Cost)
-    SOCIAL_OPTIMIZED  // NEW: Optimized for finding you on social media (1:1 profile crop)
+    SOCIAL_OPTIMIZED,  // Optimized for finding you on social media (1:1 profile crop)
+    AGGRESSIVE  // NEW: Maximum bypass - all filters removed, maximum probing
 }
 
 class CheckInViewModel(
@@ -142,12 +143,24 @@ class CheckInViewModel(
                             osinted
                         }
                     }
-                    SearchMode.SOCIAL_OPTIMIZED -> {
-                        logs.add("Social Optimized mode: Profile picture matching...")
+                    SearchMode.AGGRESSIVE -> {
+                        logs.add("AGGRESSIVE mode: MAXIMUM BYPASS - All filters removed...")
                         withContext(Dispatchers.Default) {
-                            val socialProfileCrop = nativeFaceCropper.cropForSocialProfile(bitmap)
-                            val enhanced = ImageEnhancer.enhance(socialProfileCrop)
-                            if (socialProfileCrop != bitmap) socialProfileCrop.recycle()
+                            // Use full image context + maximum enhancement
+                            val fullContext = nativeFaceCropper.cropContextual(bitmap)
+                            val fingerprinted = ImageEnhancer.applyStructuralFingerprint(fullContext)
+                            if (fullContext != bitmap) fullContext.recycle()
+                            fingerprinted
+                        }
+                    }
+                    
+                    SearchMode.SOCIAL_OPTIMIZED -> {
+                        logs.add("Social Optimized mode: AGGRESSIVE profile matching...")
+                        withContext(Dispatchers.Default) {
+                            // Maximum context for bypass
+                            val aggressiveCrop = nativeFaceCropper.cropContextual(bitmap)
+                            val enhanced = ImageEnhancer.applyStructuralFingerprint(aggressiveCrop)
+                            if (aggressiveCrop != bitmap) aggressiveCrop.recycle()
                             enhanced
                         }
                     }
@@ -165,8 +178,8 @@ class CheckInViewModel(
                     }
                 }
                 
-                if (searchMode == SearchMode.FREE) {
-                    logs.add("Face alignment complete.")
+                if (searchMode == SearchMode.FREE || searchMode == SearchMode.AGGRESSIVE) {
+                    logs.add("Maximum search probing - skipping local verification...")
                     
                     var finalBitmap = processedBitmap
                     var shouldRecycleProcessed = false

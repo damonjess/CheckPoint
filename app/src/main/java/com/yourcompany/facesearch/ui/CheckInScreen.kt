@@ -197,6 +197,13 @@ fun CheckInScreen(
                     enabled = uiState !is CheckInUiState.Loading
                 )
                 ModeChip(
+                    label = "🔥 Aggressive",
+                    icon = Icons.Default.Bolt,
+                    selected = searchMode == SearchMode.AGGRESSIVE,
+                    onClick = { onSearchModeChange(SearchMode.AGGRESSIVE) },
+                    enabled = uiState !is CheckInUiState.Loading
+                )
+                ModeChip(
                     label = "Raw",
                     icon = Icons.Default.Image,
                     selected = searchMode == SearchMode.RAW,

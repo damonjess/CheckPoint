@@ -45,8 +45,10 @@ class FreeFaceSearchHelper(private val context: Context, private val cropper: Na
     private fun openEngines(uri: Uri, name: String?, engineIndex: Int? = null) {
         val urls = listOf(
             "https://lens.google.com/upload",           // Best for faces
+            "https://pimeyes.com/en",                  // Top face search engine (Manual upload)
             "https://www.bing.com/images/searchbyimage", 
-            "https://yandex.com/images/search"
+            "https://yandex.com/images/search",
+            "https://tineye.com"                       // Reliable image tracker
         )
 
         if (engineIndex != null && engineIndex in urls.indices) {

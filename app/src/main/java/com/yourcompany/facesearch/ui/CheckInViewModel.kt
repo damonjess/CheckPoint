@@ -117,36 +117,17 @@ class CheckInViewModel(
                         logs.add("Raw mode: Using full image...")
                         bitmap
                     }
-                    SearchMode.BYPASS -> {
-                        logs.add("Engaging Deep Dorking Bypass...")
-                        withContext(Dispatchers.Default) {
-                            val cropped = nativeFaceCropper.cropContextual(bitmap)
-                            val enhanced = ImageEnhancer.applyCamouflage(cropped)
-                            if (cropped != bitmap) cropped.recycle()
-                            enhanced
-                        }
-                    }
-                    SearchMode.HYPER -> {
-                        logs.add("Engaging Cyber-Security Hyper-Probe...")
-                        withContext(Dispatchers.Default) {
-                            val probe = nativeFaceCropper.createHyperProbe(bitmap)
-                            val fingerprinted = ImageEnhancer.applyStructuralFingerprint(probe)
-                            if (probe != bitmap) probe.recycle()
-                            fingerprinted
-                        }
+                    SearchMode.BYPASS, SearchMode.HYPER, SearchMode.AGGRESSIVE -> {
+                        logs.add("Creating multiple bypass probes...")
+                        val probes = nativeFaceCropper.createUltraBypassProbe(bitmap)
+                        // Use the first/best one for upload, or test multiple later
+                        probes.firstOrNull() ?: bitmap
                     }
                     SearchMode.SOCIAL -> {
                         logs.add("Social mode: Natural Context Scoping...")
                         withContext(Dispatchers.Default) {
                             // Contextual crop helps engines recognize "real person" vibes
                             nativeFaceCropper.cropSocial(bitmap)
-                        }
-                    }
-                    SearchMode.AGGRESSIVE -> {
-                        logs.add("AGGRESSIVE mode: Deep Biometric & Social Probe...")
-                        withContext(Dispatchers.Default) {
-                            // Using a 1:1 profile crop is actually better for both biometric and social matching
-                            nativeFaceCropper.cropForSocialProfile(bitmap)
                         }
                     }
                     
@@ -238,7 +219,7 @@ class CheckInViewModel(
                     android.util.Log.d("NetworkDebug", "-----------------------------------------")
                     android.util.Log.d("NetworkDebug", "TEST URL FOR SERPAPI PLAYGROUND: $publicUrl")
                     android.util.Log.d("NetworkDebug", "-----------------------------------------")
-                    performWebSearch(publicUrl, logs)
+                    performWebSearch(listOf(publicUrl), logs)
                 } else {
                     uiState = CheckInUiState.Error("Image hosting failed. Please try again.")
                 }
@@ -248,7 +229,7 @@ class CheckInViewModel(
         }
     }
 
-    private suspend fun performWebSearch(imageUrl: String, logs: MutableList<String>) {
+    private suspend fun performWebSearch(imageUrls: List<String>, logs: MutableList<String>) {
         logs.add("Engaging Deep OSINT Waterfall...")
         uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
@@ -277,24 +258,26 @@ class CheckInViewModel(
         }
 
         // Always run standard engines for HYPER, or if AGGRESSIVE failed
-        if (searchMode != SearchMode.AGGRESSIVE || visualMatches.isEmpty()) {
-            val standardResults = faceSearchRepository.performFaceSearch(
-                uploadedImageUrl = imageUrl,
-                keywordHint = if (trimmedHint.isNotBlank()) trimmedHint else null,
-                onLog = { logMsg ->
-                    logs.add(logMsg)
-                    val currentProgress = (uiState as? CheckInUiState.Loading)?.progress ?: 0.5f
-                    uiState = CheckInUiState.Loading((currentProgress + 0.02f).coerceAtMost(0.95f), logs.toList())
-                }
-            )
-            visualMatches.addAll(standardResults)
+        for (imageUrl in imageUrls) {
+            if (searchMode != SearchMode.AGGRESSIVE || visualMatches.isEmpty()) {
+                val standardResults = faceSearchRepository.performFaceSearch(
+                    uploadedImageUrl = imageUrl,
+                    keywordHint = if (trimmedHint.isNotBlank()) trimmedHint else null,
+                    onLog = { logMsg ->
+                        logs.add(logMsg)
+                        val currentProgress = (uiState as? CheckInUiState.Loading)?.progress ?: 0.5f
+                        uiState = CheckInUiState.Loading((currentProgress + 0.02f).coerceAtMost(0.95f), logs.toList())
+                    }
+                )
+                visualMatches.addAll(standardResults)
+            }
         }
 
         if (visualMatches.isNotEmpty()) {
-            logs.add("Analysis complete. ${visualMatches.size} targets located.")
+            logs.add("Analysis complete. ${visualMatches.size} raw targets located.")
             
-            // Map matches first to handle sorting later
-            val mappedMatches = visualMatches.map { result ->
+            // Map matches and deduplicate
+            val mappedMatches = visualMatches.distinctBy { it.link }.map { result ->
                 WebMatchDisplay(
                     name = result.title ?: "Matched Profile",
                     source = result.source ?: "Public Record",
@@ -305,14 +288,15 @@ class CheckInViewModel(
             }.toMutableList()
 
             // DEEP SCRAPE BYPASS: If in HYPER or AGGRESSIVE mode, scrape top profiles
-            if (searchMode == SearchMode.HYPER || searchMode == SearchMode.AGGRESSIVE) {
-                // Try to scrape the top 2 social matches
+            if (searchMode == SearchMode.HYPER || searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.BYPASS) {
+                // Aggressively scrape the top 5 social matches
                 val socialIndices = mappedMatches.mapIndexedNotNull { index, match ->
                     if (match.profileUrl.contains("instagram") || 
                         match.profileUrl.contains("facebook") ||
                         match.profileUrl.contains("linkedin") ||
+                        match.profileUrl.contains("twitter") ||
                         match.profileUrl.contains("tiktok")) index else null
-                }.take(3)
+                }.take(5)
 
                 if (socialIndices.isNotEmpty()) {
                     logs.add("Social Targets Identified. Engaging Scraper Bypass...")

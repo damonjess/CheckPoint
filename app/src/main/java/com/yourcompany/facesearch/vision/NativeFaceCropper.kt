@@ -394,4 +394,57 @@ class NativeFaceCropper {
                 continuation.resume(bitmap)
             }
     }
+
+    /**
+     * ULTRA BYPASS PROBE: Multiple aggressive variants for social scraping
+     */
+    suspend fun createUltraBypassProbe(original: Bitmap): List<Bitmap> = suspendCancellableCoroutine { continuation ->
+        val probes = mutableListOf<Bitmap>()
+        val image = InputImage.fromBitmap(original, 0)
+        
+        detector.process(image).addOnSuccessListener { faces ->
+            try {
+                if (faces.isNotEmpty()) {
+                    val face = faces[0]
+                    val box = face.boundingBox
+                    
+                    // Variant 1: Wide contextual (Logic inlined from cropContextual to avoid suspend call in callback)
+                    val widthScale = 3.5f
+                    val heightScale = 4.0f
+                    val pWidth = (box.width() * widthScale).toInt().coerceAtLeast(1)
+                    val pHeight = (box.height() * heightScale).toInt().coerceAtLeast(1)
+                    val left = (box.centerX() - (pWidth * 0.35f)).toInt().coerceAtLeast(0).coerceAtMost(original.width - 1)
+                    val top = (box.centerY() - (pHeight * 0.4f)).toInt().coerceAtLeast(0).coerceAtMost(original.height - 1)
+                    val width = pWidth.coerceAtMost(original.width - left).coerceAtLeast(1)
+                    val height = pHeight.coerceAtMost(original.height - top).coerceAtLeast(1)
+                    probes.add(Bitmap.createBitmap(original, left, top, width, height))
+                    
+                    // Variant 2: High contrast + camouflage (Simplified without alignment for safety in callback)
+                    val faceLeft = box.left.coerceIn(0, original.width - 1)
+                    val faceTop = box.top.coerceIn(0, original.height - 1)
+                    val faceWidth = box.width().coerceIn(1, original.width - faceLeft)
+                    val faceHeight = box.height().coerceIn(1, original.height - faceTop)
+                    val faceCrop = Bitmap.createBitmap(original, faceLeft, faceTop, faceWidth, faceHeight)
+                    val contrast = ImageEnhancer.applyStructuralFingerprint(faceCrop)
+                    probes.add(ImageEnhancer.applyCamouflage(contrast))
+                    faceCrop.recycle()
+                    
+                    // Variant 3: Grayscale mirror (strong bypass)
+                    val grayMatrix = ColorMatrix().apply { setSaturation(0f) }
+                    val paint = Paint().apply { colorFilter = ColorMatrixColorFilter(grayMatrix) }
+                    val gray = Bitmap.createBitmap(original.width, original.height, Bitmap.Config.ARGB_8888)
+                    Canvas(gray).drawBitmap(original, 0f, 0f, paint)
+                    probes.add(gray)
+                } else {
+                    probes.add(original)
+                }
+                continuation.resume(probes)
+            } catch (e: Exception) {
+                probes.add(original)
+                continuation.resume(probes)
+            }
+        }.addOnFailureListener {
+            continuation.resume(listOf(original))
+        }
+    }
 }

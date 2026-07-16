@@ -105,12 +105,17 @@ class FaceSearchRepository(
         val cleanHint = keywordHint?.trim() ?: ""
 
         // ===== STRICT GLOBAL WATERFALL =====
-        // Completely removed Yandex and Baidu to eliminate Russian/Chinese bias
-        val engineWaterfall = listOf(
+        val engineWaterfall = mutableListOf(
             "google_lens",
             "bing_visual_search",
             "google_reverse_image"
         )
+
+        // Selectively re-enable Yandex for deeper matching if no hint is provided 
+        // (Yandex is excellent at finding visually similar faces even without text hints)
+        if (cleanHint.isEmpty()) {
+            engineWaterfall.add(1, "yandex_images")
+        }
 
         for (currentEngine in engineWaterfall) {
             val readable = currentEngine.replace("_", " ").uppercase()
@@ -400,7 +405,9 @@ class FaceSearchRepository(
                                 source.contains("ok.ru") || source.contains("специалисты.рф")
                 
                 if (isRussian) {
-                    score -= 10000 // Total exclusion penalty
+                    // Reduce penalty slightly if it's the only result found via Yandex,
+                    // but keep it high enough to deprioritize
+                    score -= 8000
                 }
                 
                 if (link.contains(".cn") || source.contains("baidu")) {

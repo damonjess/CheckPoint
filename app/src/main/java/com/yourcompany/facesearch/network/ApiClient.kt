@@ -48,4 +48,15 @@ object ApiClient {
             .build()
             .create(ImageUploadApi::class.java)
     }
+
+    // Optional: Self-hosted Social-Analyzer instance
+    // Update the base URL to your server's IP/domain (default port is 9005)
+    val socialAnalyzerApi: SocialAnalyzerApi by lazy {
+        Retrofit.Builder()
+            .baseUrl("http://localhost:9005/") 
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(SocialAnalyzerApi::class.java)
+    }
 }

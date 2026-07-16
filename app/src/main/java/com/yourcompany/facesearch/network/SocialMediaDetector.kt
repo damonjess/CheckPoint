@@ -32,6 +32,9 @@ object SocialMediaDetector {
         LINKTREE(1400, true),
         MEDIUM(1350, true),
         QUORA(1300, true),
+        VSCO(1250, true),
+        ONLYFANS(1200, true),
+        PMP(1150, true),
         
         // Emerging Platforms
         SNAPCHAT(1000, true),
@@ -74,6 +77,9 @@ object SocialMediaDetector {
             domain.contains("linktr.ee") -> Platform.LINKTREE
             domain.contains("medium.com") -> Platform.MEDIUM
             domain.contains("quora.com") -> Platform.QUORA
+            domain.contains("vsco.co") -> Platform.VSCO
+            domain.contains("onlyfans.com") -> Platform.ONLYFANS
+            domain.contains("pmp.it") -> Platform.PMP
             domain.contains("snapchat.com") || domain.contains("snap.com") -> Platform.SNAPCHAT
             domain.contains("discord.com") || domain.contains("discordapp.com") -> Platform.DISCORD
             domain.contains("telegram.org") || domain.contains("t.me") -> Platform.TELEGRAM
@@ -160,6 +166,12 @@ object SocialMediaDetector {
             }
             Platform.MEDIUM -> {
                 path.substringAfter("medium.com/@").substringAfter("medium.com/").substringBefore("/").takeIf { it.isNotEmpty() }
+            }
+            Platform.VSCO -> {
+                path.substringAfter("vsco.co/").substringBefore("/").takeIf { it.isNotEmpty() }
+            }
+            Platform.ONLYFANS -> {
+                path.substringAfter("onlyfans.com/").substringBefore("/").takeIf { it.isNotEmpty() }
             }
             Platform.REDDIT -> {
                 if (path.contains("/u/")) {

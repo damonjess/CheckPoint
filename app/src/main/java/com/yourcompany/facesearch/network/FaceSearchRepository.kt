@@ -203,6 +203,52 @@ class FaceSearchRepository(
             }
         }
 
+        // ===== OSINT CROSS-CORRELATION (Inspired by Social Mapper / Social Analyzer) =====
+        val correlatedResults = mutableListOf<SerpVisualMatch>()
+        val detectedUsernames = mutableSetOf<String>()
+        
+        // Extract potential usernames from high-scoring visual matches
+        allResults.filter { it.score > 2000 && it.link != null }.forEach { match ->
+            val platform = SocialMediaDetector.detectPlatform(match.link)
+            val username = SocialMediaDetector.extractUsername(match.link, platform)
+            if (username != null && username.length > 2) {
+                detectedUsernames.add(username)
+            }
+        }
+
+        if (detectedUsernames.isNotEmpty()) {
+            onLog("CROSS-CORRELATION: Found ${detectedUsernames.size} potential handles...")
+            for (username in detectedUsernames.take(2)) { // Limit to top 2 unique usernames to save API credits
+                onLog("Engaging Social-Analyzer probe for '@$username'...")
+                try {
+                    val response = apiService.searchVisual(
+                        engine = "google",
+                        query = "\"$username\" (site:instagram.com OR site:facebook.com OR site:linkedin.com OR site:twitter.com OR site:tiktok.com)",
+                        apiKey = serpApiKey
+                    )
+                    
+                    if (response.isSuccessful) {
+                        val body = response.body()
+                        body?.organicResults?.let { results ->
+                            onLog("✓ Cross-Correlation: Found ${results.size} additional profiles for @$username")
+                            correlatedResults.addAll(results.map {
+                                SerpVisualMatch(
+                                    title = it.title, 
+                                    link = it.link, 
+                                    source = it.source, 
+                                    thumbnail = it.thumbnail ?: it.favicon,
+                                    score = 3500 // High score for cross-correlated results
+                                )
+                            })
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Ignore cross-correlation failures
+                }
+            }
+        }
+        allResults.addAll(correlatedResults)
+
         // ===== PLATFORM-SPECIFIC TARGETED SEARCHES =====
         if (cleanHint.isNotEmpty()) {
             onLog("Engaging target-specific social probes...")

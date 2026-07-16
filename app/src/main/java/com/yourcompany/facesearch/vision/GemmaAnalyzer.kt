@@ -94,12 +94,13 @@ class GemmaAnalyzer(private val context: Context) {
         val inference = llmInference ?: return@withContext "Gemma analysis unavailable: ${initializationError ?: "Initialization failed"}."
 
         val prompt = StringBuilder()
-        prompt.append("You are an OSINT expert. Analyze these search results for a person matching the hint: '$targetHint'.\n")
-        prompt.append("Leads found:\n")
-        leads.take(5).forEachIndexed { index, lead ->
-            prompt.append("${index + 1}. $lead\n")
+        prompt.append("ACT AS A SENIOR OSINT INVESTIGATOR. Analyze the following target data from multiple social-mapping vectors.\n")
+        prompt.append("TARGET HINT: '$targetHint'\n\n")
+        prompt.append("INPUT LEADS (Ranked by Biometric & Social score):\n")
+        leads.take(8).forEachIndexed { index, lead ->
+            prompt.append("[VECTOR ${index + 1}] $lead\n")
         }
-        prompt.append("\nSummarize the most likely identity and social presence in 3 sentences. Be concise.")
+        prompt.append("\nTASK: Correlate these leads and identify the most probable identity. Identify shared handles, location markers, and social silos. Provide a 3-sentence summary in a professional investigative tone.")
 
         try {
             inference.generateResponse(prompt.toString())

@@ -27,7 +27,7 @@ enum class SearchMode {
     PRECISION,  // Tight face crop
     BYPASS,     // Yandex Engine + Camouflage Filter (Deep OSINT)
     SOCIAL,     // Square crop, High Contrast, Social Priority
-    HYPER,      // Multi-Probe Composite (Bypass All Filters)
+    HYPER,      // ULTIMATE: Combined Biometric + OSINT Cross-Correlation (Screenshot Tools)
     RAW,        // Full image
     FREE,       // Multi-Engine Web Browser Search (No API Cost)
     SOCIAL_OPTIMIZED,  // Optimized for finding you on social media (1:1 profile crop)
@@ -253,12 +253,12 @@ class CheckInViewModel(
         uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
         val trimmedHint = targetHint.trim()
-        val isAggressive = searchMode == SearchMode.AGGRESSIVE
+        val isDeepSearch = searchMode == SearchMode.HYPER || searchMode == SearchMode.AGGRESSIVE
         
         val visualMatches = mutableListOf<SerpVisualMatch>()
 
-        if (isAggressive) {
-            logs.add("Priority: Biometric Scan (FaceCheck.ID)...")
+        if (isDeepSearch) {
+            logs.add("ULTIMATE PROBE: Engaging Biometric Scan (FaceCheck.ID)...")
             val faceCheckResults = faceSearchRepository.performFaceCheckSearch(
                 bitmap = capturedBitmap!!,
                 onLog = { logMsg ->
@@ -270,12 +270,14 @@ class CheckInViewModel(
             visualMatches.addAll(faceCheckResults)
             
             if (visualMatches.isEmpty()) {
-                logs.add("Biometric results negative. Falling back to Visual Engines...")
+                logs.add("Biometric results negative. Expanding search to Visual OSINT Engines...")
+            } else {
+                logs.add("Biometric hits confirmed. Cross-correlating with Visual Engines...")
             }
         }
 
-        // If not aggressive, or if aggressive failed to find anything, run standard engines
-        if (!isAggressive || visualMatches.isEmpty()) {
+        // Always run standard engines for HYPER, or if AGGRESSIVE failed
+        if (searchMode != SearchMode.AGGRESSIVE || visualMatches.isEmpty()) {
             val standardResults = faceSearchRepository.performFaceSearch(
                 uploadedImageUrl = imageUrl,
                 keywordHint = if (trimmedHint.isNotBlank()) trimmedHint else null,
@@ -330,16 +332,7 @@ class CheckInViewModel(
 
             val finalMatches = mappedMatches.sortedByDescending { it.score }
 
-            var gemmaSummary: String? = null
-            if (searchMode == SearchMode.HYPER || searchMode == SearchMode.AGGRESSIVE) {
-                logs.add("Engaging Gemma-3 LLM for Deep Signal Analysis...")
-                uiState = CheckInUiState.Loading(0.95f, logs.toList())
-                val leadTexts = finalMatches.take(8).map { "${it.name} (${it.source}): ${it.profileUrl}" }
-                gemmaSummary = gemmaAnalyzer.analyzeSearchLeads(targetHint, leadTexts)
-                logs.add("Gemma Analysis Complete.")
-            }
-
-            uiState = CheckInUiState.Success(matches = finalMatches, gemmaAnalysis = gemmaSummary)
+            uiState = CheckInUiState.Success(matches = finalMatches, gemmaAnalysis = null)
         } else {
             uiState = CheckInUiState.NoMatch(logs.toList())
         }

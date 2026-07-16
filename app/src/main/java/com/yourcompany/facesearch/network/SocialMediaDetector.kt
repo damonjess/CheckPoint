@@ -26,6 +26,13 @@ object SocialMediaDetector {
         TWITCH(1200, false),
         BEHANCE(1100, true),
         
+        // OSINT / Professional (Inspired by Social-Analyzer)
+        GRAVATAR(1500, true),
+        ABOUT_ME(1450, true),
+        LINKTREE(1400, true),
+        MEDIUM(1350, true),
+        QUORA(1300, true),
+        
         // Emerging Platforms
         SNAPCHAT(1000, true),
         DISCORD(900, false),
@@ -62,6 +69,11 @@ object SocialMediaDetector {
             domain.contains("youtube.com") || domain.contains("youtu.be") -> Platform.YOUTUBE
             domain.contains("twitch.tv") -> Platform.TWITCH
             domain.contains("behance.net") -> Platform.BEHANCE
+            domain.contains("gravatar.com") -> Platform.GRAVATAR
+            domain.contains("about.me") -> Platform.ABOUT_ME
+            domain.contains("linktr.ee") -> Platform.LINKTREE
+            domain.contains("medium.com") -> Platform.MEDIUM
+            domain.contains("quora.com") -> Platform.QUORA
             domain.contains("snapchat.com") || domain.contains("snap.com") -> Platform.SNAPCHAT
             domain.contains("discord.com") || domain.contains("discordapp.com") -> Platform.DISCORD
             domain.contains("telegram.org") || domain.contains("t.me") -> Platform.TELEGRAM
@@ -136,6 +148,18 @@ object SocialMediaDetector {
             }
             Platform.GITHUB -> {
                 path.substringAfter("github.com/").substringBefore("/").takeIf { it.isNotEmpty() }
+            }
+            Platform.GRAVATAR -> {
+                path.substringAfter("gravatar.com/").substringBefore("/").takeIf { it.isNotEmpty() }
+            }
+            Platform.ABOUT_ME -> {
+                path.substringAfter("about.me/").substringBefore("/").takeIf { it.isNotEmpty() }
+            }
+            Platform.LINKTREE -> {
+                path.substringAfter("linktr.ee/").substringBefore("/").takeIf { it.isNotEmpty() }
+            }
+            Platform.MEDIUM -> {
+                path.substringAfter("medium.com/@").substringAfter("medium.com/").substringBefore("/").takeIf { it.isNotEmpty() }
             }
             Platform.REDDIT -> {
                 if (path.contains("/u/")) {

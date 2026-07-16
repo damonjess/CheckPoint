@@ -13,16 +13,12 @@ class FaceSearchRepository(
         val allResults = mutableListOf<SerpVisualMatch>()
         val cleanHint = keywordHint?.trim() ?: ""
 
-        // ===== GLOBAL TARGETING WATERFALL =====
-        // Prioritize Western/Global engines to avoid regional bias
+        // ===== STRICT GLOBAL WATERFALL =====
+        // Completely removed Yandex and Baidu to eliminate Russian/Chinese bias
         val engineWaterfall = listOf(
             "google_lens",
             "bing_visual_search",
-            "google_reverse_image",
-            
-            // Move regional engines to end of waterfall
-            "yandex_images",
-            "baidu_images"
+            "google_reverse_image"
         )
 
         for (currentEngine in engineWaterfall) {
@@ -224,13 +220,7 @@ class FaceSearchRepository(
 
                 // ===== FACTOR 4: KEYWORD MATCHING (Secondary - 1000 pts max) =====
                 // Only 1000 pts because profiles often don't have names visible
-                if (cleanHint.isNotEmpty()) {
-                    val words = cleanHint.lowercase().split(" ").filter { it.length > 2 }
-                    val titleWordMatches = words.count { title.contains(it) }
-                    if (titleWordMatches > 0) {
-                        score += (titleWordMatches * 300).coerceAtMost(1000)
-                    }
-                }
+                score += SocialMediaDetector.scoreNameMatch(cleanHint, title, link)
 
                 // ===== FACTOR 5: CONTENT INDICATORS (800 pts max) =====
                 // Has a thumbnail (actual profile image or content)
@@ -241,14 +231,20 @@ class FaceSearchRepository(
                 // Title suggests personal profile
                 if (title.contains("profile") || title.contains("account") || 
                     title.contains("about") || title.contains("bio")) {
-                    score += 250  // Increased from 200
+                    score += 400
                 }
 
                 // ===== FACTOR 6: FILTERING (Penalties) =====
+                // Negative Keywords (False Positives)
+                val negativeKeywords = listOf("meme", "joke", "funny", "skibidi", "toilet", "parody", "fan", "club")
+                if (negativeKeywords.any { title.contains(it) }) {
+                    score -= 3000
+                }
+
                 // Heavy penalty for generic results
                 if (link.contains("search") || link.contains("explore") || 
-                    link.contains("discover") || link.contains("feed")) {
-                    score -= 2000  // Increased penalty from -1500
+                    link.contains("discover") || link.contains("feed") || link.contains("tag")) {
+                    score -= 2500
                 }
                 
                 // Penalty for likely spammy content
@@ -256,14 +252,18 @@ class FaceSearchRepository(
                     score -= 2500  // Increased penalty from -2000
                 }
 
-                // ===== FACTOR 7: REGIONAL FILTERING (New) =====
-                // Penalty for domains that skew results toward specific regions if not requested
-                if (link.contains(".ru") || source.contains("yandex") || source.contains("vkontakte") || source.contains("ok.ru")) {
-                    score -= 1500 // Significant penalty for Russian-leaning results
+                // ===== FACTOR 7: REGIONAL FILTERING (HARD BLOCK) =====
+                // Total exclusion of results that skew away from target Western regions
+                val isRussian = link.contains(".ru") || link.contains(".рф") || 
+                                source.contains("yandex") || source.contains("vkontakte") || 
+                                source.contains("ok.ru") || source.contains("специалисты.рф")
+                
+                if (isRussian) {
+                    score -= 10000 // Total exclusion penalty
                 }
                 
                 if (link.contains(".cn") || source.contains("baidu")) {
-                    score -= 1000 // Penalty for Chinese-leaning results
+                    score -= 5000 // Heavy penalty for Chinese results
                 }
 
                 // Base score for any match

@@ -155,15 +155,48 @@ object SocialMediaDetector {
         val path = url.lowercase()
         
         // Bonus for direct profile patterns
-        if (isProfileUrl(url)) bonus += 800
+        if (isProfileUrl(url)) bonus += 1200 // Increased from 800
         
         // Bonus for standard social domain structures (not generic image CDN)
-        if (!isCDNUrl(url)) bonus += 400 else bonus -= 200
+        if (!isCDNUrl(url)) bonus += 600 else bonus -= 400
         
         // Bonus for having a clean, simple URL (not spammy)
-        if (path.split("/").size < 6) bonus += 300
+        if (path.split("/").size < 6) bonus += 400
         
         return bonus
+    }
+
+    /**
+     * Scores how well the target name matches the found profile title/URL.
+     */
+    fun scoreNameMatch(target: String, foundTitle: String, foundLink: String): Int {
+        if (target.isBlank()) return 0
+        val cleanTarget = target.lowercase().trim()
+        val cleanTitle = foundTitle.lowercase()
+        val cleanLink = foundLink.lowercase()
+        
+        // HARD BLOCK: If title contains Cyrillic (Russian) characters, it's likely a false positive for Western targets
+        if (containsCyrillic(foundTitle)) return -10000
+        
+        val targetWords = cleanTarget.split(" ").filter { it.length > 2 }
+        if (targetWords.isEmpty()) return 0
+        
+        var matchCount = 0
+        for (word in targetWords) {
+            if (cleanTitle.contains(word) || cleanLink.contains(word)) {
+                matchCount++
+            }
+        }
+        
+        return when {
+            matchCount == targetWords.size -> 2000 // Full name match
+            matchCount > 0 -> 800 + (matchCount * 300) // Partial match
+            else -> 0
+        }
+    }
+
+    private fun containsCyrillic(text: String): Boolean {
+        return text.any { Character.UnicodeBlock.of(it) == Character.UnicodeBlock.CYRILLIC }
     }
 
     private fun isCDNUrl(url: String): Boolean {

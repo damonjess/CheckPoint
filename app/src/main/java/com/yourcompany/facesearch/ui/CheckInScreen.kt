@@ -573,11 +573,16 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false, size: and
 
 @Composable
 private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () -> Unit) {
+    val isHighConfidence = match.score > 5000
+    
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isHighConfidence) 6.dp else 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isHighConfidence) Amber.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface
+        ),
+        border = if (isHighConfidence) androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.5f)) else null
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -585,7 +590,7 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
         ) {
             Box(
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(if (isHighConfidence) 80.dp else 64.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
@@ -615,11 +620,28 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
             Spacer(modifier = Modifier.width(16.dp))
 
             Column(modifier = Modifier.weight(1f)) {
+                if (isHighConfidence) {
+                    Surface(
+                        color = Amber,
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    ) {
+                        Text(
+                            "HIGH CONFIDENCE MATCH",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.Black
+                        )
+                    }
+                }
+
                 Text(
                     text = match.name,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    maxLines = 1
+                    fontSize = if (isHighConfidence) 18.sp else 16.sp,
+                    maxLines = 2,
+                    lineHeight = 20.sp
                 )
                 
                 if (debugMode) {
@@ -630,15 +652,9 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
                         color = Amber,
                         fontWeight = FontWeight.Bold
                     )
-                    if (match.imageUrl != null) {
-                        Text(
-                            text = "IMG: ${match.imageUrl.toString().take(30)}...",
-                            fontSize = 8.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color.Gray
-                        )
-                    }
                 }
+                
+                Spacer(modifier = Modifier.height(4.dp))
                 
                 Surface(
                     color = when {
@@ -670,18 +686,14 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
                         }
                     )
                 }
-                
-                Spacer(modifier = Modifier.height(4.dp))
-                
-                Text(
-                    text = "Source: ${match.source}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
 
-            TextButton(onClick = onClick) {
-                Text("View Profile", fontWeight = FontWeight.Bold)
+            IconButton(onClick = onClick) {
+                Icon(
+                    imageVector = Icons.Default.Bolt, 
+                    contentDescription = "View Profile",
+                    tint = if (isHighConfidence) Amber else MaterialTheme.colorScheme.primary
+                )
             }
         }
     }

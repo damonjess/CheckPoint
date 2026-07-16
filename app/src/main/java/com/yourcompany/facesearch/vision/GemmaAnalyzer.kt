@@ -20,13 +20,22 @@ class GemmaAnalyzer(private val context: Context) {
         try {
             val modelFile = java.io.File(context.filesDir, MODEL_NAME)
             
-            // 1. Robust model acquisition
-            if (!modelFile.exists() || modelFile.length() < 500000000) { // Threshold 500MB to force update
+            // 0. Check for manual push location to avoid asset deployment issues
+            val externalFile = java.io.File("/sdcard/Download/gemma.task")
+            val targetFile = if (externalFile.exists() && externalFile.length() > 500000000) {
+                android.util.Log.d("GemmaAnalyzer", "Found manually pushed model at ${externalFile.absolutePath}")
+                externalFile
+            } else {
+                modelFile
+            }
+
+            // 1. Robust model acquisition (Copy from assets if not manually pushed)
+            if (targetFile == modelFile && (!modelFile.exists() || modelFile.length() < 500000000)) {
                 try {
                     context.assets.open(MODEL_NAME).use { input ->
                         val size = input.available().toLong()
-                        if (size < 500000000) { // Assets should also be > 500MB
-                            initializationError = "Model file in assets is too small ($size bytes). Likely a Git LFS pointer or old version. Run 'git lfs pull'."
+                        if (size < 500000000) {
+                            initializationError = "Model file in assets is too small ($size bytes). Likely a Git LFS pointer. Run 'git lfs pull'."
                             return
                         }
                         
@@ -35,26 +44,29 @@ class GemmaAnalyzer(private val context: Context) {
                         }
                     }
                 } catch (e: java.io.FileNotFoundException) {
-                    initializationError = "Model file $MODEL_NAME not found in assets."
-                    return
+                    if (!targetFile.exists()) {
+                        initializationError = "Model file $MODEL_NAME not found in assets or /sdcard/Download/."
+                        return
+                    }
                 }
             }
 
             // 2. Final safety check before native initialization
-            if (!modelFile.exists() || modelFile.length() < 1000000) {
-                initializationError = "Model file invalid (Size: ${modelFile.length()} bytes)."
+            if (!targetFile.exists() || targetFile.length() < 500000000) {
+                initializationError = "Model file invalid or too small (Size: ${targetFile.length()} bytes)."
                 return
             }
 
+            android.util.Log.d("GemmaAnalyzer", "Initializing Gemma with model: ${targetFile.absolutePath} (${targetFile.length()} bytes)")
+
             // 3. Native initialization with safety
             val options = LlmInference.LlmInferenceOptions.builder()
-                .setModelPath(modelFile.absolutePath)
+                .setModelPath(targetFile.absolutePath)
                 .setMaxTokens(512)
                 .setTemperature(0.7f)
                 .setRandomSeed(42)
                 .build()
             
-            // createFromOptions can trigger SIGABRT if memory is low or model is corrupted
             llmInference = LlmInference.createFromOptions(context, options)
         } catch (e: Exception) {
             initializationError = "Gemma Init Error: ${e.message}"

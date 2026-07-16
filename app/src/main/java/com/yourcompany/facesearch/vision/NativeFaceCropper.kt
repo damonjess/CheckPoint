@@ -65,15 +65,32 @@ class NativeFaceCropper {
         // Step 1: Use ALIGNED face with moderate padding (Best for search engines)
         val faceCrop = cropAndAlignFace(original) 
 
-        // Step 2: High resolution + good quality for face recognition
-        val targetSize = 800 // 800-1000 is the sweet spot for SerpApi
-        val scaled = Bitmap.createScaledBitmap(
-            faceCrop,
-            targetSize,
-            (targetSize * faceCrop.height / faceCrop.width),
-            true
-        )
-
+        // Step 2: Constrain dimensions for API compatibility and memory safety
+        // SerpApi optimal range: 400-800px, max 2MB file size
+        val maxDimension = 800
+        val minDimension = 400
+        
+        val aspectRatio = faceCrop.width.toFloat() / faceCrop.height
+        val (finalWidth, finalHeight) = when {
+            faceCrop.width > faceCrop.height -> {
+                // Landscape: constrain width
+                val w = faceCrop.width.coerceIn(minDimension, maxDimension)
+                Pair(w, (w / aspectRatio).toInt())
+            }
+            else -> {
+                // Portrait/Square: constrain height
+                val h = faceCrop.height.coerceIn(minDimension, maxDimension)
+                Pair((h * aspectRatio).toInt(), h)
+            }
+        }
+        
+        val scaled = Bitmap.createScaledBitmap(faceCrop, finalWidth, finalHeight, true)
+        
+        // Recycle intermediate bitmap to prevent memory leak
+        if (faceCrop != original) {
+            faceCrop.recycle()
+        }
+        
         return scaled
     }
 
@@ -125,9 +142,9 @@ class NativeFaceCropper {
                         rotationMatrix.postRotate(-face.headEulerAngleZ, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
                     }
 
-                    // 2. ADD DYNAMIC PADDING (Increased to 45% for better context)
-                    // Google Lens performs significantly better when it can see hair and shoulders
-                    val paddingFactor = 0.45f
+                    // 2. ADD OPTIMIZED PADDING (25-30% for balance between context and accuracy)
+                    // Too much padding reduces search accuracy; too little loses important context
+                    val paddingFactor = 0.25f
                     val paddingX = (box.width() * paddingFactor).toInt()
                     val paddingY = (box.height() * paddingFactor).toInt()
 
@@ -213,6 +230,7 @@ class NativeFaceCropper {
 
     /**
      * HYPER-PROBE: Creates a 3-way composite to bypass privacy filters.
+     * Properly manages bitmap memory to prevent leaks.
      */
     suspend fun createHyperProbe(bitmap: Bitmap): Bitmap = suspendCancellableCoroutine { continuation ->
         val image = InputImage.fromBitmap(bitmap, 0)
@@ -222,49 +240,74 @@ class NativeFaceCropper {
                 val canvas = Canvas(composite)
                 canvas.drawColor(Color.BLACK)
 
-                if (faces.isNotEmpty()) {
-                    val face = faces[0]
-                    val box = face.boundingBox
+                try {
+                    if (faces.isNotEmpty()) {
+                        val face = faces[0]
+                        val box = face.boundingBox
 
-                    // 1. TOP HALF: Wide Context (Clothes/Background)
-                    val contextWidth = (box.width() * 4.0f).toInt().coerceAtMost(bitmap.width)
-                    val contextHeight = (contextWidth * 0.5f).toInt()
-                    val cLeft = (box.centerX() - (contextWidth / 2)).coerceIn(0, bitmap.width - contextWidth)
-                    val cTop = (box.centerY() - (contextHeight / 2)).coerceIn(0, bitmap.height - contextHeight)
-                    val contextCrop = Bitmap.createBitmap(bitmap, cLeft, cTop, contextWidth, contextHeight)
-                    canvas.drawBitmap(Bitmap.createScaledBitmap(contextCrop, 1024, 512, true), 0f, 0f, null)
+                        // 1. TOP HALF: Wide Context (Clothes/Background)
+                        val contextWidth = (box.width() * 4.0f).toInt().coerceAtMost(bitmap.width)
+                        val contextHeight = (contextWidth * 0.5f).toInt()
+                        val cLeft = (box.centerX() - (contextWidth / 2)).coerceIn(0, (bitmap.width - contextWidth).coerceAtLeast(1))
+                        val cTop = (box.centerY() - (contextHeight / 2)).coerceIn(0, (bitmap.height - contextHeight).coerceAtLeast(1))
+                        
+                        val contextCrop = Bitmap.createBitmap(bitmap, cLeft, cTop, contextWidth.coerceAtLeast(1), contextHeight.coerceAtLeast(1))
+                        val contextScaled = Bitmap.createScaledBitmap(contextCrop, 1024, 512, true)
+                        canvas.drawBitmap(contextScaled, 0f, 0f, null)
+                        contextCrop.recycle()
+                        contextScaled.recycle()
 
-                    // 2. BOTTOM LEFT: High-Contrast Face
-                    val faceCrop = Bitmap.createBitmap(bitmap, 
-                        box.left.coerceAtLeast(0), 
-                        box.top.coerceAtLeast(0), 
-                        box.width().coerceAtMost(bitmap.width - box.left.coerceAtLeast(0)), 
-                        box.height().coerceAtMost(bitmap.height - box.top.coerceAtLeast(0))
-                    )
-                    val enhancedFace = ImageEnhancer.enhance(faceCrop)
-                    canvas.drawBitmap(Bitmap.createScaledBitmap(enhancedFace, 512, 512, true), 0f, 512f, null)
+                        // 2. BOTTOM LEFT: High-Contrast Face
+                        val faceWidth = box.width().coerceAtMost(bitmap.width - box.left.coerceAtLeast(0))
+                        val faceHeight = box.height().coerceAtMost(bitmap.height - box.top.coerceAtLeast(0))
+                        if (faceWidth > 0 && faceHeight > 0) {
+                            val faceCrop = Bitmap.createBitmap(bitmap, 
+                                box.left.coerceAtLeast(0), 
+                                box.top.coerceAtLeast(0),
+                                faceWidth,
+                                faceHeight
+                            )
+                            val enhancedFace = ImageEnhancer.enhance(faceCrop)
+                            val faceScaled = Bitmap.createScaledBitmap(enhancedFace, 512, 512, true)
+                            canvas.drawBitmap(faceScaled, 0f, 512f, null)
+                            faceCrop.recycle()
+                            enhancedFace.recycle()
+                            faceScaled.recycle()
 
-                    // 3. BOTTOM RIGHT: Digital Camouflage / Grayscale Bypass
-                    val matrix = Matrix().apply { postScale(-1f, 1f) }
-                    val mirroredFace = Bitmap.createBitmap(faceCrop, 0, 0, faceCrop.width, faceCrop.height, matrix, true)
-                    
-                    // Convert to Grayscale (Bypasses color-based privacy filters)
-                    val grayFace = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
-                    val grayCanvas = Canvas(grayFace)
-                    val grayPaint = Paint()
-                    val cm = ColorMatrix()
-                    cm.setSaturation(0f)
-                    grayPaint.colorFilter = ColorMatrixColorFilter(cm)
-                    grayCanvas.drawBitmap(Bitmap.createScaledBitmap(mirroredFace, 512, 512, true), 0f, 0f, grayPaint)
-                    
-                    val camoFace = ImageEnhancer.applyCamouflage(grayFace)
-                    canvas.drawBitmap(camoFace, 512f, 512f, null)
-
-                    continuation.resume(composite)
-                } else {
+                            // 3. BOTTOM RIGHT: Grayscale Bypass
+                            val matrix = Matrix().apply { postScale(-1f, 1f) }
+                            val mirroredFace = Bitmap.createBitmap(faceCrop, 0, 0, faceCrop.width, faceCrop.height, matrix, true)
+                            
+                            // Convert to Grayscale (Bypasses color-based privacy filters)
+                            val grayFace = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
+                            val grayCanvas = Canvas(grayFace)
+                            val grayPaint = Paint()
+                            val cm = ColorMatrix()
+                            cm.setSaturation(0f)
+                            grayPaint.colorFilter = ColorMatrixColorFilter(cm)
+                            val mirroredScaled = Bitmap.createScaledBitmap(mirroredFace, 512, 512, true)
+                            grayCanvas.drawBitmap(mirroredScaled, 0f, 0f, grayPaint)
+                            mirroredFace.recycle()
+                            mirroredScaled.recycle()
+                            
+                            val camoFace = ImageEnhancer.applyCamouflage(grayFace)
+                            canvas.drawBitmap(camoFace, 512f, 512f, null)
+                            grayFace.recycle()
+                            camoFace.recycle()
+                        }
+                        continuation.resume(composite)
+                    } else {
+                        continuation.resume(bitmap)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("NativeFaceCropper", "Error in createHyperProbe: ${e.message}")
+                    composite.recycle()
                     continuation.resume(bitmap)
                 }
             }
-            .addOnFailureListener { continuation.resume(bitmap) }
+            .addOnFailureListener { 
+                android.util.Log.e("NativeFaceCropper", "Face detection failed in createHyperProbe")
+                continuation.resume(bitmap) 
+            }
     }
 }

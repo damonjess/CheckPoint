@@ -162,6 +162,13 @@ fun CheckInScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ModeChip(
+                    label = "Precision",
+                    icon = Icons.Default.FilterCenterFocus,
+                    selected = searchMode == SearchMode.PRECISION,
+                    onClick = { onSearchModeChange(SearchMode.PRECISION) },
+                    enabled = uiState !is CheckInUiState.Loading
+                )
+                ModeChip(
                     label = "Bypass",
                     icon = Icons.Default.Security,
                     selected = searchMode == SearchMode.BYPASS,
@@ -180,6 +187,13 @@ fun CheckInScreen(
                     icon = Icons.Default.People,
                     selected = searchMode == SearchMode.SOCIAL,
                     onClick = { onSearchModeChange(SearchMode.SOCIAL) },
+                    enabled = uiState !is CheckInUiState.Loading
+                )
+                ModeChip(
+                    label = "Social Opt",
+                    icon = Icons.Default.Person,
+                    selected = searchMode == SearchMode.SOCIAL_OPTIMIZED,
+                    onClick = { onSearchModeChange(SearchMode.SOCIAL_OPTIMIZED) },
                     enabled = uiState !is CheckInUiState.Loading
                 )
                 ModeChip(

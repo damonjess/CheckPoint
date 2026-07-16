@@ -10,6 +10,9 @@ object ApiClient {
     
     // Sign up at serpapi.com to get your own free API Key (250 searches/month)
     val API_KEY = Secrets.SERP_API_KEY
+    
+    // Sign up at facecheck.id/Face-Search/API to get your API Token
+    val FACECHECK_API_KEY = Secrets.FACECHECK_API_KEY
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(90, TimeUnit.SECONDS)
@@ -25,6 +28,16 @@ object ApiClient {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(SerpApiService::class.java)
+    }
+
+    // FaceCheck.ID API instance
+    val faceCheckApi: FaceCheckApi by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://facecheck.id/")
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(FaceCheckApi::class.java)
     }
 
     val imageUploadApi: ImageUploadApi by lazy {

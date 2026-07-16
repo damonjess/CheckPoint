@@ -273,62 +273,59 @@ class NativeFaceCropper {
                         val box = face.boundingBox
 
                         // 1. TOP HALF: Wide Context (Clothes/Background)
-                        val contextWidth = (box.width() * 4.0f).toInt().coerceAtMost(bitmap.width)
-                        val contextHeight = (contextWidth * 0.5f).toInt()
-                        val cLeft = (box.centerX() - (contextWidth / 2)).coerceIn(0, (bitmap.width - contextWidth).coerceAtLeast(1))
-                        val cTop = (box.centerY() - (contextHeight / 2)).coerceIn(0, (bitmap.height - contextHeight).coerceAtLeast(1))
+                        val contextWidth = (box.width() * 4.0f).toInt().coerceIn(1, bitmap.width)
+                        val contextHeight = (contextWidth * 0.5f).toInt().coerceIn(1, bitmap.height)
+                        val cLeft = (box.centerX() - (contextWidth / 2)).coerceIn(0, (bitmap.width - contextWidth).coerceAtLeast(0))
+                        val cTop = (box.centerY() - (contextHeight / 2)).coerceIn(0, (bitmap.height - contextHeight).coerceAtLeast(0))
                         
-                        val contextCrop = Bitmap.createBitmap(bitmap, cLeft, cTop, contextWidth.coerceAtLeast(1), contextHeight.coerceAtLeast(1))
+                        val contextCrop = Bitmap.createBitmap(bitmap, cLeft, cTop, contextWidth, contextHeight)
                         val contextScaled = Bitmap.createScaledBitmap(contextCrop, 1024, 512, true)
                         canvas.drawBitmap(contextScaled, 0f, 0f, null)
                         contextCrop.recycle()
                         contextScaled.recycle()
 
                         // 2. BOTTOM LEFT: High-Contrast Face
-                        val faceWidth = box.width().coerceAtMost(bitmap.width - box.left.coerceAtLeast(0))
-                        val faceHeight = box.height().coerceAtMost(bitmap.height - box.top.coerceAtLeast(0))
-                        if (faceWidth > 0 && faceHeight > 0) {
-                            val faceCrop = Bitmap.createBitmap(bitmap, 
-                                box.left.coerceAtLeast(0), 
-                                box.top.coerceAtLeast(0),
-                                faceWidth,
-                                faceHeight
-                            )
-                            val enhancedFace = ImageEnhancer.enhance(faceCrop)
-                            val faceScaled = Bitmap.createScaledBitmap(enhancedFace, 512, 512, true)
-                            canvas.drawBitmap(faceScaled, 0f, 512f, null)
-                            faceCrop.recycle()
-                            enhancedFace.recycle()
-                            faceScaled.recycle()
+                        val faceLeft = box.left.coerceIn(0, bitmap.width - 1)
+                        val faceTop = box.top.coerceIn(0, bitmap.height - 1)
+                        val faceWidth = box.width().coerceIn(1, bitmap.width - faceLeft)
+                        val faceHeight = box.height().coerceIn(1, bitmap.height - faceTop)
+                        
+                        val faceCrop = Bitmap.createBitmap(bitmap, faceLeft, faceTop, faceWidth, faceHeight)
+                        val enhancedFace = ImageEnhancer.enhance(faceCrop)
+                        val faceScaled = Bitmap.createScaledBitmap(enhancedFace, 512, 512, true)
+                        canvas.drawBitmap(faceScaled, 0f, 512f, null)
+                        enhancedFace.recycle()
+                        faceScaled.recycle()
 
-                            // 3. BOTTOM RIGHT: Grayscale Bypass
-                            val matrix = Matrix().apply { postScale(-1f, 1f) }
-                            val mirroredFace = Bitmap.createBitmap(faceCrop, 0, 0, faceCrop.width, faceCrop.height, matrix, true)
+                        // 3. BOTTOM RIGHT: Grayscale Bypass
+                        val matrix = Matrix().apply { postScale(-1f, 1f) }
+                        val mirroredFace = Bitmap.createBitmap(faceCrop, 0, 0, faceCrop.width, faceCrop.height, matrix, true)
+                        faceCrop.recycle()
                             
-                            // Convert to Grayscale (Bypasses color-based privacy filters)
-                            val grayFace = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
-                            val grayCanvas = Canvas(grayFace)
-                            val grayPaint = Paint()
-                            val cm = ColorMatrix()
-                            cm.setSaturation(0f)
-                            grayPaint.colorFilter = ColorMatrixColorFilter(cm)
-                            val mirroredScaled = Bitmap.createScaledBitmap(mirroredFace, 512, 512, true)
-                            grayCanvas.drawBitmap(mirroredScaled, 0f, 0f, grayPaint)
-                            mirroredFace.recycle()
-                            mirroredScaled.recycle()
-                            
-                            val camoFace = ImageEnhancer.applyCamouflage(grayFace)
-                            canvas.drawBitmap(camoFace, 512f, 512f, null)
-                            grayFace.recycle()
-                            camoFace.recycle()
-                        }
+                        // Convert to Grayscale (Bypasses color-based privacy filters)
+                        val grayFace = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
+                        val grayCanvas = Canvas(grayFace)
+                        val grayPaint = Paint()
+                        val cm = ColorMatrix()
+                        cm.setSaturation(0f)
+                        grayPaint.colorFilter = ColorMatrixColorFilter(cm)
+                        val mirroredScaled = Bitmap.createScaledBitmap(mirroredFace, 512, 512, true)
+                        grayCanvas.drawBitmap(mirroredScaled, 0f, 0f, grayPaint)
+                        mirroredFace.recycle()
+                        mirroredScaled.recycle()
+                        
+                        val camoFace = ImageEnhancer.applyCamouflage(grayFace)
+                        canvas.drawBitmap(camoFace, 512f, 512f, null)
+                        grayFace.recycle()
+                        camoFace.recycle()
+                        
                         continuation.resume(composite)
                     } else {
                         continuation.resume(bitmap)
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("NativeFaceCropper", "Error in createHyperProbe: ${e.message}")
-                    composite.recycle()
+                    if (!composite.isRecycled) composite.recycle()
                     continuation.resume(bitmap)
                 }
             }

@@ -1,9 +1,97 @@
 package com.yourcompany.facesearch.network
 
+import android.graphics.Bitmap
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.ByteArrayOutputStream
+
 class FaceSearchRepository(
     private val apiService: SerpApiService = ApiClient.serpApiService,
-    private val serpApiKey: String = ApiClient.API_KEY
+    private val serpApiKey: String = ApiClient.API_KEY,
+    private val faceCheckApi: FaceCheckApi = ApiClient.faceCheckApi,
+    private val faceCheckApiKey: String = ApiClient.FACECHECK_API_KEY
 ) {
+
+    suspend fun performFaceCheckSearch(
+        bitmap: Bitmap,
+        onLog: (String) -> Unit = {}
+    ): List<SerpVisualMatch> {
+        try {
+            onLog("PREPARING FACECHECK.ID UPLOAD...")
+            
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+            val byteArray = stream.toByteArray()
+            val requestBody = byteArray.toRequestBody("image/jpeg".toMediaTypeOrNull())
+            val multipartBody = MultipartBody.Part.createFormData("images", "face_probe.jpg", requestBody)
+
+            val uploadResponse = faceCheckApi.uploadPic(multipartBody, faceCheckApiKey)
+            
+            if (!uploadResponse.isSuccessful) {
+                onLog("✗ UPLOAD FAILED: HTTP ${uploadResponse.code()}")
+                return emptyList()
+            }
+            
+            val idSearch = uploadResponse.body()?.idSearch
+            if (idSearch == null) {
+                onLog("✗ UPLOAD FAILED: No Search ID returned")
+                return emptyList()
+            }
+
+            onLog("✓ UPLOAD SUCCESS. SEARCH ID: ${idSearch.take(8)}...")
+            onLog("INITIATING ASYNCHRONOUS PROBE...")
+
+            var retryCount = 0
+            val maxRetries = 30 // Approx 1 minute with 2s delay
+            
+            while (retryCount < maxRetries) {
+                val searchResponse = faceCheckApi.search(
+                    FaceCheckSearchRequest(
+                        idSearch = idSearch, 
+                        demo = false // Using live mode
+                    ),
+                    faceCheckApiKey
+                )
+                
+                if (searchResponse.isSuccessful) {
+                    val body = searchResponse.body()
+                    val progress = body?.progress ?: 0
+                    val status = body?.status ?: "searching"
+                    
+                    onLog("PROBING... $progress% [$status]")
+                    
+                    if (body?.items != null && body.items.isNotEmpty()) {
+                        onLog("✓ PROBE COMPLETE. FOUND ${body.items.size} TARGETS")
+                        return body.items.map { match ->
+                            SerpVisualMatch(
+                                title = match.site ?: "Social Media Profile",
+                                link = match.url,
+                                source = match.site ?: "Public Profile",
+                                thumbnail = if (match.base64 != null) "data:image/jpeg;base64,${match.base64}" else null,
+                                score = (match.score ?: 0) * 100 // Scale to match SerpApi scores
+                            )
+                        }
+                    }
+                    
+                    if (status.contains("done", ignoreCase = true) || progress >= 100) {
+                        break
+                    }
+                } else {
+                    onLog("⚠ POLLING ERROR: HTTP ${searchResponse.code()}")
+                }
+                
+                kotlinx.coroutines.delay(2000)
+                retryCount++
+            }
+            
+            onLog("⚠ PROBE TIMEOUT: No results found in the allotted time.")
+            return emptyList()
+        } catch (e: Exception) {
+            onLog("✗ FACECHECK ERROR: ${e.message}")
+            return emptyList()
+        }
+    }
 
     suspend fun performFaceSearch(
         uploadedImageUrl: String,

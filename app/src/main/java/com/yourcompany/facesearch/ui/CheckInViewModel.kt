@@ -30,7 +30,7 @@ enum class SearchMode {
     RAW,        // Full image
     FREE,       // Multi-Engine Web Browser Search (No API Cost)
     SOCIAL_OPTIMIZED,  // Optimized for finding you on social media (1:1 profile crop)
-    AGGRESSIVE  // NEW: Maximum bypass - all filters removed, maximum probing
+    AGGRESSIVE  // NEW: FaceCheck.ID Biometric Scan (Bypasses Search Engines)
 }
 
 class CheckInViewModel(
@@ -178,7 +178,7 @@ class CheckInViewModel(
                     }
                 }
                 
-                if (searchMode == SearchMode.FREE || searchMode == SearchMode.AGGRESSIVE) {
+                if (searchMode == SearchMode.FREE) {
                     logs.add("Maximum search probing - skipping local verification...")
                     
                     var finalBitmap = processedBitmap
@@ -229,6 +229,15 @@ class CheckInViewModel(
                 uiState = CheckInUiState.Loading(0.4f, logs.toList())
                 
                 val uploadBitmap = nativeFaceCropper.prepareFaceForSearch(processedBitmap)
+                
+                if (searchMode == SearchMode.HYPER) {
+                    logs.add("Engaging Multi-Engine OSINT Waterfall (Free Mode)...")
+                    // Removed FaceCheck.ID (Paid) - switching to standard high-depth OSINT
+                }
+
+                logs.add("Hosting probe image safely (ImgBB)...")
+                uiState = CheckInUiState.Loading(0.4f, logs.toList())
+                
                 val publicUrl = imageUploadRepository.uploadImage(uploadBitmap)
                 
                 if (publicUrl != null) {
@@ -251,15 +260,27 @@ class CheckInViewModel(
         uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
         val trimmedHint = targetHint.trim()
-        val visualMatches = faceSearchRepository.performFaceSearch(
-            uploadedImageUrl = imageUrl, 
-            keywordHint = if (trimmedHint.isNotBlank()) trimmedHint else null,
-            onLog = { logMsg ->
-                logs.add(logMsg)
-                val newProgress = (uiState as? CheckInUiState.Loading)?.progress?.plus(0.05f)?.coerceAtMost(0.95f) ?: 0.8f
-                uiState = CheckInUiState.Loading(newProgress, logs.toList())
-            }
-        )
+        
+        val visualMatches = if (searchMode == SearchMode.AGGRESSIVE) {
+            faceSearchRepository.performFaceCheckSearch(
+                bitmap = capturedBitmap!!,
+                onLog = { logMsg ->
+                    logs.add(logMsg)
+                    val newProgress = (uiState as? CheckInUiState.Loading)?.progress?.plus(0.02f)?.coerceAtMost(0.95f) ?: 0.8f
+                    uiState = CheckInUiState.Loading(newProgress, logs.toList())
+                }
+            )
+        } else {
+            faceSearchRepository.performFaceSearch(
+                uploadedImageUrl = imageUrl,
+                keywordHint = if (trimmedHint.isNotBlank()) trimmedHint else null,
+                onLog = { logMsg ->
+                    logs.add(logMsg)
+                    val newProgress = (uiState as? CheckInUiState.Loading)?.progress?.plus(0.05f)?.coerceAtMost(0.95f) ?: 0.8f
+                    uiState = CheckInUiState.Loading(newProgress, logs.toList())
+                }
+            )
+        }
 
         if (visualMatches.isNotEmpty()) {
             logs.add("Analysis complete. Targets located.")
@@ -316,59 +337,10 @@ class CheckInViewModel(
         viewModelScope.launch {
             val original = capturedBitmap ?: bitmap
             
-            if (searchMode == SearchMode.AGGRESSIVE) {
-                // Use aggressive API-based search with proper image upload
-                val logs = mutableListOf<String>()
-                uiState = CheckInUiState.Loading(0.1f, listOf("LAUNCHING AGGRESSIVE FACE SEARCH ENGINE..."))
-                
-                try {
-                    logs.add("Preparing image for aggressive scan...")
-                    uiState = CheckInUiState.Loading(0.2f, logs.toList())
-                    
-                    val uploadBitmap = nativeFaceCropper.prepareFaceForSearch(original)
-                    logs.add("Uploading to cloud servers...")
-                    uiState = CheckInUiState.Loading(0.3f, logs.toList())
-                    
-                    val publicUrl = imageUploadRepository.uploadImage(uploadBitmap)
-                    
-                    if (publicUrl != null) {
-                        logs.add("Cloud hosting successful. Engaging waterfall...")
-                        uiState = CheckInUiState.Loading(0.4f, logs.toList())
-                        
-                        // Perform the aggressive search
-                        val results = faceSearchRepository.performFaceSearch(
-                            uploadedImageUrl = publicUrl,
-                            keywordHint = if (targetHint.isNotBlank()) targetHint else null,
-                            onLog = { message ->
-                                logs.add(message)
-                                uiState = CheckInUiState.Loading(0.5f, logs.toList())
-                            }
-                        )
-                        
-                        logs.add("Aggressive scan complete - ${results.size} profiles found")
-                        
-                        val mappedMatches = results.map { result ->
-                            WebMatchDisplay(
-                                name = result.title ?: "Matched Profile",
-                                source = result.source ?: "Public Record",
-                                profileUrl = result.link ?: "",
-                                score = result.score,
-                                imageUrl = result.thumbnail
-                            )
-                        }.sortedByDescending { it.score }
-
-                        uiState = CheckInUiState.Success(
-                            matches = mappedMatches,
-                            gemmaAnalysis = null
-                        )
-                    } else {
-                        logs.add("ERROR: Image upload failed")
-                        uiState = CheckInUiState.Error("Upload failed: Could not upload image to cloud")
-                    }
-                } catch (e: Exception) {
-                    logs.add("ERROR: ${e.message}")
-                    uiState = CheckInUiState.Error("Search failed: ${e.message ?: "Unknown error"}")
-                }
+            if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
+                // User wants Deep Search / Social Bypass - use the API flow instead of redirecting to browser
+                uiState = CheckInUiState.Loading(0.1f, listOf("INITIATING DEEP SOCIAL BYPASS..."))
+                onPhotoCaptured(original)
             } else {
                 // Use browser-based FREE search
                 uiState = CheckInUiState.Loading(1.0f, listOf("Launching browser-based search nodes..."))

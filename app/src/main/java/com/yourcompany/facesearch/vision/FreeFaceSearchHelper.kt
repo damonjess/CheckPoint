@@ -61,13 +61,26 @@ class FreeFaceSearchHelper(private val context: Context, private val cropper: Na
     }
 
     private fun launchIntent(url: String, uri: Uri) {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(Uri.parse(url), "image/jpeg")
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+        
+        // Use a separate intent for sharing the image to the system, 
+        // as standard browsers don't support direct image upload via URL intents.
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "image/jpeg"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
         try {
+            // Open the search engine page
             context.startActivity(intent)
+            
+            // Also offer to "Share" the photo so user can manually upload or use an app like Google Lens
+            val chooser = Intent.createChooser(shareIntent, "Search Socials: Upload this photo")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
         } catch (e: Exception) {
             context.startActivity(Intent.createChooser(intent, "Open Search"))
         }

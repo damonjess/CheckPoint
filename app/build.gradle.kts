@@ -15,6 +15,7 @@ val localProperties = Properties().apply {
 val serpApiKey = localProperties.getProperty("SERP_API_KEY") ?: ""
 val imgbbApiKey = localProperties.getProperty("IMGBB_API_KEY") ?: ""
 val apifyApiToken = localProperties.getProperty("APIFY_API_TOKEN") ?: ""
+val facecheckApiKey = localProperties.getProperty("FACECHECK_API_KEY") ?: ""
 
 android {
     namespace = "com.yourcompany.facesearch"
@@ -32,6 +33,7 @@ android {
         buildConfigField("String", "SERP_API_KEY", "\"$serpApiKey\"")
         buildConfigField("String", "IMGBB_API_KEY", "\"$imgbbApiKey\"")
         buildConfigField("String", "APIFY_API_TOKEN", "\"$apifyApiToken\"")
+        buildConfigField("String", "FACECHECK_API_KEY", "\"$facecheckApiKey\"")
     }
 
     buildTypes {
@@ -53,6 +55,10 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true // Ensure BuildConfig generation is enabled
+    }
+
+    androidResources {
+        noCompress += "task"
     }
 
     packaging {

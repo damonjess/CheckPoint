@@ -7,8 +7,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -72,10 +70,12 @@ fun CheckInScreen(
             )
         }
     ) { padding ->
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -221,7 +221,8 @@ fun CheckInScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (searchMode == SearchMode.FREE && capturedBitmap != null && uiState !is CheckInUiState.Loading) {
+            val isFreeMode = searchMode == SearchMode.FREE || searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER
+            if (isFreeMode && capturedBitmap != null && uiState !is CheckInUiState.Loading) {
                 Button(
                     onClick = { onConfirmFreeSearch(capturedBitmap) },
                     modifier = Modifier
@@ -231,7 +232,12 @@ fun CheckInScreen(
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
-                        "🔍 Free Search - My Photos Only",
+                        when (searchMode) {
+                            SearchMode.FREE -> "🔍 Search Social Media (Free)"
+                            SearchMode.AGGRESSIVE -> "🚀 Launch Biometric Social Scan"
+                            SearchMode.HYPER -> "⚡ Execute Deep OSINT Search"
+                            else -> "⚡ Launch Social Search"
+                        },
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -240,10 +246,10 @@ fun CheckInScreen(
             }
 
             // Main Content Area
-            Box(modifier = Modifier.weight(1f)) {
+            Box(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
                 when (uiState) {
                     is CheckInUiState.Idle -> {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
                             Text(
                                 text = "Select mode & scan to begin search",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -258,7 +264,7 @@ fun CheckInScreen(
                             consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
                         }
 
-                        Column(modifier = Modifier.fillMaxSize()) {
+                        Column(modifier = Modifier.fillMaxWidth().height(400.dp)) {
                             LinearProgressIndicator(
                                 progress = { uiState.progress },
                                 modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
@@ -316,7 +322,7 @@ fun CheckInScreen(
                     }
 
                     is CheckInUiState.Success -> {
-                        Column(modifier = Modifier.fillMaxSize()) {
+                        Column(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
                             if (uiState.gemmaAnalysis != null) {
                                 Text(
                                     text = "GEMMA-3 DEEP ANALYSIS",
@@ -351,15 +357,14 @@ fun CheckInScreen(
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.height(12.dp))
-                            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                items(uiState.matches) { match ->
-                                    MatchCard(
-                                        match = match,
-                                        debugMode = debugMode,
-                                        onClick = { uriHandler.openUri(match.profileUrl) }
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                }
+                            
+                            uiState.matches.forEach { match ->
+                                MatchCard(
+                                    match = match,
+                                    debugMode = debugMode,
+                                    onClick = { uriHandler.openUri(match.profileUrl) }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
                             }
                         }
                     }
@@ -369,9 +374,8 @@ fun CheckInScreen(
                     }
 
                     is CheckInUiState.NoMatch -> {
-                        val scrollState = rememberScrollState()
                         Column(
-                            modifier = Modifier.fillMaxSize().verticalScroll(scrollState),
+                            modifier = Modifier.fillMaxWidth().wrapContentHeight(),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
@@ -640,8 +644,8 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
                     text = match.name,
                     fontWeight = FontWeight.Bold,
                     fontSize = if (isHighConfidence) 18.sp else 16.sp,
-                    maxLines = 2,
-                    lineHeight = 20.sp
+                    maxLines = 3,
+                    lineHeight = 22.sp
                 )
                 
                 if (debugMode) {

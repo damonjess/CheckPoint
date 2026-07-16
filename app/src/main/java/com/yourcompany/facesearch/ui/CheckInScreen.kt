@@ -308,6 +308,7 @@ fun CheckInScreen(
                         FaceSearchConfirmScreen(
                             croppedBitmap = uiState.faceBitmap,
                             nameHint = targetHint,
+                            searchMode = searchMode,
                             onConfirm = { onConfirmFreeSearch(uiState.faceBitmap) },
                             onGoogleLensOnly = { onGoogleLensOnlySearch(uiState.faceBitmap) },
                             onCancel = onRetryClick

@@ -13,24 +13,21 @@ class FaceSearchRepository(
         val allResults = mutableListOf<SerpVisualMatch>()
         val cleanHint = keywordHint?.trim() ?: ""
 
-        // ===== AGGRESSIVE BYPASS WATERFALL =====
-        // Multiple engines in priority order with built-in retries and fallbacks
+        // ===== GLOBAL TARGETING WATERFALL =====
+        // Prioritize Western/Global engines to avoid regional bias
         val engineWaterfall = listOf(
-            // Primary visual search (most accurate)
             "google_lens",
-            "yandex_images",
             "bing_visual_search",
-            
-            // Reverse image search specialists
             "google_reverse_image",
             
-            // Fallback engines if primary fails
+            // Move regional engines to end of waterfall
+            "yandex_images",
             "baidu_images"
         )
 
         for (currentEngine in engineWaterfall) {
+            val readable = currentEngine.replace("_", " ").uppercase()
             try {
-                val readable = currentEngine.replace("_", " ").uppercase()
                 onLog("PROBING $readable...")
 
                 // Rate limiting between engines
@@ -257,6 +254,16 @@ class FaceSearchRepository(
                 // Penalty for likely spammy content
                 if (source?.contains("spam") == true || source?.contains("ad") == true) {
                     score -= 2500  // Increased penalty from -2000
+                }
+
+                // ===== FACTOR 7: REGIONAL FILTERING (New) =====
+                // Penalty for domains that skew results toward specific regions if not requested
+                if (link.contains(".ru") || source.contains("yandex") || source.contains("vkontakte") || source.contains("ok.ru")) {
+                    score -= 1500 // Significant penalty for Russian-leaning results
+                }
+                
+                if (link.contains(".cn") || source.contains("baidu")) {
+                    score -= 1000 // Penalty for Chinese-leaning results
                 }
 
                 // Base score for any match

@@ -3,7 +3,9 @@ package com.yourcompany.facesearch.ui
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -20,6 +22,7 @@ import androidx.compose.ui.unit.sp
 fun FaceSearchConfirmScreen(
     croppedBitmap: Bitmap,
     nameHint: String?,
+    searchMode: SearchMode = SearchMode.FREE,
     onConfirm: () -> Unit,
     onGoogleLensOnly: () -> Unit,
     onCancel: () -> Unit
@@ -27,14 +30,16 @@ fun FaceSearchConfirmScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "Confirm Face Search",
+            text = if (searchMode == SearchMode.AGGRESSIVE) "Confirm Aggressive Search" else "Confirm Face Search",
             style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            color = if (searchMode == SearchMode.AGGRESSIVE) Color.Red else MaterialTheme.colorScheme.onSurface
         )
         
         Spacer(modifier = Modifier.height(24.dp))
@@ -60,29 +65,46 @@ fun FaceSearchConfirmScreen(
         
         Button(
             onClick = onConfirm,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB000))
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (searchMode == SearchMode.AGGRESSIVE) Color.Red else Color(0xFFFFB000)
+            ),
+            enabled = true
         ) {
-            Text("Launch Free Search", color = Color.Black, fontWeight = FontWeight.Bold)
+            Text(
+                text = if (searchMode == SearchMode.AGGRESSIVE) "🔥 LAUNCH AGGRESSIVE SCAN" else "Launch Free Search", 
+                color = if (searchMode == SearchMode.AGGRESSIVE) Color.White else Color.Black, 
+                fontWeight = FontWeight.Bold, 
+                fontSize = 16.sp
+            )
         }
         
-        Spacer(modifier = Modifier.height(8.dp))
+        if (searchMode != SearchMode.AGGRESSIVE) {
+            Spacer(modifier = Modifier.height(12.dp))
 
-        Button(
-            onClick = onGoogleLensOnly,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4))
-        ) {
-            Text("🎯 Direct Google Lens Search", color = Color.White, fontWeight = FontWeight.Bold)
+            Button(
+                onClick = onGoogleLensOnly,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4)),
+                enabled = true
+            ) {
+                Text("🎯 Direct Google Lens Search", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
         }
         
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         
         TextButton(
             onClick = onCancel,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
         ) {
-            Text("Cancel")
+            Text("Cancel", fontSize = 16.sp)
         }
     }
 }

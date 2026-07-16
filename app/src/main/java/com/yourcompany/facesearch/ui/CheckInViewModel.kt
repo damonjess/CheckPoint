@@ -315,10 +315,67 @@ class CheckInViewModel(
     fun onConfirmFreeSearch(bitmap: Bitmap) {
         viewModelScope.launch {
             val original = capturedBitmap ?: bitmap
-            uiState = CheckInUiState.Loading(1.0f, listOf("Launching browser-based search nodes..."))
-            freeSearch.searchMyPhoto(original, targetHint)
-            delay(1000)
-            uiState = CheckInUiState.Idle
+            
+            if (searchMode == SearchMode.AGGRESSIVE) {
+                // Use aggressive API-based search with proper image upload
+                val logs = mutableListOf<String>()
+                uiState = CheckInUiState.Loading(0.1f, listOf("LAUNCHING AGGRESSIVE FACE SEARCH ENGINE..."))
+                
+                try {
+                    logs.add("Preparing image for aggressive scan...")
+                    uiState = CheckInUiState.Loading(0.2f, logs.toList())
+                    
+                    val uploadBitmap = nativeFaceCropper.prepareFaceForSearch(original)
+                    logs.add("Uploading to cloud servers...")
+                    uiState = CheckInUiState.Loading(0.3f, logs.toList())
+                    
+                    val publicUrl = imageUploadRepository.uploadImage(uploadBitmap)
+                    
+                    if (publicUrl != null) {
+                        logs.add("Cloud hosting successful. Engaging waterfall...")
+                        uiState = CheckInUiState.Loading(0.4f, logs.toList())
+                        
+                        // Perform the aggressive search
+                        val results = faceSearchRepository.performFaceSearch(
+                            uploadedImageUrl = publicUrl,
+                            keywordHint = if (targetHint.isNotBlank()) targetHint else null,
+                            onLog = { message ->
+                                logs.add(message)
+                                uiState = CheckInUiState.Loading(0.5f, logs.toList())
+                            }
+                        )
+                        
+                        logs.add("Aggressive scan complete - ${results.size} profiles found")
+                        
+                        val mappedMatches = results.map { result ->
+                            WebMatchDisplay(
+                                name = result.title ?: "Matched Profile",
+                                source = result.source ?: "Public Record",
+                                profileUrl = result.link ?: "",
+                                score = result.score,
+                                imageUrl = result.thumbnail
+                            )
+                        }.sortedByDescending { it.score }
+
+                        uiState = CheckInUiState.Success(
+                            matches = mappedMatches,
+                            gemmaAnalysis = null
+                        )
+                    } else {
+                        logs.add("ERROR: Image upload failed")
+                        uiState = CheckInUiState.Error("Upload failed: Could not upload image to cloud")
+                    }
+                } catch (e: Exception) {
+                    logs.add("ERROR: ${e.message}")
+                    uiState = CheckInUiState.Error("Search failed: ${e.message ?: "Unknown error"}")
+                }
+            } else {
+                // Use browser-based FREE search
+                uiState = CheckInUiState.Loading(1.0f, listOf("Launching browser-based search nodes..."))
+                freeSearch.searchMyPhoto(original, targetHint)
+                delay(1000)
+                uiState = CheckInUiState.Idle
+            }
         }
     }
 

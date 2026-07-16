@@ -15,7 +15,10 @@ interface SerpApiService {
         @Query("url") imageUrl: String? = null,
         @Query("image_url") googleImageUrl: String? = null,    // For google_reverse_image
         @Query("q") query: String? = null,                    // OSINT Keyword Hint
-        @Query("api_key") apiKey: String
+        @Query("api_key") apiKey: String,
+        @Query("google_domain") googleDomain: String? = "google.com",
+        @Query("gl") country: String? = "us",                 // Country code (e.g., us, uk, ca)
+        @Query("hl") language: String? = "en"                 // Language code
     ): Response<SerpLensResponse>
 }
 

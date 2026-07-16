@@ -28,7 +28,8 @@ enum class SearchMode {
     SOCIAL,     // Square crop, High Contrast, Social Priority
     HYPER,      // Multi-Probe Composite (Bypass All Filters)
     RAW,        // Full image
-    FREE        // Multi-Engine Web Browser Search (No API Cost)
+    FREE,       // Multi-Engine Web Browser Search (No API Cost)
+    SOCIAL_OPTIMIZED  // NEW: Optimized for finding you on social media (1:1 profile crop)
 }
 
 class CheckInViewModel(
@@ -118,21 +119,36 @@ class CheckInViewModel(
                         logs.add("Engaging Deep Dorking Bypass...")
                         withContext(Dispatchers.Default) {
                             val cropped = nativeFaceCropper.cropContextual(bitmap)
-                            ImageEnhancer.applyCamouflage(cropped)
+                            val enhanced = ImageEnhancer.applyCamouflage(cropped)
+                            if (cropped != bitmap) cropped.recycle()
+                            enhanced
                         }
                     }
                     SearchMode.HYPER -> {
                         logs.add("Engaging Cyber-Security Hyper-Probe...")
                         withContext(Dispatchers.Default) {
                             val probe = nativeFaceCropper.createHyperProbe(bitmap)
-                            ImageEnhancer.applyStructuralFingerprint(probe)
+                            val fingerprinted = ImageEnhancer.applyStructuralFingerprint(probe)
+                            if (probe != bitmap) probe.recycle()
+                            fingerprinted
                         }
                     }
                     SearchMode.SOCIAL -> {
                         logs.add("Social mode: Boosting profile markers...")
                         withContext(Dispatchers.Default) {
                             val socialCrop = nativeFaceCropper.cropSocial(bitmap)
-                            ImageEnhancer.applyDeepOSINT(socialCrop)
+                            val osinted = ImageEnhancer.applyDeepOSINT(socialCrop)
+                            if (socialCrop != bitmap) socialCrop.recycle()
+                            osinted
+                        }
+                    }
+                    SearchMode.SOCIAL_OPTIMIZED -> {
+                        logs.add("Social Optimized mode: Profile picture matching...")
+                        withContext(Dispatchers.Default) {
+                            val socialProfileCrop = nativeFaceCropper.cropForSocialProfile(bitmap)
+                            val enhanced = ImageEnhancer.enhance(socialProfileCrop)
+                            if (socialProfileCrop != bitmap) socialProfileCrop.recycle()
+                            enhanced
                         }
                     }
                     SearchMode.PRECISION -> {
@@ -153,17 +169,24 @@ class CheckInViewModel(
                     logs.add("Face alignment complete.")
                     
                     var finalBitmap = processedBitmap
+                    var shouldRecycleProcessed = false
+                    
                     if (Runtime.getRuntime().maxMemory() - Runtime.getRuntime().totalMemory() < 150 * 1024 * 1024) {
                         logs.add("Low memory detected - using lower resolution crop.")
                         val targetSize = 600
                         if (finalBitmap.width > targetSize) {
                             val scale = targetSize.toFloat() / finalBitmap.width
-                            finalBitmap = Bitmap.createScaledBitmap(
+                            val scaledBitmap = Bitmap.createScaledBitmap(
                                 finalBitmap,
                                 (finalBitmap.width * scale).toInt(),
                                 (finalBitmap.height * scale).toInt(),
                                 true
                             )
+                            if (finalBitmap != bitmap) {
+                                finalBitmap.recycle()
+                                shouldRecycleProcessed = false
+                            }
+                            finalBitmap = scaledBitmap
                         }
                     }
                     

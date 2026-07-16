@@ -102,38 +102,79 @@ class FaceSearchRepository(
             android.util.Log.d("FaceSearch", "TOTAL RESULTS: ${allResults.size} raw matches found.")
         }
 
-        // Scoring for matches
+        // ===== IMPROVED MULTI-FACTOR SCORING SYSTEM =====
         return allResults
             .map { match ->
                 var score = 0
                 val title = match.title?.lowercase() ?: ""
                 val link = match.link?.lowercase() ?: ""
+                val source = match.source?.lowercase() ?: ""
 
-                // Hint matching is a huge boost
-                if (cleanHint.isNotEmpty() && title.contains(cleanHint.lowercase())) {
-                    score += 5000
+                // ===== FACTOR 1: KEYWORD MATCHING (2000 pts max) =====
+                if (cleanHint.isNotEmpty()) {
+                    val words = cleanHint.lowercase().split(" ").filter { it.length > 2 }
+                    val titleWordMatches = words.count { title.contains(it) }
+                    score += (titleWordMatches * 600).coerceAtMost(2000)
+                }
+
+                // ===== FACTOR 2: SOCIAL PLATFORM PRIORITY (2500 pts max) =====
+                val platform = SocialMediaDetector.detectPlatform(link)
+                score += platform.baseScore
+                
+                // Bonus for known profile-based platforms
+                if (platform.isProfileBased) {
+                    score += 400
+                }
+
+                // ===== FACTOR 3: URL PATTERN QUALITY (1200 pts max) =====
+                score += SocialMediaDetector.scoreUrlPattern(link)
+
+                // ===== FACTOR 4: PROFILE INDICATORS (1000 pts max) =====
+                if (SocialMediaDetector.isProfileUrl(link)) {
+                    score += 800
                 }
                 
-                // Social media priority
-                if (link.contains("linkedin.com") || link.contains("facebook.com") || 
-                    link.contains("instagram.com") || link.contains("twitter.com") || 
-                    link.contains("x.com") || link.contains("github.com") ||
-                    link.contains("pinterest.com") || link.contains("youtube.com")) {
-                    score += 3000
+                // Username extraction bonus (indicates real profile)
+                val username = SocialMediaDetector.extractUsername(link, platform)
+                if (username != null && username.length > 2 && username.length < 50) {
+                    score += 200
+                }
+
+                // ===== FACTOR 5: CONTENT INDICATORS (800 pts max) =====
+                // Has a thumbnail (actual profile image or content)
+                if (match.thumbnail != null) {
+                    score += 300
                 }
                 
-                // Profile page indicators
-                if (link.contains("profile") || link.contains("/in/") || link.contains("/user/") || link.contains("people")) {
-                    score += 1500
+                // Title suggests personal profile
+                if (title.contains("profile") || title.contains("account") || 
+                    title.contains("about") || title.contains("bio")) {
+                    score += 200
+                }
+
+                // ===== FACTOR 6: FILTERING (Penalties) =====
+                // Heavy penalty for generic results
+                if (link.contains("search") || link.contains("explore") || 
+                    link.contains("discover") || link.contains("feed")) {
+                    score -= 1500
                 }
                 
-                // Base score for any visual match found by engines
-                score += 500
+                // Penalty for likely spammy content
+                if (source?.contains("spam") == true || source?.contains("ad") == true) {
+                    score -= 2000
+                }
+
+                // Base score for any match
+                score += 300
 
                 match.copy(score = score)
             }
             .sortedByDescending { it.score }
-            .filter { it.link != null || it.title != null || it.thumbnail != null }
-            .distinctBy { it.link ?: it.title ?: it.thumbnail }
+            .filter { it.link != null && !it.link.lowercase().contains("search") }
+            .distinctBy { 
+                // Deduplicate by link, or by username if available
+                SocialMediaDetector.extractUsername(it.link, SocialMediaDetector.detectPlatform(it.link)) 
+                    ?: (it.link?.substringAfter("://")?.substringBefore("/") ?: it.title)
+            }
     }
 }

@@ -98,22 +98,28 @@ class NativeFaceCropper {
         val image = InputImage.fromBitmap(bitmap, 0)
         detector.process(image)
             .addOnSuccessListener { faces ->
-                if (faces.isNotEmpty()) {
-                    val box = faces[0].boundingBox
-                    val left = box.left.coerceAtLeast(0)
-                    val top = box.top.coerceAtLeast(0)
-                    val width = box.width().coerceAtMost(bitmap.width - left)
-                    val height = box.height().coerceAtMost(bitmap.height - top)
-                    if (width > 0 && height > 0) {
-                        continuation.resume(Bitmap.createBitmap(bitmap, left, top, width, height))
+                try {
+                    if (faces.isNotEmpty()) {
+                        val box = faces[0].boundingBox
+                        val left = box.left.coerceAtLeast(0)
+                        val top = box.top.coerceAtLeast(0)
+                        val width = box.width().coerceAtMost(bitmap.width - left).coerceAtLeast(1)
+                        val height = box.height().coerceAtMost(bitmap.height - top).coerceAtLeast(1)
+                        if (width > 0 && height > 0) {
+                            continuation.resume(Bitmap.createBitmap(bitmap, left, top, width, height))
+                        } else {
+                            continuation.resume(null)
+                        }
                     } else {
                         continuation.resume(null)
                     }
-                } else {
+                } catch (e: Exception) {
+                    android.util.Log.e("NativeFaceCropper", "Error in getTightFaceCrop: ${e.message}")
                     continuation.resume(null)
                 }
             }
             .addOnFailureListener {
+                android.util.Log.e("NativeFaceCropper", "Face detection failed in getTightFaceCrop")
                 continuation.resume(null)
             }
     }
@@ -123,46 +129,53 @@ class NativeFaceCropper {
         
         detector.process(image)
             .addOnSuccessListener { faces ->
-                if (faces.isNotEmpty()) {
-                    val face = faces[0]
-                    val box = face.boundingBox
+                try {
+                    if (faces.isNotEmpty()) {
+                        val face = faces[0]
+                        val box = face.boundingBox
 
-                    // 1. IMPROVED ALIGNMENT USING LANDMARKS
-                    val leftEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.LEFT_EYE)
-                    val rightEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.RIGHT_EYE)
-                    
-                    val rotationMatrix = Matrix()
-                    if (leftEye != null && rightEye != null) {
-                        val deltaX = (rightEye.position.x - leftEye.position.x).toDouble()
-                        val deltaY = (rightEye.position.y - leftEye.position.y).toDouble()
-                        val angle = Math.toDegrees(Math.atan2(deltaY, deltaX)).toFloat()
-                        rotationMatrix.postRotate(-angle, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
+                        // 1. IMPROVED ALIGNMENT USING LANDMARKS
+                        val leftEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.LEFT_EYE)
+                        val rightEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.RIGHT_EYE)
+                        
+                        val rotationMatrix = Matrix()
+                        if (leftEye != null && rightEye != null) {
+                            val deltaX = (rightEye.position.x - leftEye.position.x).toDouble()
+                            val deltaY = (rightEye.position.y - leftEye.position.y).toDouble()
+                            val angle = Math.toDegrees(Math.atan2(deltaY, deltaX)).toFloat()
+                            rotationMatrix.postRotate(-angle, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
+                        } else {
+                            // Fallback to Euler angle if landmarks are missing
+                            rotationMatrix.postRotate(-face.headEulerAngleZ, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
+                        }
+
+                        // 2. ADD OPTIMIZED PADDING (25-30% for balance between context and accuracy)
+                        // Too much padding reduces search accuracy; too little loses important context
+                        val paddingFactor = 0.25f
+                        val paddingX = (box.width() * paddingFactor).toInt()
+                        val paddingY = (box.height() * paddingFactor).toInt()
+
+                        val left = (box.left - paddingX).coerceAtLeast(0)
+                        val top = (box.top - paddingY).coerceAtLeast(0)
+                        val width = (box.width() + (paddingX * 2)).coerceAtMost(bitmap.width - left).coerceAtLeast(1)
+                        val height = (box.height() + (paddingY * 2)).coerceAtMost(bitmap.height - top).coerceAtLeast(1)
+
+                        // 3. CROP AND APPLY ALIGNMENT
+                        val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
+                        val aligned = Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, rotationMatrix, true)
+                        cropped.recycle()
+
+                        continuation.resume(aligned)
                     } else {
-                        // Fallback to Euler angle if landmarks are missing
-                        rotationMatrix.postRotate(-face.headEulerAngleZ, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
+                        continuation.resume(bitmap) 
                     }
-
-                    // 2. ADD OPTIMIZED PADDING (25-30% for balance between context and accuracy)
-                    // Too much padding reduces search accuracy; too little loses important context
-                    val paddingFactor = 0.25f
-                    val paddingX = (box.width() * paddingFactor).toInt()
-                    val paddingY = (box.height() * paddingFactor).toInt()
-
-                    val left = (box.left - paddingX).coerceAtLeast(0)
-                    val top = (box.top - paddingY).coerceAtLeast(0)
-                    val width = (box.width() + (paddingX * 2)).coerceAtMost(bitmap.width - left)
-                    val height = (box.height() + (paddingY * 2)).coerceAtMost(bitmap.height - top)
-
-                    // 3. CROP AND APPLY ALIGNMENT
-                    val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
-                    val aligned = Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, rotationMatrix, true)
-
-                    continuation.resume(aligned)
-                } else {
-                    continuation.resume(bitmap) 
+                } catch (e: Exception) {
+                    android.util.Log.e("NativeFaceCropper", "Error in cropAndAlignFace: ${e.message}")
+                    continuation.resume(bitmap)
                 }
             }
             .addOnFailureListener {
+                android.util.Log.e("NativeFaceCropper", "Face detection failed in cropAndAlignFace")
                 continuation.resume(bitmap)
             }
     }
@@ -171,61 +184,75 @@ class NativeFaceCropper {
         val image = InputImage.fromBitmap(bitmap, 0)
         detector.process(image)
             .addOnSuccessListener { faces ->
-                if (faces.isNotEmpty()) {
-                    val face = faces[0]
-                    val box = face.boundingBox
+                try {
+                    if (faces.isNotEmpty()) {
+                        val face = faces[0]
+                        val box = face.boundingBox
 
-                    // BYPASS STRATEGY: 350% wider crop, face off-center
-                    val widthScale = 3.5f
-                    val heightScale = 4.0f
-                    
-                    val pWidth = (box.width() * widthScale).toInt()
-                    val pHeight = (box.height() * heightScale).toInt()
+                        // BYPASS STRATEGY: 350% wider crop, face off-center
+                        val widthScale = 3.5f
+                        val heightScale = 4.0f
+                        
+                        val pWidth = (box.width() * widthScale).toInt().coerceAtLeast(1)
+                        val pHeight = (box.height() * heightScale).toInt().coerceAtLeast(1)
 
-                    val left = (box.centerX() - (pWidth * 0.35f)).toInt().coerceAtLeast(0)
-                    val top = (box.centerY() - (pHeight * 0.4f)).toInt().coerceAtLeast(0)
-                    
-                    val width = pWidth.coerceAtMost(bitmap.width - left)
-                    val height = pHeight.coerceAtMost(bitmap.height - top)
+                        val left = (box.centerX() - (pWidth * 0.35f)).toInt().coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
+                        val top = (box.centerY() - (pHeight * 0.4f)).toInt().coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
+                        
+                        val width = pWidth.coerceAtMost(bitmap.width - left).coerceAtLeast(1)
+                        val height = pHeight.coerceAtMost(bitmap.height - top).coerceAtLeast(1)
 
-                    val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
-                    
-                    // Removed mirroring as it might confuse Yandex's specific profile matching
-                    continuation.resume(cropped)
-                } else {
+                        val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
+                        continuation.resume(cropped)
+                    } else {
+                        continuation.resume(bitmap)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("NativeFaceCropper", "Error in cropContextual: ${e.message}")
                     continuation.resume(bitmap)
                 }
             }
-            .addOnFailureListener { continuation.resume(bitmap) }
+            .addOnFailureListener { 
+                android.util.Log.e("NativeFaceCropper", "Face detection failed in cropContextual")
+                continuation.resume(bitmap) 
+            }
     }
 
     suspend fun cropSocial(bitmap: Bitmap): Bitmap = suspendCancellableCoroutine { continuation ->
         val image = InputImage.fromBitmap(bitmap, 0)
         detector.process(image)
             .addOnSuccessListener { faces ->
-                if (faces.isNotEmpty()) {
-                    val face = faces[0]
-                    val box = face.boundingBox
+                try {
+                    if (faces.isNotEmpty()) {
+                        val face = faces[0]
+                        val box = face.boundingBox
 
-                    // SOCIAL STRATEGY: Wider Contextual Crop (Natural look)
-                    val targetWidth = (box.width() * 3.0f).toInt()
-                    val targetHeight = (targetWidth * 1.1f).toInt()
-                    
-                    val left = (box.centerX() - (targetWidth / 2)).coerceIn(0, (bitmap.width - targetWidth).coerceAtLeast(0))
-                    val top = (box.centerY() - (targetHeight * 0.40f).toInt()).coerceIn(0, (bitmap.height - targetHeight).coerceAtLeast(0))
-                    
-                    val finalWidth = targetWidth.coerceAtMost(bitmap.width - left)
-                    val finalHeight = targetHeight.coerceAtMost(bitmap.height - top)
+                        // SOCIAL STRATEGY: Wider Contextual Crop (Natural look)
+                        val targetWidth = (box.width() * 3.0f).toInt().coerceAtLeast(1)
+                        val targetHeight = (targetWidth * 1.1f).toInt().coerceAtLeast(1)
+                        
+                        val left = (box.centerX() - (targetWidth / 2)).toInt().coerceIn(0, (bitmap.width - targetWidth).coerceAtLeast(0))
+                        val top = (box.centerY() - (targetHeight * 0.40f).toInt()).coerceIn(0, (bitmap.height - targetHeight).coerceAtLeast(0))
+                        
+                        val finalWidth = targetWidth.coerceAtMost(bitmap.width - left).coerceAtLeast(1)
+                        val finalHeight = targetHeight.coerceAtMost(bitmap.height - top).coerceAtLeast(1)
 
-                    val cropped = Bitmap.createBitmap(bitmap, left, top, finalWidth, finalHeight)
-                    
-                    val enhanced = ImageEnhancer.enhance(cropped)
-                    continuation.resume(enhanced)
-                } else {
-                    continuation.resume(ImageEnhancer.enhance(bitmap))
+                        val cropped = Bitmap.createBitmap(bitmap, left, top, finalWidth, finalHeight)
+                        val enhanced = ImageEnhancer.enhance(cropped)
+                        cropped.recycle()
+                        continuation.resume(enhanced)
+                    } else {
+                        continuation.resume(ImageEnhancer.enhance(bitmap))
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("NativeFaceCropper", "Error in cropSocial: ${e.message}")
+                    continuation.resume(bitmap)
                 }
             }
-            .addOnFailureListener { continuation.resume(bitmap) }
+            .addOnFailureListener { 
+                android.util.Log.e("NativeFaceCropper", "Face detection failed in cropSocial")
+                continuation.resume(bitmap) 
+            }
     }
 
     /**
@@ -308,6 +335,66 @@ class NativeFaceCropper {
             .addOnFailureListener { 
                 android.util.Log.e("NativeFaceCropper", "Face detection failed in createHyperProbe")
                 continuation.resume(bitmap) 
+            }
+    }
+
+    /**
+     * SOCIAL MEDIA OPTIMIZED: Crops face with dimensions optimized for social platform profile pictures.
+     * Most social platforms use 1:1 (square) or 4:5 aspect ratios for profile/cover photos.
+     */
+    suspend fun cropForSocialProfile(bitmap: Bitmap): Bitmap = suspendCancellableCoroutine { continuation ->
+        val image = InputImage.fromBitmap(bitmap, 0)
+        detector.process(image)
+            .addOnSuccessListener { faces ->
+                try {
+                    if (faces.isNotEmpty()) {
+                        val face = faces[0]
+                        val box = face.boundingBox
+
+                        // Social media platforms typically show profile pics at 1:1 aspect ratio (square)
+                        // Optimize for this: face centered in a square crop with light padding
+                        val faceSize = box.width().coerceAtLeast(box.height())
+                        val targetSize = (faceSize * 1.4f).toInt().coerceIn(300, 800) // 40% padding, but constrained
+                        
+                        val centerX = box.centerX().toInt()
+                        val centerY = box.centerY().toInt()
+                        
+                        val left = (centerX - (targetSize / 2)).coerceIn(0, (bitmap.width - targetSize).coerceAtLeast(0))
+                        val top = (centerY - (targetSize / 2)).coerceIn(0, (bitmap.height - targetSize).coerceAtLeast(0))
+                        
+                        val finalSize = targetSize.coerceAtMost(bitmap.width - left).coerceAtMost(bitmap.height - top).coerceAtLeast(1)
+                        
+                        val cropped = Bitmap.createBitmap(bitmap, left, top, finalSize, finalSize)
+                        
+                        // Apply eye-level rotation for better profile match
+                        val leftEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.LEFT_EYE)
+                        val rightEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.RIGHT_EYE)
+                        
+                        val aligned = if (leftEye != null && rightEye != null) {
+                            val deltaX = (rightEye.position.x - leftEye.position.x).toDouble()
+                            val deltaY = (rightEye.position.y - leftEye.position.y).toDouble()
+                            val angle = Math.toDegrees(Math.atan2(deltaY, deltaX)).toFloat()
+                            
+                            val rotMatrix = Matrix()
+                            rotMatrix.postRotate(-angle, (finalSize / 2).toFloat(), (finalSize / 2).toFloat())
+                            Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, rotMatrix, true)
+                        } else {
+                            cropped
+                        }
+                        
+                        cropped.recycle()
+                        continuation.resume(aligned)
+                    } else {
+                        continuation.resume(bitmap)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("NativeFaceCropper", "Error in cropForSocialProfile: ${e.message}")
+                    continuation.resume(bitmap)
+                }
+            }
+            .addOnFailureListener {
+                android.util.Log.e("NativeFaceCropper", "Face detection failed in cropForSocialProfile")
+                continuation.resume(bitmap)
             }
     }
 }

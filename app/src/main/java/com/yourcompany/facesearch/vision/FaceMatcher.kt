@@ -26,7 +26,7 @@ object FaceMatcher {
         return best?.takeIf { it.similarity >= MATCH_THRESHOLD }
     }
 
-    private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
+    fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
         require(a.size == b.size) { "Embedding size mismatch: ${a.size} vs ${b.size}" }
         var dot = 0f
         var normA = 0f

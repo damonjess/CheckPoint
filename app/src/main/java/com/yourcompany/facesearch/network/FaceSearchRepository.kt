@@ -26,16 +26,18 @@ class FaceSearchRepository(
             val requestBody = byteArray.toRequestBody("image/jpeg".toMediaTypeOrNull())
             val multipartBody = MultipartBody.Part.createFormData("images", "face_probe.jpg", requestBody)
 
-            val uploadResponse = faceCheckApi.uploadPic(multipartBody, faceCheckApiKey)
+            val bearerToken = if (faceCheckApiKey.startsWith("Bearer ")) faceCheckApiKey else "Bearer $faceCheckApiKey"
+            val uploadResponse = faceCheckApi.uploadPic(multipartBody, bearerToken)
             
             if (!uploadResponse.isSuccessful) {
-                onLog("✗ UPLOAD FAILED: HTTP ${uploadResponse.code()}")
+                val errorMsg = uploadResponse.errorBody()?.string() ?: "Unknown error"
+                onLog("✗ UPLOAD FAILED: HTTP ${uploadResponse.code()} - $errorMsg")
                 return emptyList()
             }
             
             val idSearch = uploadResponse.body()?.idSearch
             if (idSearch == null) {
-                onLog("✗ UPLOAD FAILED: No Search ID returned")
+                onLog("✗ UPLOAD FAILED: No Search ID returned - ${uploadResponse.body()?.error ?: "Check API Key"}")
                 return emptyList()
             }
 
@@ -43,27 +45,28 @@ class FaceSearchRepository(
             onLog("INITIATING ASYNCHRONOUS PROBE...")
 
             var retryCount = 0
-            val maxRetries = 30 // Approx 1 minute with 2s delay
+            val maxRetries = 60 // 2 minutes
             
             while (retryCount < maxRetries) {
                 val searchResponse = faceCheckApi.search(
                     FaceCheckSearchRequest(
                         idSearch = idSearch, 
-                        demo = false // Using live mode
+                        demo = false
                     ),
-                    faceCheckApiKey
+                    bearerToken
                 )
                 
                 if (searchResponse.isSuccessful) {
                     val body = searchResponse.body()
                     val progress = body?.progress ?: 0
-                    val status = body?.status ?: "searching"
+                    val status = body?.message ?: body?.status ?: "searching"
+                    val items = body?.output?.items ?: body?.items
                     
                     onLog("PROBING... $progress% [$status]")
                     
-                    if (body?.items != null && body.items.isNotEmpty()) {
-                        onLog("✓ PROBE COMPLETE. FOUND ${body.items.size} TARGETS")
-                        return body.items.map { match ->
+                    if (items != null && items.isNotEmpty()) {
+                        onLog("✓ PROBE COMPLETE. FOUND ${items.size} TARGETS")
+                        return items.map { match ->
                             SerpVisualMatch(
                                 title = match.site ?: "Social Media Profile",
                                 link = match.url,
@@ -74,7 +77,7 @@ class FaceSearchRepository(
                         }
                     }
                     
-                    if (status.contains("done", ignoreCase = true) || progress >= 100) {
+                    if (progress >= 100 || status.contains("completed", ignoreCase = true)) {
                         break
                     }
                 } else {
@@ -85,7 +88,7 @@ class FaceSearchRepository(
                 retryCount++
             }
             
-            onLog("⚠ PROBE TIMEOUT: No results found in the allotted time.")
+            onLog("⚠ PROBE FINISHED: No results found.")
             return emptyList()
         } catch (e: Exception) {
             onLog("✗ FACECHECK ERROR: ${e.message}")
@@ -201,23 +204,20 @@ class FaceSearchRepository(
         }
 
         // ===== PLATFORM-SPECIFIC TARGETED SEARCHES =====
-        if (cleanHint.isNotEmpty() && allResults.size < 10) {
-            onLog("Engaging platform-specific deep scans...")
+        if (cleanHint.isNotEmpty()) {
+            onLog("Engaging target-specific social probes...")
             val platformSearches = listOf(
-                "instagram.com $cleanHint profile" to "instagram",
-                "tiktok.com @$cleanHint" to "tiktok",
-                "linkedin.com/in/$cleanHint" to "linkedin",
-                "facebook.com $cleanHint" to "facebook",
-                "twitter.com $cleanHint" to "twitter",
-                "snapchat.com $cleanHint" to "snapchat",
-                "reddit.com/u/$cleanHint" to "reddit",
-                "youtube.com $cleanHint channel" to "youtube"
+                "\"$cleanHint\" site:instagram.com" to "instagram",
+                "\"$cleanHint\" site:facebook.com" to "facebook",
+                "\"$cleanHint\" site:linkedin.com" to "linkedin",
+                "\"$cleanHint\" site:twitter.com" to "twitter",
+                "\"$cleanHint\" site:tiktok.com" to "tiktok"
             )
             
             for ((query, platform) in platformSearches) {
                 try {
-                    onLog("Scanning $platform...")
-                    kotlinx.coroutines.delay(500)
+                    onLog("Direct probe: $platform...")
+                    kotlinx.coroutines.delay(400)
                     
                     val response = apiService.searchVisual(
                         engine = "google_lens",
@@ -231,11 +231,18 @@ class FaceSearchRepository(
                         val results = mutableListOf<SerpVisualMatch>()
                         
                         body?.visualMatches?.let { results.addAll(it) }
-                        body?.imageResults?.let { results.addAll(it.map { SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail) }) }
+                        body?.visualSearchResults?.let { results.addAll(it) }
                         
                         if (results.isNotEmpty()) {
-                            allResults.addAll(results)
-                            onLog("✓ Found ${results.size} on $platform")
+                            // Filter these specific results to ENSURE the name is present
+                            val filtered = results.filter { 
+                                it.title?.lowercase()?.contains(cleanHint.split(" ")[0].lowercase()) == true ||
+                                it.link?.lowercase()?.contains(cleanHint.split(" ")[0].lowercase()) == true
+                            }
+                            allResults.addAll(filtered)
+                            if (filtered.isNotEmpty()) {
+                                onLog("✓ Found ${filtered.size} verified leads on $platform")
+                            }
                         }
                     }
                 } catch (e: Exception) {

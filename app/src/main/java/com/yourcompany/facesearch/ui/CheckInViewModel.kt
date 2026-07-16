@@ -12,6 +12,7 @@ import com.yourcompany.facesearch.network.ApifyRepository
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.ImageUploadRepository
 import com.yourcompany.facesearch.network.Secrets
+import com.yourcompany.facesearch.network.SerpVisualMatch
 import com.yourcompany.facesearch.vision.FaceEmbedder
 import com.yourcompany.facesearch.vision.FreeFaceSearchHelper
 import com.yourcompany.facesearch.vision.GemmaAnalyzer
@@ -135,33 +136,25 @@ class CheckInViewModel(
                         }
                     }
                     SearchMode.SOCIAL -> {
-                        logs.add("Social mode: Boosting profile markers...")
+                        logs.add("Social mode: Natural Context Scoping...")
                         withContext(Dispatchers.Default) {
-                            val socialCrop = nativeFaceCropper.cropSocial(bitmap)
-                            val osinted = ImageEnhancer.applyDeepOSINT(socialCrop)
-                            if (socialCrop != bitmap) socialCrop.recycle()
-                            osinted
+                            // Contextual crop helps engines recognize "real person" vibes
+                            nativeFaceCropper.cropSocial(bitmap)
                         }
                     }
                     SearchMode.AGGRESSIVE -> {
-                        logs.add("AGGRESSIVE mode: MAXIMUM BYPASS - All filters removed...")
+                        logs.add("AGGRESSIVE mode: Deep Biometric & Social Probe...")
                         withContext(Dispatchers.Default) {
-                            // Use full image context + maximum enhancement
-                            val fullContext = nativeFaceCropper.cropContextual(bitmap)
-                            val fingerprinted = ImageEnhancer.applyStructuralFingerprint(fullContext)
-                            if (fullContext != bitmap) fullContext.recycle()
-                            fingerprinted
+                            // Using a 1:1 profile crop is actually better for both biometric and social matching
+                            nativeFaceCropper.cropForSocialProfile(bitmap)
                         }
                     }
                     
                     SearchMode.SOCIAL_OPTIMIZED -> {
-                        logs.add("Social Optimized mode: AGGRESSIVE profile matching...")
+                        logs.add("Social Optimized mode: 1:1 Profile Picture Alignment...")
                         withContext(Dispatchers.Default) {
-                            // Maximum context for bypass
-                            val aggressiveCrop = nativeFaceCropper.cropContextual(bitmap)
-                            val enhanced = ImageEnhancer.applyStructuralFingerprint(aggressiveCrop)
-                            if (aggressiveCrop != bitmap) aggressiveCrop.recycle()
-                            enhanced
+                            // Square crop matches standard profile pic aspect ratios
+                            nativeFaceCropper.cropForSocialProfile(bitmap)
                         }
                     }
                     SearchMode.PRECISION -> {
@@ -260,49 +253,45 @@ class CheckInViewModel(
         uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
         val trimmedHint = targetHint.trim()
+        val isAggressive = searchMode == SearchMode.AGGRESSIVE
         
-        val visualMatches = if (searchMode == SearchMode.AGGRESSIVE) {
-            faceSearchRepository.performFaceCheckSearch(
+        val visualMatches = mutableListOf<SerpVisualMatch>()
+
+        if (isAggressive) {
+            logs.add("Priority: Biometric Scan (FaceCheck.ID)...")
+            val faceCheckResults = faceSearchRepository.performFaceCheckSearch(
                 bitmap = capturedBitmap!!,
                 onLog = { logMsg ->
                     logs.add(logMsg)
-                    val newProgress = (uiState as? CheckInUiState.Loading)?.progress?.plus(0.02f)?.coerceAtMost(0.95f) ?: 0.8f
-                    uiState = CheckInUiState.Loading(newProgress, logs.toList())
+                    val currentProgress = (uiState as? CheckInUiState.Loading)?.progress ?: 0.5f
+                    uiState = CheckInUiState.Loading((currentProgress + 0.01f).coerceAtMost(0.95f), logs.toList())
                 }
             )
-        } else {
-            faceSearchRepository.performFaceSearch(
+            visualMatches.addAll(faceCheckResults)
+            
+            if (visualMatches.isEmpty()) {
+                logs.add("Biometric results negative. Falling back to Visual Engines...")
+            }
+        }
+
+        // If not aggressive, or if aggressive failed to find anything, run standard engines
+        if (!isAggressive || visualMatches.isEmpty()) {
+            val standardResults = faceSearchRepository.performFaceSearch(
                 uploadedImageUrl = imageUrl,
                 keywordHint = if (trimmedHint.isNotBlank()) trimmedHint else null,
                 onLog = { logMsg ->
                     logs.add(logMsg)
-                    val newProgress = (uiState as? CheckInUiState.Loading)?.progress?.plus(0.05f)?.coerceAtMost(0.95f) ?: 0.8f
-                    uiState = CheckInUiState.Loading(newProgress, logs.toList())
+                    val currentProgress = (uiState as? CheckInUiState.Loading)?.progress ?: 0.5f
+                    uiState = CheckInUiState.Loading((currentProgress + 0.02f).coerceAtMost(0.95f), logs.toList())
                 }
             )
+            visualMatches.addAll(standardResults)
         }
 
         if (visualMatches.isNotEmpty()) {
-            logs.add("Analysis complete. Targets located.")
+            logs.add("Analysis complete. ${visualMatches.size} targets located.")
             
-            // DEEP SCRAPE BYPASS: If in HYPER mode and we found a high-score social profile, 
-            // scrape it directly to find more photos for verification.
-            if (searchMode == SearchMode.HYPER) {
-                val topSocialMatch = visualMatches.firstOrNull { 
-                    it.score > 3000 && (it.link?.contains("instagram") == true || it.link?.contains("facebook") == true)
-                }
-                if (topSocialMatch != null) {
-                    logs.add("High-Confidence Signal Detected.")
-                    logs.add("Scraping site directly via Apify Bypass...")
-                    val extraPhotos = apifyRepository.deepScrapeProfile(topSocialMatch.link!!) { logs.add(it) }
-                    if (extraPhotos.isNotEmpty()) {
-                        logs.add("Successfully bypassed site wall. ${extraPhotos.size} extra data points found.")
-                    }
-                }
-            }
-
-            uiState = CheckInUiState.Loading(1.0f, logs.toList())
-
+            // Map matches first to handle sorting later
             val mappedMatches = visualMatches.map { result ->
                 WebMatchDisplay(
                     name = result.title ?: "Matched Profile",
@@ -311,18 +300,46 @@ class CheckInViewModel(
                     score = result.score,
                     imageUrl = result.thumbnail
                 )
-            }.sortedByDescending { it.score }
+            }.toMutableList()
+
+            // DEEP SCRAPE BYPASS: If in HYPER or AGGRESSIVE mode, scrape top profiles
+            if (searchMode == SearchMode.HYPER || searchMode == SearchMode.AGGRESSIVE) {
+                // Try to scrape the top 2 social matches
+                val socialIndices = mappedMatches.mapIndexedNotNull { index, match ->
+                    if (match.profileUrl.contains("instagram") || 
+                        match.profileUrl.contains("facebook") ||
+                        match.profileUrl.contains("linkedin") ||
+                        match.profileUrl.contains("tiktok")) index else null
+                }.take(3)
+
+                if (socialIndices.isNotEmpty()) {
+                    logs.add("Social Targets Identified. Engaging Scraper Bypass...")
+                    socialIndices.forEach { index ->
+                        val match = mappedMatches[index]
+                        logs.add("Scraping ${match.source} directly...")
+                        val extraPhotos = apifyRepository.deepScrapeProfile(match.profileUrl) { logs.add(it) }
+                        if (extraPhotos.isNotEmpty()) {
+                            logs.add("✓ Harvested ${extraPhotos.size} extra photos from ${match.source}.")
+                            mappedMatches[index] = match.copy(extraImages = extraPhotos)
+                        }
+                    }
+                }
+            }
+
+            uiState = CheckInUiState.Loading(1.0f, logs.toList())
+
+            val finalMatches = mappedMatches.sortedByDescending { it.score }
 
             var gemmaSummary: String? = null
-            if (searchMode == SearchMode.HYPER) {
+            if (searchMode == SearchMode.HYPER || searchMode == SearchMode.AGGRESSIVE) {
                 logs.add("Engaging Gemma-3 LLM for Deep Signal Analysis...")
                 uiState = CheckInUiState.Loading(0.95f, logs.toList())
-                val leadTexts = mappedMatches.take(5).map { "${it.name} (${it.source}): ${it.profileUrl}" }
+                val leadTexts = finalMatches.take(8).map { "${it.name} (${it.source}): ${it.profileUrl}" }
                 gemmaSummary = gemmaAnalyzer.analyzeSearchLeads(targetHint, leadTexts)
                 logs.add("Gemma Analysis Complete.")
             }
 
-            uiState = CheckInUiState.Success(matches = mappedMatches, gemmaAnalysis = gemmaSummary)
+            uiState = CheckInUiState.Success(matches = finalMatches, gemmaAnalysis = gemmaSummary)
         } else {
             uiState = CheckInUiState.NoMatch(logs.toList())
         }

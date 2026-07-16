@@ -188,9 +188,15 @@ object SocialMediaDetector {
             }
         }
         
+        // If a name hint is provided, but the title/link doesn't contain any part of it,
+        // it's almost certainly NOT the person the user is looking for.
+        if (targetWords.isNotEmpty() && matchCount == 0) {
+            return -5000 // Heavy penalty for name mismatch
+        }
+        
         return when {
-            matchCount == targetWords.size -> 2000 // Full name match
-            matchCount > 0 -> 800 + (matchCount * 300) // Partial match
+            matchCount == targetWords.size -> 5000 // Huge boost for full name match
+            matchCount > 0 -> 2000 + (matchCount * 500) // Partial match boost
             else -> 0
         }
     }

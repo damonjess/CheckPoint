@@ -660,6 +660,27 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
                 
                 Spacer(modifier = Modifier.height(4.dp))
                 
+                if (match.extraImages.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        match.extraImages.take(5).forEach { extraUrl ->
+                            AsyncImage(
+                                model = extraUrl,
+                                contentDescription = "Extra photo",
+                                modifier = Modifier
+                                    .size(60.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                }
+
                 Surface(
                     color = when {
                         match.source.contains("facebook", ignoreCase = true) -> Color(0xFF1877F2).copy(alpha = 0.1f)

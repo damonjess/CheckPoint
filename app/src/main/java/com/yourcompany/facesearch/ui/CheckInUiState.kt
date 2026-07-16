@@ -23,5 +23,6 @@ data class WebMatchDisplay(
     val source: String,
     val profileUrl: String,
     val score: Int,
-    val imageUrl: Any? = null
+    val imageUrl: Any? = null,
+    val extraImages: List<String> = emptyList()
 )

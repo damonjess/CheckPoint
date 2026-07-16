@@ -46,8 +46,18 @@ class ApifyRepository(
                             val items = itemsResponse.body()
                             if (!items.isNullOrEmpty()) {
                                 onLog("Data harvested from profile.")
-                                // Extract images/bio found directly on the page
-                                return items.flatMap { it["profilePicUrl"]?.toString()?.let { listOf(it) } ?: emptyList() }
+                                // Extract multiple images (Profile pic + recent posts)
+                                val images = mutableListOf<String>()
+                                items.forEach { item ->
+                                    item["profilePicUrl"]?.toString()?.let { images.add(it) }
+                                    item["displayUrl"]?.toString()?.let { images.add(it) } // Instagram post
+                                    
+                                    // Handle nested list of images in some scrapers
+                                    (item["latestPosts"] as? List<Map<String, Any>>)?.forEach { post ->
+                                        post["displayUrl"]?.toString()?.let { images.add(it) }
+                                    }
+                                }
+                                return images.distinct()
                             }
                         }
                     }

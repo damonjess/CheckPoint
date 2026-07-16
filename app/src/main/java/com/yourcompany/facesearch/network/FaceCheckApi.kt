@@ -35,18 +35,29 @@ data class FaceCheckSearchRequest(
     @SerializedName("status_only")
     val statusOnly: Boolean = false,
     @SerializedName("demo")
-    val demo: Boolean = false
+    val demo: Boolean = false,
+    @SerializedName("id_captcha")
+    val idCaptcha: String? = null
 )
 
 data class FaceCheckSearchResponse(
+    @SerializedName("output")
+    val output: FaceCheckOutput? = null,
     @SerializedName("items")
     val items: List<FaceCheckMatch>? = null,
     @SerializedName("progress")
     val progress: Int? = null,
     @SerializedName("error")
     val error: String? = null,
+    @SerializedName("message")
+    val message: String? = null,
     @SerializedName("status")
     val status: String? = null
+)
+
+data class FaceCheckOutput(
+    @SerializedName("items")
+    val items: List<FaceCheckMatch>? = null
 )
 
 data class FaceCheckMatch(

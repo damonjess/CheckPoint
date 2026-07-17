@@ -18,6 +18,7 @@ coroutines = "1.9.0"
 mlkitFaceDetection = "16.1.7"
 coil = "3.0.4"
 playServicesTflite = "16.5.0"
+jsoup = "1.17.2"
 
 
 [libraries]
@@ -56,6 +57,7 @@ coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp"
 play-services-tflite-java = { group = "com.google.android.gms", name = "play-services-tflite-java", version.ref = "playServicesTflite" }
 play-services-tflite-support = { group = "com.google.android.gms", name = "play-services-tflite-support", version.ref = "playServicesTflite" }
 tensorflow_lite = { group = "org.tensorflow", name = "tensorflow-lite", version = "2.16.1" }
+jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 
 
 [plugins]

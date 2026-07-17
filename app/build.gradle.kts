@@ -134,6 +134,9 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
 
+    // HTML Parsing
+    implementation(libs.jsoup)
+
     // Ktor Server (embedded)
     implementation("io.ktor:ktor-server-core:2.3.12")
     implementation("io.ktor:ktor-server-netty:2.3.12")

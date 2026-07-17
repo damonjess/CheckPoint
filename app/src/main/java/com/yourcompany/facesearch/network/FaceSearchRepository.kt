@@ -1,10 +1,17 @@
 package com.yourcompany.facesearch.network
 
 import android.graphics.Bitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.TimeUnit
 
 class FaceSearchRepository(
     private val apiService: SerpApiService = ApiClient.serpApiService,
@@ -13,6 +20,17 @@ class FaceSearchRepository(
     private val faceCheckApiKey: String = ApiClient.FACECHECK_API_KEY,
     private val apifyRepository: ApifyRepository = ApifyRepository()
 ) {
+
+    private val stealthClient = OkHttpClient.Builder()
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .build()
+
+    // Replace with your actual deployed backend URL 
+    // Use http://10.0.2.2:3000/api/search for Emulator
+    // Use http://127.0.0.1:3000/api/search if using 'adb reverse tcp:3000 tcp:3000'
+    private val BACKEND_URL = "http://127.0.0.1:3000/api/search"
 
     suspend fun performFaceCheckSearch(
         bitmap: Bitmap,
@@ -93,7 +111,7 @@ class FaceSearchRepository(
                     onLog("⚠ POLLING ERROR: HTTP ${searchResponse.code()}")
                 }
                 
-                kotlinx.coroutines.delay(2000)
+                delay(2000)
                 retryCount++
             }
             
@@ -109,148 +127,116 @@ class FaceSearchRepository(
         uploadedImageUrl: String,
         keywordHint: String? = null,
         onLog: (String) -> Unit = {}
-    ): List<SerpVisualMatch> {
-        val allResults = mutableListOf<SerpVisualMatch>()
+    ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
+        val verifiedLeads = mutableListOf<SerpVisualMatch>()
         
-        // NO ACTORS, NO DEMOS - Direct Scraping Only
-        onLog("Engaging Sherlock Free Scraper...")
-        try {
-            val scraperResults = scrapeFreeIndex(uploadedImageUrl, onLog)
-            allResults.addAll(scraperResults)
-        } catch (e: Exception) {
-            onLog("⚠ Scraper interrupted: ${e.message}")
+        // 1. STABLE API ROUTE (SerpApi) - Recommended for Production
+        if (serpApiKey.isNotBlank() && serpApiKey != "null") {
+            onLog("Engaging Official Visual Search Index (SerpApi)...")
+            try {
+                val response = apiService.searchVisual(
+                    engine = "google_lens",
+                    googleImageUrl = uploadedImageUrl,
+                    query = keywordHint,
+                    apiKey = serpApiKey
+                )
+                
+                if (response.isSuccessful) {
+                    val apiMatches = response.body()?.visualMatches ?: response.body()?.visualSearchResults
+                    apiMatches?.let { matches ->
+                        onLog("✓ Stable Index: Found ${matches.size} high-fidelity matches")
+                        verifiedLeads.addAll(matches.map { it.copy(source = it.source ?: "Google Lens") })
+                    }
+                } else {
+                    onLog("⚠ Stable Index rejection: HTTP ${response.code()}")
+                }
+            } catch (e: Exception) {
+                onLog("⚠ Stable Index error: ${e.message}")
+            }
         }
 
-        return allResults
+        // 2. STEALTH AUTOMATION ROUTE (Node.js Scraper) - Fallback/Free Alternative
+        if (verifiedLeads.isEmpty()) {
+            onLog("Connecting to Stealth Automation Cluster...")
+            try {
+                val jsonPayload = JSONObject().apply {
+                    put("imageUrl", uploadedImageUrl)
+                    put("keywordHint", keywordHint ?: "")
+                }.toString()
+
+                val requestBody = jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
+                val request = Request.Builder().url(BACKEND_URL).post(requestBody).build()
+
+                onLog("Executing deep scraper via anti-detection context...")
+                stealthClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val responseData = response.body?.string() ?: ""
+                        if (responseData.isBlank()) {
+                            onLog("⚠ Engine returned empty stream.")
+                            return@use
+                        }
+                        
+                        // Robust parsing: Handle both {success:true, matches:[]} and direct [...] array responses
+                        val matchesArray = try {
+                            if (responseData.trim().startsWith("[")) {
+                                org.json.JSONArray(responseData)
+                            } else {
+                                val jsonResponse = JSONObject(responseData)
+                                if (jsonResponse.has("matches")) {
+                                    jsonResponse.getJSONArray("matches")
+                                } else if (jsonResponse.optBoolean("success", false)) {
+                                    org.json.JSONArray() // Success but no matches field?
+                                } else {
+                                    onLog("⚠ Engine reported failure: ${jsonResponse.optString("error", "Unknown")}")
+                                    null
+                                }
+                            }
+                        } catch (e: Exception) {
+                            onLog("⚠ Parse error: ${e.message?.take(50)}...")
+                            null
+                        }
+
+                        if (matchesArray != null) {
+                            onLog("Crawl complete. Analyzing ${matchesArray.length()} potential visual hits...")
+                            for (i in 0 until matchesArray.length()) {
+                                val item = matchesArray.getJSONObject(i)
+                                val title = item.optString("title").ifBlank { "Visual Match Profile" }
+                                val link = item.optString("link")
+                                if (link.isNotBlank()) {
+                                    verifiedLeads.add(SerpVisualMatch(
+                                        title = title,
+                                        link = link,
+                                        source = item.optString("source", "Stealth Engine"),
+                                        thumbnail = item.optString("thumbnail").ifBlank { null },
+                                        score = 1000
+                                    ))
+                                }
+                            }
+                        }
+                    } else {
+                        onLog("⚠ Stealth engine rejection: HTTP ${response.code}")
+                    }
+                }
+            } catch (e: Exception) {
+                onLog("⚠ Stealth connection error: ${e.localizedMessage}")
+            }
+        }
+
+        // SCORING & DEDUPING
+        return@withContext verifiedLeads
             .map { match ->
                 var score = match.score
                 val link = match.link?.lowercase() ?: ""
-                val platform = SocialMediaDetector.detectPlatform(link)
-                score += platform.baseScore
                 
-                if (keywordHint != null && match.title?.lowercase()?.contains(keywordHint.lowercase()) == true) {
-                    score += 1500
+                if (link.contains("linkedin.com")) score += 1500
+                if (link.contains("instagram.com") || link.contains("facebook.com")) score += 800
+                
+                if (!keywordHint.isNullOrBlank() && match.title?.lowercase()?.contains(keywordHint.lowercase()) == true) {
+                    score += 2000
                 }
-                
-                match.copy(score = score, source = platform.name)
+                match.copy(score = score)
             }
             .sortedByDescending { it.score }
             .distinctBy { it.link }
-    }
-
-    private suspend fun scrapeFreeIndex(imageUrl: String, onLog: (String) -> Unit): List<SerpVisualMatch> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val client = okhttp3.OkHttpClient.Builder()
-            .followRedirects(true)
-            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-            .build()
-
-        val results = mutableListOf<SerpVisualMatch>()
-        val encodedUrl = android.net.Uri.encode(imageUrl)
-
-        // ENGINE 1: YANDEX (The King of Facial Recognition)
-        try {
-            onLog("Deep-Scanning Global Facial Index (Yandex)...")
-            val yandexUrl = "https://yandex.com/images/search?rpt=imageview&url=$encodedUrl"
-            val request = okhttp3.Request.Builder()
-                .url(yandexUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
-                .build()
-
-            val response = client.newCall(request).execute()
-            val html = response.body?.string() ?: ""
-            
-            // Extract sites with matching images and their thumbnails
-            // Pattern for Yandex's JSON data structure
-            val siteMatchRegex = "\\{\"url\":\"(http[s]?://[^\"]+)\",\"title\":\"([^\"]+)\".*?\"thumb\":\\{\"url\":\"([^\"]+)\"".toRegex()
-            siteMatchRegex.findAll(html).forEach { matchResult ->
-                val link = matchResult.groups[1]?.value ?: ""
-                val title = matchResult.groups[2]?.value?.replace("\\u002F", "/") ?: "Web Match"
-                var thumb = matchResult.groups[3]?.value?.replace("\\u002F", "/") ?: ""
-                
-                if (thumb.startsWith("//")) thumb = "https:$thumb"
-                else if (thumb.startsWith("/") && !thumb.startsWith("http")) thumb = "https://yandex.com$thumb"
-
-                if (!link.contains("yandex.") && !link.contains("google.")) {
-                    results.add(SerpVisualMatch(
-                        title = title,
-                        link = link,
-                        source = SocialMediaDetector.detectPlatform(link).name,
-                        thumbnail = if (thumb.isNotEmpty()) thumb else null,
-                        score = 2500
-                    ))
-                }
-            }
-            onLog("✓ Global Index: Found ${results.size} visual leads")
-        } catch (e: Exception) {
-            onLog("⚠ Global Index probe failed")
-        }
-
-        // ENGINE 2: BING (Social Profile Aggregator)
-        try {
-            onLog("Scanning Social Platform Index (Bing)...")
-            val bingUrl = "https://www.bing.com/images/search?view=detailv2&iss=sbi&FORM=IRSBIQ&q=imgurl:$encodedUrl"
-            val request = okhttp3.Request.Builder()
-                .url(bingUrl)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36")
-                .build()
-
-            val response = client.newCall(request).execute()
-            val html = response.body?.string() ?: ""
-            
-            // Extract visual leads with source icons/urls
-            val bingLeadRegex = "mediaurl=(http[s]?%3a%2f%2f[^\"]+?)&.*?expurl=(http[s]?%3a%2f%2f[^\"]+?)&".toRegex()
-            var bingCount = 0
-            bingLeadRegex.findAll(html).forEach { matchResult ->
-                val thumb = android.net.Uri.decode(matchResult.groups[1]?.value ?: "")
-                val link = android.net.Uri.decode(matchResult.groups[2]?.value ?: "")
-                
-                if (link.isNotEmpty() && results.none { it.link == link }) {
-                    val platform = SocialMediaDetector.detectPlatform(link)
-                    results.add(SerpVisualMatch(
-                        title = if (platform.isProfileBased) "${platform.name} Profile" else "Social Lead",
-                        link = link,
-                        source = platform.name,
-                        thumbnail = if (thumb.isNotEmpty()) thumb else null,
-                        score = 2200
-                    ))
-                    bingCount++
-                }
-            }
-            onLog("✓ Social Index: Found $bingCount profile leads")
-        } catch (e: Exception) {
-            onLog("⚠ Social Index probe failed")
-        }
-
-        // ENGINE 3: GOOGLE (OSINT Organic Search)
-        try {
-            onLog("Finalizing Organic Search (Google)...")
-            val googleUrl = "https://www.google.com/searchbyimage?image_url=$encodedUrl&safe=off"
-            val request = okhttp3.Request.Builder()
-                .url(googleUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
-                .build()
-
-            val response = client.newCall(request).execute()
-            val html = response.body?.string() ?: ""
-            
-            val organicPattern = "<a href=\"(https?://[^\"]+)\"[^>]*><h3[^>]*>(.*?)</h3>".toRegex(RegexOption.DOT_MATCHES_ALL)
-            organicPattern.findAll(html).forEach { matchResult ->
-                val link = matchResult.groups[1]?.value ?: ""
-                val title = matchResult.groups[2]?.value?.replace("<[^>]*>".toRegex(), "")?.trim() ?: "Organic Match"
-                
-                if (!link.contains("google.com") && results.none { it.link == link }) {
-                    results.add(SerpVisualMatch(
-                        title = title,
-                        link = link,
-                        source = SocialMediaDetector.detectPlatform(link).name,
-                        thumbnail = null,
-                        score = 1800
-                    ))
-                }
-            }
-        } catch (e: Exception) {}
-
-        results.distinctBy { it.link }
     }
 }

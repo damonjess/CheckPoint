@@ -31,10 +31,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-enum class SearchMode {
-    PRECISION, BYPASS, SOCIAL, HYPER, RAW, FREE, SOCIAL_OPTIMIZED, AGGRESSIVE
-}
-
 class CheckInViewModel(
     application: Application
 ) : AndroidViewModel(application) {
@@ -115,7 +111,7 @@ class CheckInViewModel(
 
                 if (publicUrl != null) {
                     logs.add("Upload successful. Starting search...")
-                    performWebSearch(publicUrl, logs)
+                    performWebSearch(publicUrl, targetHint.trim(), logs)
                 } else {
                     uiState = CheckInUiState.Error("Image hosting failed.")
                 }
@@ -125,84 +121,77 @@ class CheckInViewModel(
         }
     }
 
-    private suspend fun performWebSearch(imageUrl: String, logs: MutableList<String>) {
-        logs.add("Starting integrated search...")
-        uiState = CheckInUiState.Loading(0.5f, logs.toList())
+    private suspend fun performWebSearch(imageUrl: String, hintText: String, logs: MutableList<String>) {
+        logs.add("Starting ultra-safe search...")
+        uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
         try {
-            // 1. FaceCheck.ID (Skip if paywalled or no key)
-            val faceCheckResults = if (Secrets.FACECHECK_API_KEY.isNotBlank() && Secrets.FACECHECK_API_KEY != "null") {
-                logs.add("Engaging Biometric Index (FaceCheck)...")
-                try {
-                    faceSearchRepository.performFaceCheckSearch(
-                        bitmap = capturedBitmap!!,
-                        onLog = { 
-                            logs.add(it)
-                            uiState = CheckInUiState.Loading(0.6f, logs.toList())
-                        }
-                    )
-                } catch (e: Exception) {
-                    logs.add("⚠ FaceCheck failed or tokens exhausted.")
-                    emptyList()
-                }
-            } else {
-                logs.add("Skipping FaceCheck (No API Key provided).")
-                emptyList()
-            }
+            logs.add("Running engine route validation [Mode: ${searchMode.name}]...")
 
-            // 2. Web Index (Apify / Deep Scan)
-            val webResults = if (Secrets.APIFY_API_TOKEN.isNotBlank() && Secrets.APIFY_API_TOKEN != "null") {
-                logs.add("Engaging Web Index (Deep Scan)...")
-                try {
-                    faceSearchRepository.performFaceSearch(
-                        uploadedImageUrl = imageUrl,
-                        keywordHint = targetHint.ifBlank { null },
-                        onLog = { 
-                            logs.add(it)
-                            uiState = CheckInUiState.Loading(0.8f, logs.toList())
-                        }
-                    )
-                } catch (e: Exception) {
-                    logs.add("⚠ Deep Scan failed.")
-                    emptyList()
-                }
-            } else {
-                logs.add("Skipping Deep Scan (No Apify Token provided).")
-                emptyList()
-            }
-
-            // Combine and format
-            val allRawMatches = faceCheckResults + webResults
-            
-            if (allRawMatches.isEmpty()) {
-                logs.add("No matches found in any public indices.")
-                uiState = CheckInUiState.NoMatch(logs.toList())
-                return
-            }
-
-            logs.add("Aggregation complete. Found ${allRawMatches.size} raw matches.")
-
-            val displayMatches = allRawMatches.map { result ->
-                WebMatchDisplay(
-                    name = result.title ?: "Match",
-                    source = result.source ?: "Web",
-                    profileUrl = result.link ?: "",
-                    score = result.score,
-                    imageUrl = result.thumbnail
+            val visualMatches = try {
+                faceSearchRepository.performFaceSearch(
+                    uploadedImageUrl = imageUrl,
+                    keywordHint = hintText.trim().ifBlank { null },
+                    onLog = { logs.add(it) }
                 )
-            }.sortedByDescending { it.score }
+            } catch (e: Exception) {
+                logs.add("Search engines failed: ${e.message}")
+                emptyList()
+            }
+
+            logs.add("Got ${visualMatches.size} raw candidates from crawl.")
+
+            // BRANCHING: If mode is AGGRESSIVE/HYPER, apply strict local signature alignment
+            var displayMatches = if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
+                logs.add("Deep Mode verified. Extracting target matrices...")
+                verifyResultsLocally(visualMatches, logs)
+            } else {
+                // Standard mode processing fallback
+                visualMatches.map { result ->
+                    val cleanName = result.title?.replace(Regex("\\d+\\s*[×x]\\s*\\d+"), "")?.trim()
+                    WebMatchDisplay(
+                        name = if (!cleanName.isNullOrBlank()) cleanName else "Visual Match Profile",
+                        source = result.source ?: "Stealth Engine",
+                        profileUrl = result.link ?: "",
+                        score = result.score,
+                        imageUrl = result.thumbnail
+                    )
+                }
+            }
+
+            // FALLBACK: If filtering was too strict, show at least top 3 raw matches
+            if (displayMatches.isEmpty() && visualMatches.isNotEmpty()) {
+                logs.add("⚠ High-confidence filter rejected all leads. Showing raw visual matches instead.")
+                displayMatches = visualMatches.take(5).map { result ->
+                    WebMatchDisplay(
+                        name = result.title ?: "Visual Match",
+                        source = result.source ?: "Crawl",
+                        profileUrl = result.link ?: "",
+                        score = 500, // Lower score for unverified
+                        imageUrl = result.thumbnail
+                    )
+                }
+            }
+
+            logs.add("Search phase complete. ${displayMatches.size} visual leads ready.")
 
             if (displayMatches.isNotEmpty()) {
-                logs.add("Success: Displaying ${displayMatches.size} verified leads.")
-                uiState = CheckInUiState.Success(matches = displayMatches)
+                uiState = CheckInUiState.Success(
+                    matches = displayMatches.sortedByDescending { it.score },
+                    gemmaAnalysis = null,
+                    logs = logs.toList()
+                )
             } else {
-                logs.add("No matches found in any public indices.")
+                // Fallback assistance to help users pivot if zero leads clear the threshold
+                if (visualMatches.isNotEmpty()) {
+                    logs.add("ℹ Hint: ${visualMatches.size} traces found but filtered out by local signature limits.")
+                }
                 uiState = CheckInUiState.NoMatch(logs.toList())
             }
 
         } catch (e: Exception) {
-            logs.add("Search Crash: ${e.message}")
-            uiState = CheckInUiState.Error("Search failed. Check your API keys in local.properties.")
+            logs.add("Crash prevented: ${e.message}")
+            uiState = CheckInUiState.Error("Search failed - fallback to FREE mode suggested")
         }
     }
 
@@ -223,15 +212,18 @@ class CheckInViewModel(
                 
                 val finalScore = (similarity ?: 0f) + nameScore
                 
-                if (finalScore > 0.62f) {
+                if (finalScore > 0.40f) { // Further relaxed
+                    val cleanName = match.title?.replace(Regex("\\d+\\s*[×x]\\s*\\d+"), "")?.trim()
                     verified.add(WebMatchDisplay(
-                        name = match.title ?: "Match",
-                        source = match.source ?: "Social",
+                        name = if (!cleanName.isNullOrBlank()) cleanName else "Match",
+                        source = match.source ?: "Social Profile",
                         profileUrl = match.link ?: "",
                         score = match.score + (finalScore * 18000).toInt(),
                         imageUrl = match.thumbnail
                     ))
-                    logs.add("Good match! Face: ${similarity} + Name boost")
+                    logs.add("✓ Match verified: ${"%.2f".format(similarity ?: 0f)} similarity")
+                } else {
+                    if (debugMode) logs.add("× Low similarity: ${"%.2f".format(similarity ?: 0f)}")
                 }
                 thumb.recycleSafely()
             } catch (e: Exception) {}

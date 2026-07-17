@@ -383,6 +383,47 @@ fun CheckInScreen(
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
                             }
+
+                            // --- SCAN DIAGNOSTICS SECTION ---
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Text(
+                                "SCAN DIAGNOSTICS & LOGS",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = Amber
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                                modifier = Modifier.fillMaxWidth().height(150.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.2f))
+                            ) {
+                                val logScroll = rememberScrollState()
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    Column(modifier = Modifier.padding(10.dp).verticalScroll(logScroll)) {
+                                        uiState.logs.forEach { log ->
+                                            Text(
+                                                text = "> $log", 
+                                                color = Amber.copy(alpha = 0.8f), 
+                                                fontSize = 10.sp, 
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+                                    // Copy button for the success console too
+                                    IconButton(
+                                        onClick = {
+                                            val logText = uiState.logs.joinToString("\n")
+                                            clipboardManager.setText(AnnotatedString(logText))
+                                        },
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = Amber.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(32.dp))
                         }
                     }
 

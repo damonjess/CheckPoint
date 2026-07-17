@@ -59,6 +59,7 @@ class FaceVerifier(context: Context) {
 
     fun close() {
         faceEmbedder.close()
+        faceCropper.release()
     }
 }
 

@@ -132,6 +132,7 @@ dependencies {
 
     // Image Loading
     implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 
     // Ktor Server (embedded)
     implementation("io.ktor:ktor-server-core:2.3.12")

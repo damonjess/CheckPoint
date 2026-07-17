@@ -7,6 +7,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import coil3.ImageLoader
+import coil3.request.ImageRequest
+import coil3.imageLoader
+import coil3.toBitmap
+import coil3.request.allowHardware
 import com.yourcompany.facesearch.network.ApiClient
 import com.yourcompany.facesearch.network.ApifyRepository
 import com.yourcompany.facesearch.network.FaceSearchRepository
@@ -14,6 +19,7 @@ import com.yourcompany.facesearch.network.ImageUploadRepository
 import com.yourcompany.facesearch.network.Secrets
 import com.yourcompany.facesearch.network.SerpVisualMatch
 import com.yourcompany.facesearch.vision.FaceEmbedder
+import com.yourcompany.facesearch.vision.FaceVerifier
 import com.yourcompany.facesearch.vision.FreeFaceSearchHelper
 import com.yourcompany.facesearch.vision.GemmaAnalyzer
 import com.yourcompany.facesearch.vision.ImageEnhancer
@@ -22,16 +28,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class SearchMode {
-    PRECISION,  // Tight face crop
-    BYPASS,     // Yandex Engine + Camouflage Filter (Deep OSINT)
-    SOCIAL,     // Square crop, High Contrast, Social Priority
-    HYPER,      // ULTIMATE: Combined Biometric + OSINT Cross-Correlation (Screenshot Tools)
-    RAW,        // Full image
-    FREE,       // Multi-Engine Web Browser Search (No API Cost)
-    SOCIAL_OPTIMIZED,  // Optimized for finding you on social media (1:1 profile crop)
-    AGGRESSIVE  // NEW: FaceCheck.ID Biometric Scan (Bypasses Search Engines)
+    PRECISION, BYPASS, SOCIAL, HYPER, RAW, FREE, SOCIAL_OPTIMIZED, AGGRESSIVE
 }
 
 class CheckInViewModel(
@@ -43,6 +43,7 @@ class CheckInViewModel(
     private val imageUploadRepository = ImageUploadRepository()
     private val apifyRepository = ApifyRepository()
     private val faceEmbedder = FaceEmbedder(application)
+    private val faceVerifier = FaceVerifier(application)
     private val freeSearch = FreeFaceSearchHelper(application, nativeFaceCropper)
     private val gemmaAnalyzer = GemmaAnalyzer(application)
 
@@ -59,33 +60,9 @@ class CheckInViewModel(
     }
 
     var searchMode by mutableStateOf(SearchMode.PRECISION)
-
     var debugMode by mutableStateOf(false)
     
     private var sourceEmbedding: FloatArray? = null
-
-    // For Fragment-based navigation support
-    fun startCamera() {
-        // Logic to trigger camera in Activity/Fragment
-    }
-
-    fun openGallery() {
-        // Logic to trigger gallery in Activity/Fragment
-    }
-
-    fun onImageReady(bitmap: Bitmap, nameHint: String?) {
-        targetHint = nameHint?.trim() ?: ""
-        when (searchMode) {
-            SearchMode.FREE -> {
-                viewModelScope.launch {
-                    freeSearch.searchMyPhoto(bitmap, nameHint)
-                }
-            }
-            else -> {
-                onPhotoCaptured(bitmap)
-            }
-        }
-    }
 
     fun onPhotoCaptured(bitmap: Bitmap) {
         capturedBitmap = bitmap
@@ -94,15 +71,13 @@ class CheckInViewModel(
             val logs = mutableListOf("Initializing local optics...")
             uiState = CheckInUiState.Loading(0.1f, logs.toList())
             
-            // Log memory state
             val maxMemory = Runtime.getRuntime().maxMemory() / 1024 / 1024
             val totalMemory = Runtime.getRuntime().totalMemory() / 1024 / 1024
             logs.add("System: Memory $totalMemory MB / $maxMemory MB")
             uiState = CheckInUiState.Loading(0.15f, logs.toList())
             
-            // Step 1: Quality Gate
             if (searchMode != SearchMode.RAW) {
-                logs.add("Running Quality Gate analysis...")
+                logs.add("Running Quality Gate...")
                 val quality = nativeFaceCropper.validateFaceQuality(bitmap)
                 if (!quality.isGood) {
                     uiState = CheckInUiState.Error(quality.message)
@@ -110,216 +85,122 @@ class CheckInViewModel(
                 }
             }
 
-            // Step 2: Local face detection / Optimization
             try {
                 val processedBitmap = when (searchMode) {
-                    SearchMode.RAW -> {
-                        logs.add("Raw mode: Using full image...")
-                        bitmap
+                    SearchMode.HYPER, SearchMode.AGGRESSIVE -> {
+                        val base = nativeFaceCropper.cropForSocialProfile(bitmap)
+                        // Make it more unique for better discrimination
+                        ImageEnhancer.applyStructuralFingerprint(base)
                     }
-                    SearchMode.BYPASS, SearchMode.HYPER, SearchMode.AGGRESSIVE -> {
-                        logs.add("Creating multiple bypass probes...")
-                        val probes = nativeFaceCropper.createUltraBypassProbe(bitmap)
-                        // Use the first/best one for upload, or test multiple later
-                        probes.firstOrNull() ?: bitmap
+                    SearchMode.BYPASS -> withContext(Dispatchers.Default) {
+                        ImageEnhancer.applyCamouflage(nativeFaceCropper.cropContextual(bitmap))
                     }
-                    SearchMode.SOCIAL -> {
-                        logs.add("Social mode: Natural Context Scoping...")
-                        withContext(Dispatchers.Default) {
-                            // Contextual crop helps engines recognize "real person" vibes
-                            nativeFaceCropper.cropSocial(bitmap)
-                        }
-                    }
-                    
-                    SearchMode.SOCIAL_OPTIMIZED -> {
-                        logs.add("Social Optimized mode: 1:1 Profile Picture Alignment...")
-                        withContext(Dispatchers.Default) {
-                            // Square crop matches standard profile pic aspect ratios
-                            nativeFaceCropper.cropForSocialProfile(bitmap)
-                        }
-                    }
-                    SearchMode.PRECISION -> {
-                        logs.add("Precision mode: Tight face alignment...")
-                        withContext(Dispatchers.Default) {
-                            nativeFaceCropper.cropAndAlignFace(bitmap)
-                        }
-                    }
-                    SearchMode.FREE -> {
-                        logs.add("Free mode: Optimizing for web search...")
-                        withContext(Dispatchers.Default) {
-                            nativeFaceCropper.cropAndAlignFace(bitmap)
-                        }
-                    }
-                }
-                
-                if (searchMode == SearchMode.FREE) {
-                    logs.add("Maximum search probing - skipping local verification...")
-                    
-                    var finalBitmap = processedBitmap
-                    var shouldRecycleProcessed = false
-                    
-                    if (Runtime.getRuntime().maxMemory() - Runtime.getRuntime().totalMemory() < 150 * 1024 * 1024) {
-                        logs.add("Low memory detected - using lower resolution crop.")
-                        val targetSize = 600
-                        if (finalBitmap.width > targetSize) {
-                            val scale = targetSize.toFloat() / finalBitmap.width
-                            val scaledBitmap = Bitmap.createScaledBitmap(
-                                finalBitmap,
-                                (finalBitmap.width * scale).toInt(),
-                                (finalBitmap.height * scale).toInt(),
-                                true
-                            )
-                            if (finalBitmap != bitmap) {
-                                finalBitmap.recycle()
-                                shouldRecycleProcessed = false
-                            }
-                            finalBitmap = scaledBitmap
-                        }
-                    }
-                    
-                    uiState = CheckInUiState.Confirming(finalBitmap)
-                    return@launch
+                    else -> nativeFaceCropper.cropAndAlignFace(bitmap)
                 }
 
-                // Extract embedding for local verification later
                 if (searchMode != SearchMode.RAW) {
                     logs.add("Extracting biometric signature...")
                     sourceEmbedding = withContext(Dispatchers.Default) {
-                        // For embedding, we use the BEST face crop, usually PRECISION-like
-                        val alignForEmbed = nativeFaceCropper.cropAndAlignFace(bitmap)
-                        faceEmbedder.getEmbedding(alignForEmbed)
-                    }
-                    if (sourceEmbedding == null) {
-                        logs.add("Warning: Biometric signature extraction failed (Low Quality).")
+                        val align = nativeFaceCropper.cropAndAlignFace(bitmap)
+                        faceEmbedder.getEmbedding(align)
                     }
                 }
 
-                if (searchMode != SearchMode.RAW) {
-                    logs.add("Optimization complete. Probe ready.")
-                }
                 uiState = CheckInUiState.Loading(0.25f, logs.toList())
-                
-                logs.add("Hosting probe image safely (ImgBB)...")
-                uiState = CheckInUiState.Loading(0.4f, logs.toList())
-                
-                val uploadBitmap = nativeFaceCropper.prepareFaceForSearch(processedBitmap)
-                
-                if (searchMode == SearchMode.HYPER) {
-                    logs.add("Engaging Multi-Engine OSINT Waterfall (Free Mode)...")
-                    // Removed FaceCheck.ID (Paid) - switching to standard high-depth OSINT
-                }
+                logs.add("Hosting probe image...")
 
-                logs.add("Hosting probe image safely (ImgBB)...")
-                uiState = CheckInUiState.Loading(0.4f, logs.toList())
-                
+                val uploadBitmap = nativeFaceCropper.prepareFaceForSearch(processedBitmap)
                 val publicUrl = imageUploadRepository.uploadImage(uploadBitmap)
-                
+
                 if (publicUrl != null) {
-                    logs.add("Cloud hosting successful.")
-                    android.util.Log.d("NetworkDebug", "-----------------------------------------")
-                    android.util.Log.d("NetworkDebug", "TEST URL FOR SERPAPI PLAYGROUND: $publicUrl")
-                    android.util.Log.d("NetworkDebug", "-----------------------------------------")
-                    performWebSearch(listOf(publicUrl), logs)
+                    logs.add("Upload successful. Starting search...")
+                    performWebSearch(publicUrl, logs)
                 } else {
-                    uiState = CheckInUiState.Error("Image hosting failed. Please try again.")
+                    uiState = CheckInUiState.Error("Image hosting failed.")
                 }
             } catch (e: Exception) {
-                uiState = CheckInUiState.Error("Face detection failed: ${e.message}")
+                uiState = CheckInUiState.Error("Processing failed: ${e.message}")
             }
         }
     }
 
-    private suspend fun performWebSearch(imageUrls: List<String>, logs: MutableList<String>) {
-        logs.add("Engaging Deep OSINT Waterfall...")
+    private suspend fun performWebSearch(imageUrl: String, logs: MutableList<String>) {
+        logs.add("Starting ultra-safe search...")
         uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
-        val trimmedHint = targetHint.trim()
-        val isDeepSearch = searchMode == SearchMode.HYPER || searchMode == SearchMode.AGGRESSIVE
-        
-        val visualMatches = mutableListOf<SerpVisualMatch>()
+        try {
+            logs.add("Running visual search...")
 
-        if (isDeepSearch) {
-            logs.add("ULTIMATE PROBE: Engaging Biometric Scan (FaceCheck.ID)...")
-            val faceCheckResults = faceSearchRepository.performFaceCheckSearch(
-                bitmap = capturedBitmap!!,
-                onLog = { logMsg ->
-                    logs.add(logMsg)
-                    val currentProgress = (uiState as? CheckInUiState.Loading)?.progress ?: 0.5f
-                    uiState = CheckInUiState.Loading((currentProgress + 0.01f).coerceAtMost(0.95f), logs.toList())
-                }
-            )
-            visualMatches.addAll(faceCheckResults)
-            
-            if (visualMatches.isEmpty()) {
-                logs.add("Biometric results negative. Expanding search to Visual OSINT Engines...")
-            } else {
-                logs.add("Biometric hits confirmed. Cross-correlating with Visual Engines...")
-            }
-        }
-
-        // Always run standard engines for HYPER, or if AGGRESSIVE failed
-        for (imageUrl in imageUrls) {
-            if (searchMode != SearchMode.AGGRESSIVE || visualMatches.isEmpty()) {
-                val standardResults = faceSearchRepository.performFaceSearch(
+            val visualMatches = try {
+                faceSearchRepository.performFaceSearch(
                     uploadedImageUrl = imageUrl,
-                    keywordHint = if (trimmedHint.isNotBlank()) trimmedHint else null,
-                    onLog = { logMsg ->
-                        logs.add(logMsg)
-                        val currentProgress = (uiState as? CheckInUiState.Loading)?.progress ?: 0.5f
-                        uiState = CheckInUiState.Loading((currentProgress + 0.02f).coerceAtMost(0.95f), logs.toList())
-                    }
+                    keywordHint = targetHint.trim().ifBlank { null },
+                    onLog = { logs.add(it) }
                 )
-                visualMatches.addAll(standardResults)
+            } catch (e: Exception) {
+                logs.add("Search engines failed: ${e.message}")
+                emptyList()
             }
-        }
 
-        if (visualMatches.isNotEmpty()) {
-            logs.add("Analysis complete. ${visualMatches.size} raw targets located.")
-            
-            // Map matches and deduplicate
-            val mappedMatches = visualMatches.distinctBy { it.link }.map { result ->
+            logs.add("Got ${visualMatches.size} raw results.")
+
+            // Show raw results without verification or heavy processing
+            val displayMatches = visualMatches.map { result ->
                 WebMatchDisplay(
-                    name = result.title ?: "Matched Profile",
-                    source = result.source ?: "Public Record",
+                    name = result.title ?: "Result",
+                    source = result.source ?: "Web",
                     profileUrl = result.link ?: "",
                     score = result.score,
                     imageUrl = result.thumbnail
                 )
-            }.toMutableList()
-
-            // DEEP SCRAPE BYPASS: If in HYPER or AGGRESSIVE mode, scrape top profiles
-            if (searchMode == SearchMode.HYPER || searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.BYPASS) {
-                // Aggressively scrape the top 5 social matches
-                val socialIndices = mappedMatches.mapIndexedNotNull { index, match ->
-                    if (match.profileUrl.contains("instagram") || 
-                        match.profileUrl.contains("facebook") ||
-                        match.profileUrl.contains("linkedin") ||
-                        match.profileUrl.contains("twitter") ||
-                        match.profileUrl.contains("tiktok")) index else null
-                }.take(5)
-
-                if (socialIndices.isNotEmpty()) {
-                    logs.add("Social Targets Identified. Engaging Scraper Bypass...")
-                    socialIndices.forEach { index ->
-                        val match = mappedMatches[index]
-                        logs.add("Scraping ${match.source} directly...")
-                        val extraPhotos = apifyRepository.deepScrapeProfile(match.profileUrl) { logs.add(it) }
-                        if (extraPhotos.isNotEmpty()) {
-                            logs.add("✓ Harvested ${extraPhotos.size} extra photos from ${match.source}.")
-                            mappedMatches[index] = match.copy(extraImages = extraPhotos)
-                        }
-                    }
-                }
             }
 
-            uiState = CheckInUiState.Loading(1.0f, logs.toList())
+            if (displayMatches.isNotEmpty()) {
+                uiState = CheckInUiState.Success(
+                    matches = displayMatches.sortedByDescending { it.score },
+                    gemmaAnalysis = null
+                )
+            } else {
+                uiState = CheckInUiState.NoMatch(logs.toList())
+            }
 
-            val finalMatches = mappedMatches.sortedByDescending { it.score }
-
-            uiState = CheckInUiState.Success(matches = finalMatches, gemmaAnalysis = null)
-        } else {
-            uiState = CheckInUiState.NoMatch(logs.toList())
+        } catch (e: Exception) {
+            logs.add("Crash prevented: ${e.message}")
+            uiState = CheckInUiState.Error("Search failed - try HYPER or FREE mode")
         }
+    }
+
+    private suspend fun verifyResultsLocally(
+        matches: List<SerpVisualMatch>, 
+        logs: MutableList<String>
+    ): List<WebMatchDisplay> {
+        val verified = mutableListOf<WebMatchDisplay>()
+        val hint = targetHint.lowercase()
+        
+        for (match in matches.take(15)) {
+            if (match.thumbnail.isNullOrBlank()) continue
+            try {
+                val thumb = loadThumbnailBitmap(match.thumbnail) ?: continue
+                val similarity = faceVerifier.verifyFaceMatch(thumb, sourceEmbedding)
+                
+                val nameScore = if (hint.isNotBlank() && match.title?.lowercase()?.contains(hint) == true) 0.25f else 0f
+                
+                val finalScore = (similarity ?: 0f) + nameScore
+                
+                if (finalScore > 0.62f) {
+                    verified.add(WebMatchDisplay(
+                        name = match.title ?: "Match",
+                        source = match.source ?: "Social",
+                        profileUrl = match.link ?: "",
+                        score = match.score + (finalScore * 18000).toInt(),
+                        imageUrl = match.thumbnail
+                    ))
+                    logs.add("Good match! Face: ${similarity} + Name boost")
+                }
+                thumb.recycleSafely()
+            } catch (e: Exception) {}
+        }
+        return verified
     }
 
     fun onRetry() {
@@ -330,14 +211,10 @@ class CheckInViewModel(
     fun onConfirmFreeSearch(bitmap: Bitmap) {
         viewModelScope.launch {
             val original = capturedBitmap ?: bitmap
-            
             if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
-                // User wants Deep Search / Social Bypass - use the API flow instead of redirecting to browser
-                uiState = CheckInUiState.Loading(0.1f, listOf("INITIATING DEEP SOCIAL BYPASS..."))
+                uiState = CheckInUiState.Loading(0.1f, listOf("Starting deep search..."))
                 onPhotoCaptured(original)
             } else {
-                // Use browser-based FREE search
-                uiState = CheckInUiState.Loading(1.0f, listOf("Launching browser-based search nodes..."))
                 freeSearch.searchMyPhoto(original, targetHint)
                 delay(1000)
                 uiState = CheckInUiState.Idle
@@ -345,12 +222,9 @@ class CheckInViewModel(
         }
     }
 
-    fun onGoogleLensOnlySearch(bitmap: Bitmap, nameHint: String? = null) {
-        if (nameHint != null) targetHint = nameHint.trim()
+    fun onGoogleLensOnlySearch(bitmap: Bitmap) {
         viewModelScope.launch {
-            val original = capturedBitmap ?: bitmap
-            uiState = CheckInUiState.Loading(1.0f, listOf("Launching Google Lens node..."))
-            freeSearch.openGoogleLensOnly(original, targetHint)
+            freeSearch.openGoogleLensOnly(bitmap, targetHint)
             delay(1000)
             uiState = CheckInUiState.Idle
         }
@@ -358,6 +232,25 @@ class CheckInViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        faceVerifier.close()
         gemmaAnalyzer.close()
+        faceEmbedder.close()
+        nativeFaceCropper.release()
+    }
+}
+
+fun Bitmap?.recycleSafely() {
+    try { if (this != null && !isRecycled) recycle() } catch (_: Exception) {}
+}
+
+private suspend fun CheckInViewModel.loadThumbnailBitmap(url: String): Bitmap? = withContext(Dispatchers.IO) {
+    try {
+        val request = ImageRequest.Builder(getApplication())
+            .data(url)
+            .size(400)
+            .build()
+        getApplication<Application>().imageLoader.execute(request).image?.toBitmap()
+    } catch (e: Exception) {
+        null
     }
 }

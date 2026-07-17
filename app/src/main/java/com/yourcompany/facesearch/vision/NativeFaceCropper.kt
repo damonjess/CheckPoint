@@ -447,4 +447,24 @@ class NativeFaceCropper {
             continuation.resume(listOf(original))
         }
     }
+
+    suspend fun createBestProbeVariants(original: Bitmap): List<Bitmap> {
+        val variants = mutableListOf<Bitmap>()
+        
+        // 1. Tight aligned face (best for FaceCheck)
+        variants.add(cropAndAlignFace(original))
+        
+        // 2. Square social profile style
+        variants.add(cropForSocialProfile(original))
+        
+        // 3. High contrast bypass
+        val contrast = ImageEnhancer.applyStructuralFingerprint(original)
+        variants.add(contrast)
+        
+        return variants
+    }
+
+    fun release() {
+        detector.close()
+    }
 }

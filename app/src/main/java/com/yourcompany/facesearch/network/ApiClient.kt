@@ -1,5 +1,11 @@
 package com.yourcompany.facesearch.network
 
+import android.content.Context
+import coil3.ImageLoader
+import coil3.disk.DiskCache
+import coil3.disk.directory
+import coil3.memory.MemoryCache
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -58,5 +64,31 @@ object ApiClient {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(SocialAnalyzerApi::class.java)
+    }
+
+    private var _imageLoader: ImageLoader? = null
+    
+    /**
+     * Provides a shared, cached ImageLoader for biometric thumbnail verification.
+     */
+    fun getImageLoader(context: Context): ImageLoader {
+        return _imageLoader ?: synchronized(this) {
+            _imageLoader ?: ImageLoader.Builder(context)
+                .components {
+                    add(OkHttpNetworkFetcherFactory(okHttpClient))
+                }
+                .memoryCache {
+                    MemoryCache.Builder()
+                        .maxSizePercent(context, 0.25)
+                        .build()
+                }
+                .diskCache {
+                    DiskCache.Builder()
+                        .directory(context.cacheDir.resolve("biometric_thumbnails"))
+                        .maxSizePercent(0.05)
+                        .build()
+                }
+                .build().also { _imageLoader = it }
+        }
     }
 }

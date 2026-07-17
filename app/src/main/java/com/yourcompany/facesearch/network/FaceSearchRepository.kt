@@ -104,64 +104,33 @@ class FaceSearchRepository(
         val allResults = mutableListOf<SerpVisualMatch>()
         val cleanHint = keywordHint?.trim() ?: ""
 
-        // ===== STRICT GLOBAL WATERFALL =====
         val engineWaterfall = mutableListOf(
             "google_lens",
             "bing_visual_search",
+            "yandex_images",           // Added - excellent for faces
             "google_reverse_image"
         )
-
-        // Selectively re-enable Yandex for deeper matching if no hint is provided 
-        // (Yandex is excellent at finding visually similar faces even without text hints)
-        if (cleanHint.isEmpty()) {
-            engineWaterfall.add(1, "yandex_images")
-        }
 
         for (currentEngine in engineWaterfall) {
             val readable = currentEngine.replace("_", " ").uppercase()
             try {
                 onLog("PROBING $readable...")
 
-                // Rate limiting between engines
                 if (currentEngine != engineWaterfall.first()) {
-                    kotlinx.coroutines.delay(800)
-                }
-
-                val response = try {
-                    apiService.searchVisual(
-                        engine = currentEngine,
-                        imageUrl = uploadedImageUrl,
-                        query = if (currentEngine == "google_lens" && cleanHint.isNotEmpty()) cleanHint else null,
-                        apiKey = serpApiKey
-                    )
-                } catch (e: java.net.SocketTimeoutException) {
-                    onLog("⚠ $readable timeout - retrying...")
                     kotlinx.coroutines.delay(1000)
-                    try {
-                        apiService.searchVisual(
-                            engine = currentEngine,
-                            imageUrl = uploadedImageUrl,
-                            query = null,
-                            apiKey = serpApiKey
-                        )
-                    } catch (e: Exception) {
-                        null
-                    }
-                } catch (e: Exception) {
-                    onLog("⚠ $readable failed - skipping...")
-                    null
                 }
 
-                if (response == null) {
-                    onLog("$readable: No response - continuing...")
-                    continue
-                }
+                val response = apiService.searchVisual(
+                    engine = currentEngine,
+                    imageUrl = uploadedImageUrl,
+                    query = if (currentEngine.contains("lens") && cleanHint.isNotEmpty()) cleanHint else null,
+                    apiKey = serpApiKey
+                )
 
                 if (response.isSuccessful) {
                     val body = response.body()
                     val engineResults = mutableListOf<SerpVisualMatch>()
 
-                    // Collect ALL result types
                     body?.visualMatches?.let { engineResults.addAll(it) }
                     body?.visualSearchResults?.let { engineResults.addAll(it) }
                     body?.imageResults?.let { results ->
@@ -169,55 +138,32 @@ class FaceSearchRepository(
                             SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail)
                         })
                     }
-                    body?.organicResults?.let { results ->
-                        engineResults.addAll(results.map {
-                            SerpVisualMatch(
-                                title = it.title, 
-                                link = it.link, 
-                                source = it.source, 
-                                thumbnail = it.thumbnail ?: it.richSnippet?.top?.thumbnail ?: it.favicon
-                            )
-                        })
-                    }
-                    body?.inlineImages?.let { results ->
-                        engineResults.addAll(results.map {
-                            SerpVisualMatch(title = null, link = null, source = it.source, thumbnail = it.thumbnail)
-                        })
-                    }
 
                     if (engineResults.isNotEmpty()) {
                         allResults.addAll(engineResults)
                         onLog("✓ $readable: Found ${engineResults.size} leads")
-                        
-                        // If we found good results, continue probing other engines too
-                        if (allResults.size >= 8) {
-                            onLog("Threshold reached - continuing secondary scans...")
-                        }
-                    } else {
-                        onLog("$readable: No results")
                     }
                 } else {
-                    val errorCode = response.code()
-                    when (errorCode) {
-                        429 -> onLog("$readable: Rate limited - backoff...")
-                        else -> onLog("$readable: HTTP $errorCode")
-                    }
+                    onLog("$readable: HTTP ${response.code()}")
                 }
             } catch (e: Exception) {
-                onLog("✗ $readable error: ${e.javaClass.simpleName}")
+                onLog("✗ $readable error")
             }
         }
 
         // ===== OSINT CROSS-CORRELATION (Inspired by Social Mapper / Social Analyzer) =====
         val correlatedResults = mutableListOf<SerpVisualMatch>()
         val detectedUsernames = mutableSetOf<String>()
-        
+
         // Extract potential usernames from high-scoring visual matches
-        allResults.filter { it.score > 2000 && it.link != null }.forEach { match ->
+        allResults.filter { it.link != null }.forEach { match ->
             val platform = SocialMediaDetector.detectPlatform(match.link)
-            val username = SocialMediaDetector.extractUsername(match.link, platform)
-            if (username != null && username.length > 2) {
-                detectedUsernames.add(username)
+            // Use baseScore from detector since local score is not yet calculated
+            if (platform.baseScore > 1500) {
+                val username = SocialMediaDetector.extractUsername(match.link, platform)
+                if (username != null && username.length > 2) {
+                    detectedUsernames.add(username)
+                }
             }
         }
 
@@ -231,16 +177,16 @@ class FaceSearchRepository(
                         query = "\"$username\" (site:instagram.com OR site:facebook.com OR site:linkedin.com OR site:twitter.com OR site:tiktok.com)",
                         apiKey = serpApiKey
                     )
-                    
+
                     if (response.isSuccessful) {
                         val body = response.body()
                         body?.organicResults?.let { results ->
                             onLog("✓ Cross-Correlation: Found ${results.size} additional profiles for @$username")
                             correlatedResults.addAll(results.map {
                                 SerpVisualMatch(
-                                    title = it.title, 
-                                    link = it.link, 
-                                    source = it.source, 
+                                    title = it.title,
+                                    link = it.link,
+                                    source = it.source,
                                     thumbnail = it.thumbnail ?: it.favicon,
                                     score = 3500 // High score for cross-correlated results
                                 )
@@ -257,43 +203,52 @@ class FaceSearchRepository(
         // ===== PLATFORM-SPECIFIC TARGETED SEARCHES =====
         if (cleanHint.isNotEmpty()) {
             onLog("Engaging target-specific social probes...")
-            val platformSearches = listOf(
+            val platformSearches = mutableListOf(
                 "\"$cleanHint\" site:instagram.com" to "instagram",
                 "\"$cleanHint\" site:facebook.com" to "facebook",
                 "\"$cleanHint\" site:linkedin.com" to "linkedin",
                 "\"$cleanHint\" site:twitter.com" to "twitter",
-                "\"$cleanHint\" site:tiktok.com" to "tiktok"
+                "\"$cleanHint\" site:tiktok.com" to "tiktok",
+                "\"$cleanHint\" profile" to "social_profile",
+                "\"$cleanHint\" bio" to "bio_match"
             )
-            
+
+            // Add specific OSINT Dorks for better profile discovery
+            if (cleanHint.split(" ").size >= 2) {
+                platformSearches.add("intitle:\"$cleanHint\" (site:facebook.com OR site:instagram.com)" to "combined_social")
+                platformSearches.add("\"$cleanHint\" inurl:profile" to "profile_dork")
+            }
+
             for ((query, platform) in platformSearches) {
                 try {
                     onLog("Direct probe: $platform...")
-                    kotlinx.coroutines.delay(400)
-                    
+                    kotlinx.coroutines.delay(600)
+
                     val response = apiService.searchVisual(
-                        engine = "google_lens",
-                        imageUrl = uploadedImageUrl,
+                        engine = "google",
                         query = query,
                         apiKey = serpApiKey
                     )
-                    
+
                     if (response.isSuccessful) {
                         val body = response.body()
                         val results = mutableListOf<SerpVisualMatch>()
-                        
-                        body?.visualMatches?.let { results.addAll(it) }
-                        body?.visualSearchResults?.let { results.addAll(it) }
-                        
+
+                        body?.organicResults?.let { organic ->
+                            results.addAll(organic.map {
+                                SerpVisualMatch(
+                                    title = it.title,
+                                    link = it.link,
+                                    source = it.source,
+                                    thumbnail = it.thumbnail ?: it.favicon,
+                                    score = 4000 // Boost for direct keyword match
+                                )
+                            })
+                        }
+
                         if (results.isNotEmpty()) {
-                            // Filter these specific results to ENSURE the name is present
-                            val filtered = results.filter { 
-                                it.title?.lowercase()?.contains(cleanHint.split(" ")[0].lowercase()) == true ||
-                                it.link?.lowercase()?.contains(cleanHint.split(" ")[0].lowercase()) == true
-                            }
-                            allResults.addAll(filtered)
-                            if (filtered.isNotEmpty()) {
-                                onLog("✓ Found ${filtered.size} verified leads on $platform")
-                            }
+                            allResults.addAll(results)
+                            onLog("✓ Found ${results.size} verified leads on $platform")
                         }
                     }
                 } catch (e: Exception) {
@@ -314,10 +269,10 @@ class FaceSearchRepository(
                     query = null,
                     apiKey = serpApiKey
                 )
-                
+
                 if (bypassResponse.isSuccessful) {
                     bypassResponse.body()?.visualMatches?.let { allResults.addAll(it) }
-                    bypassResponse.body()?.imageResults?.let { 
+                    bypassResponse.body()?.imageResults?.let {
                         allResults.addAll(it.map { SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail) })
                     }
                 }
@@ -326,105 +281,34 @@ class FaceSearchRepository(
             }
         }
 
-        if (allResults.isEmpty()) {
-            onLog("⚠ No profiles found - verify image quality or try different search mode")
-        } else {
-            android.util.Log.d("FaceSearch", "TOTAL RESULTS: ${allResults.size} raw matches found.")
-        }
-
-        // ===== IMPROVED MULTI-FACTOR SCORING SYSTEM =====
+        // Stronger final scoring
         return allResults
             .map { match ->
-                var score = 0
+                var score = 800 // base
+
                 val title = match.title?.lowercase() ?: ""
                 val link = match.link?.lowercase() ?: ""
-                val source = match.source?.lowercase() ?: ""
 
-                // ===== FACTOR 1: SOCIAL PLATFORM PRIORITY (PRIMARY - 2500 pts max) =====
-                // Platform detection is most important for finding actual profiles
                 val platform = SocialMediaDetector.detectPlatform(link)
-                score += platform.baseScore
-                
-                // Bonus for known profile-based platforms
-                if (platform.isProfileBased) {
-                    score += 600  // Increased from 400
-                }
+                score += platform.baseScore * 2
 
-                // ===== FACTOR 2: PROFILE INDICATORS (1000 pts max) =====
-                if (SocialMediaDetector.isProfileUrl(link)) {
-                    score += 900  // Increased from 800
-                }
-                
-                // Username extraction bonus (indicates real profile)
-                val username = SocialMediaDetector.extractUsername(link, platform)
-                if (username != null && username.length > 2 && username.length < 50) {
-                    score += 300  // Increased from 200
-                }
+                if (SocialMediaDetector.isProfileUrl(link)) score += 1200
 
-                // ===== FACTOR 3: URL PATTERN QUALITY (1200 pts max) =====
-                score += SocialMediaDetector.scoreUrlPattern(link)
+                // Name boost
+                if (cleanHint.isNotEmpty() && title.contains(cleanHint)) score += 1400
 
-                // ===== FACTOR 4: KEYWORD MATCHING (Secondary - 1000 pts max) =====
-                // Only 1000 pts because profiles often don't have names visible
-                score += SocialMediaDetector.scoreNameMatch(cleanHint, title, link)
+                // Face thumbnail bonus
+                if (match.thumbnail != null) score += 600
 
-                // ===== FACTOR 5: CONTENT INDICATORS (800 pts max) =====
-                // Has a thumbnail (actual profile image or content)
-                if (match.thumbnail != null) {
-                    score += 400  // Increased from 300
+                // Regional penalty
+                if (link.contains(".ru") || link.contains(".рф") || link.contains("vk.com")) {
+                    score -= 9000
                 }
-                
-                // Title suggests personal profile
-                if (title.contains("profile") || title.contains("account") || 
-                    title.contains("about") || title.contains("bio")) {
-                    score += 400
-                }
-
-                // ===== FACTOR 6: FILTERING (Penalties) =====
-                // Negative Keywords (False Positives)
-                val negativeKeywords = listOf("meme", "joke", "funny", "skibidi", "toilet", "parody", "fan", "club")
-                if (negativeKeywords.any { title.contains(it) }) {
-                    score -= 3000
-                }
-
-                // Heavy penalty for generic results
-                if (link.contains("search") || link.contains("explore") || 
-                    link.contains("discover") || link.contains("feed") || link.contains("tag")) {
-                    score -= 2500
-                }
-                
-                // Penalty for likely spammy content
-                if (source?.contains("spam") == true || source?.contains("ad") == true) {
-                    score -= 2500  // Increased penalty from -2000
-                }
-
-                // ===== FACTOR 7: REGIONAL FILTERING (HARD BLOCK) =====
-                // Total exclusion of results that skew away from target Western regions
-                val isRussian = link.contains(".ru") || link.contains(".рф") || 
-                                source.contains("yandex") || source.contains("vkontakte") || 
-                                source.contains("ok.ru") || source.contains("специалисты.рф")
-                
-                if (isRussian) {
-                    // Reduce penalty slightly if it's the only result found via Yandex,
-                    // but keep it high enough to deprioritize
-                    score -= 8000
-                }
-                
-                if (link.contains(".cn") || source.contains("baidu")) {
-                    score -= 5000 // Heavy penalty for Chinese results
-                }
-
-                // Base score for any match
-                score += 500  // Increased from 300
 
                 match.copy(score = score)
             }
             .sortedByDescending { it.score }
-            .filter { it.link != null && !it.link.lowercase().contains("search") }
-            .distinctBy { 
-                // Deduplicate by link, or by username if available
-                SocialMediaDetector.extractUsername(it.link, SocialMediaDetector.detectPlatform(it.link)) 
-                    ?: (it.link?.substringAfter("://")?.substringBefore("/") ?: it.title)
-            }
+            .filter { it.score > 1500 }  // Filter weak results
+            .distinctBy { it.link }
     }
 }

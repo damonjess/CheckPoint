@@ -3,26 +3,27 @@ package com.yourcompany.facesearch.network
 object SocialMediaDetector {
 
     data class PlatformScore(
+        val name: String,
         val baseScore: Int,
         val isProfileBased: Boolean
     )
 
     fun detectPlatform(link: String?): PlatformScore {
-        if (link.isNullOrBlank()) return PlatformScore(0, false)
+        if (link.isNullOrBlank()) return PlatformScore("Web", 0, false)
 
         val lower = link.lowercase()
 
         return when {
-            lower.contains("instagram.com") || lower.contains("instagr.am") -> PlatformScore(2500, true)
-            lower.contains("facebook.com") || lower.contains("fb.com") -> PlatformScore(2200, true)
-            lower.contains("linkedin.com") -> PlatformScore(2100, true)
-            lower.contains("tiktok.com") -> PlatformScore(2000, true)
-            lower.contains("twitter.com") || lower.contains("x.com") -> PlatformScore(1900, true)
-            lower.contains("youtube.com") -> PlatformScore(1400, false)
-            lower.contains("snapchat.com") || lower.contains("snap") -> PlatformScore(1300, true)
-            lower.contains("reddit.com") -> PlatformScore(800, false)
-            lower.contains("pinterest.com") -> PlatformScore(700, false)
-            else -> PlatformScore(500, false)
+            lower.contains("instagram.com") || lower.contains("instagr.am") -> PlatformScore("Instagram", 2500, true)
+            lower.contains("facebook.com") || lower.contains("fb.com") -> PlatformScore("Facebook", 2200, true)
+            lower.contains("linkedin.com") -> PlatformScore("LinkedIn", 2100, true)
+            lower.contains("tiktok.com") -> PlatformScore("TikTok", 2000, true)
+            lower.contains("twitter.com") || lower.contains("x.com") -> PlatformScore("Twitter", 1900, true)
+            lower.contains("youtube.com") -> PlatformScore("YouTube", 1400, false)
+            lower.contains("snapchat.com") || lower.contains("snap") -> PlatformScore("Snapchat", 1300, true)
+            lower.contains("reddit.com") -> PlatformScore("Reddit", 800, false)
+            lower.contains("pinterest.com") -> PlatformScore("Pinterest", 700, false)
+            else -> PlatformScore("Web", 500, false)
         }
     }
 

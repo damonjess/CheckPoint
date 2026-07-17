@@ -21,24 +21,49 @@ class ImageUploadRepository {
         Log.d("NetworkDebug", "ImgBB Key: ${Secrets.IMGBB_API_KEY}")
 
         return try {
-            val response = api.upload(Secrets.IMGBB_API_KEY, body)
-            if (response.isSuccessful) {
-                val data = response.body()?.data
-                // ENFORCE DIRECT URL: SerpApi requires a direct image file stream (i.ibb.co)
-                // data.url is the raw original file. data.display_url is often a web-viewer.
-                val rawUrl = data?.url 
-                val displayUrl = data?.display_url
-                
-                Log.d("NetworkDebug", "ImgBB Raw URL: $rawUrl")
-                Log.d("NetworkDebug", "ImgBB Display URL: $displayUrl")
-                
-                val finalUrl = rawUrl ?: displayUrl
-                Log.d("NetworkDebug", "Final URL selected for SerpApi: $finalUrl")
-                finalUrl
+            val apiKey = Secrets.IMGBB_API_KEY
+            if (apiKey.isBlank() || apiKey == "null") {
+                // FALLBACK: Anonymous upload if no API key is provided
+                uploadToTelegraph(byteArray)
             } else {
-                Log.e("NetworkDebug", "ImgBB Upload Failed: ${response.code()} ${response.errorBody()?.string()}")
-                null
+                val response = api.upload(apiKey, body)
+                if (response.isSuccessful) {
+                    val data = response.body()?.data
+                    val rawUrl = data?.url 
+                    val displayUrl = data?.display_url
+                    rawUrl ?: displayUrl
+                } else {
+                    // If ImgBB fails (e.g. invalid key), try anonymous fallback
+                    uploadToTelegraph(byteArray)
+                }
             }
+        } catch (e: Exception) {
+            uploadToTelegraph(byteArray)
+        }
+    }
+
+    private suspend fun uploadToTelegraph(bytes: ByteArray): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val client = okhttp3.OkHttpClient()
+        val requestBody = bytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", "upload.jpg", requestBody)
+            .build()
+
+        val request = okhttp3.Request.Builder()
+            .url("https://telegra.ph/upload")
+            .post(body)
+            .build()
+
+        try {
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val json = response.body?.string() ?: ""
+                // Telegra.ph returns a JSON array like [{"src":"/file/..."}]
+                val pattern = "\"src\":\"([^\"]+)\"".toRegex()
+                val match = pattern.find(json)
+                match?.groups?.get(1)?.value?.let { "https://telegra.ph$it" }
+            } else null
         } catch (e: Exception) {
             null
         }

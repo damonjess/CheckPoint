@@ -2,6 +2,7 @@ package com.yourcompany.facesearch.network
 
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -10,6 +11,7 @@ interface ApifyApiService {
     
     // Runs an Apify Actor (e.g. Instagram Scraper, LinkedIn Scraper)
     @POST("v2/acts/{actorId}/runs")
+    @JvmSuppressWildcards
     suspend fun runActor(
         @Path("actorId") actorId: String,
         @Query("token") token: String,
@@ -17,7 +19,8 @@ interface ApifyApiService {
     ): Response<ApifyRunResponse>
 
     // Gets the results from a dataset
-    @POST("v2/datasets/{datasetId}/items")
+    @GET("v2/datasets/{datasetId}/items")
+    @JvmSuppressWildcards
     suspend fun getDatasetItems(
         @Path("datasetId") datasetId: String,
         @Query("token") token: String

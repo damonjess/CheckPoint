@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,7 +35,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -62,6 +65,7 @@ fun CheckInScreen(
     onGoogleLensOnlySearch: (Bitmap) -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
+    val clipboardManager = LocalClipboardManager.current
 
     Scaffold(
         topBar = {
@@ -285,26 +289,39 @@ fun CheckInScreen(
                                 shape = RoundedCornerShape(8.dp),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
                             ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp).fillMaxSize().verticalScroll(consoleScrollState)
-                                ) {
-                                    Text(
-                                        "SHERLOCK OSINT CONSOLE v2.1",
-                                        color = Amber,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    uiState.logs.forEach { log ->
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp).fillMaxSize().verticalScroll(consoleScrollState)
+                                    ) {
                                         Text(
-                                            text = "> $log",
-                                            color = Amber.copy(alpha = 0.9f),
-                                            fontSize = 11.sp,
+                                            "SHERLOCK OSINT CONSOLE v2.1",
+                                            color = Amber,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Black,
                                             fontFamily = FontFamily.Monospace
                                         )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        uiState.logs.forEach { log ->
+                                            Text(
+                                                text = "> $log",
+                                                color = Amber.copy(alpha = 0.9f),
+                                                fontSize = 11.sp,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                        BlinkingCursor()
                                     }
-                                    BlinkingCursor()
+                                    
+                                    // Copy Logs Button
+                                    IconButton(
+                                        onClick = {
+                                            val logText = uiState.logs.joinToString("\n")
+                                            clipboardManager.setText(AnnotatedString(logText))
+                                        },
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = Amber.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                                    }
                                 }
                             }
                         }
@@ -386,12 +403,26 @@ fun CheckInScreen(
                             )
 
                             // Always show console logs if results are zero, so errors aren't hidden
-                            Text(
-                                "SHERLOCK OSINT CONSOLE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Amber,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "SHERLOCK OSINT CONSOLE",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Amber
+                                )
+                                IconButton(
+                                    onClick = {
+                                        val logText = uiState.logs.joinToString("\n")
+                                        clipboardManager.setText(AnnotatedString(logText))
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = Amber, modifier = Modifier.size(14.dp))
+                                }
+                            }
                             Card(
                                 colors = CardDefaults.cardColors(containerColor = Color.Black),
                                 modifier = Modifier.fillMaxWidth().height(200.dp),
@@ -580,6 +611,7 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
     val isHighConfidence = match.score > 5000
     
     Card(
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isHighConfidence) 6.dp else 2.dp),

@@ -10,13 +10,18 @@ class FaceSearchRepository(
     private val apiService: SerpApiService = ApiClient.serpApiService,
     private val serpApiKey: String = ApiClient.API_KEY,
     private val faceCheckApi: FaceCheckApi = ApiClient.faceCheckApi,
-    private val faceCheckApiKey: String = ApiClient.FACECHECK_API_KEY
+    private val faceCheckApiKey: String = ApiClient.FACECHECK_API_KEY,
+    private val apifyRepository: ApifyRepository = ApifyRepository()
 ) {
 
     suspend fun performFaceCheckSearch(
         bitmap: Bitmap,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> {
+        if (faceCheckApiKey.isBlank() || faceCheckApiKey == "null") {
+            onLog("⚠ FaceCheck token missing. Skipping biometric scan.")
+            return emptyList()
+        }
         try {
             onLog("PREPARING FACECHECK.ID UPLOAD...")
             
@@ -31,13 +36,17 @@ class FaceSearchRepository(
             
             if (!uploadResponse.isSuccessful) {
                 val errorMsg = uploadResponse.errorBody()?.string() ?: "Unknown error"
-                onLog("✗ UPLOAD FAILED: HTTP ${uploadResponse.code()} - $errorMsg")
+                if (uploadResponse.code() == 401 || errorMsg.contains("token", true)) {
+                    onLog("⚠ FaceCheck: Invalid API Key or No Tokens left.")
+                } else {
+                    onLog("✗ UPLOAD FAILED: HTTP ${uploadResponse.code()}")
+                }
                 return emptyList()
             }
             
             val idSearch = uploadResponse.body()?.idSearch
             if (idSearch == null) {
-                onLog("✗ UPLOAD FAILED: No Search ID returned - ${uploadResponse.body()?.error ?: "Check API Key"}")
+                onLog("✗ UPLOAD FAILED: No Search ID returned.")
                 return emptyList()
             }
 
@@ -51,7 +60,7 @@ class FaceSearchRepository(
                 val searchResponse = faceCheckApi.search(
                     FaceCheckSearchRequest(
                         idSearch = idSearch, 
-                        demo = false
+                        demo = true 
                     ),
                     bearerToken
                 )
@@ -72,7 +81,7 @@ class FaceSearchRepository(
                                 link = match.url,
                                 source = match.site ?: "Public Profile",
                                 thumbnail = if (match.base64 != null) "data:image/jpeg;base64,${match.base64}" else null,
-                                score = (match.score ?: 0) * 100 // Scale to match SerpApi scores
+                                score = (match.score ?: 0) * 100
                             )
                         }
                     }
@@ -102,213 +111,146 @@ class FaceSearchRepository(
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> {
         val allResults = mutableListOf<SerpVisualMatch>()
-        val cleanHint = keywordHint?.trim() ?: ""
-
-        val engineWaterfall = mutableListOf(
-            "google_lens",
-            "bing_visual_search",
-            "yandex_images",           // Added - excellent for faces
-            "google_reverse_image"
-        )
-
-        for (currentEngine in engineWaterfall) {
-            val readable = currentEngine.replace("_", " ").uppercase()
-            try {
-                onLog("PROBING $readable...")
-
-                if (currentEngine != engineWaterfall.first()) {
-                    kotlinx.coroutines.delay(1000)
-                }
-
-                val response = apiService.searchVisual(
-                    engine = currentEngine,
-                    imageUrl = uploadedImageUrl,
-                    query = if (currentEngine.contains("lens") && cleanHint.isNotEmpty()) cleanHint else null,
-                    apiKey = serpApiKey
-                )
-
-                if (response.isSuccessful) {
-                    val body = response.body()
-                    val engineResults = mutableListOf<SerpVisualMatch>()
-
-                    body?.visualMatches?.let { engineResults.addAll(it) }
-                    body?.visualSearchResults?.let { engineResults.addAll(it) }
-                    body?.imageResults?.let { results ->
-                        engineResults.addAll(results.map {
-                            SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail)
-                        })
-                    }
-
-                    if (engineResults.isNotEmpty()) {
-                        allResults.addAll(engineResults)
-                        onLog("✓ $readable: Found ${engineResults.size} leads")
-                    }
-                } else {
-                    onLog("$readable: HTTP ${response.code()}")
-                }
-            } catch (e: Exception) {
-                onLog("✗ $readable error")
-            }
+        
+        // NO ACTORS, NO DEMOS - Direct Scraping Only
+        onLog("Engaging Sherlock Free Scraper...")
+        try {
+            val scraperResults = scrapeFreeIndex(uploadedImageUrl, onLog)
+            allResults.addAll(scraperResults)
+        } catch (e: Exception) {
+            onLog("⚠ Scraper interrupted: ${e.message}")
         }
 
-        // ===== OSINT CROSS-CORRELATION (Inspired by Social Mapper / Social Analyzer) =====
-        val correlatedResults = mutableListOf<SerpVisualMatch>()
-        val detectedUsernames = mutableSetOf<String>()
-
-        // Extract potential usernames from high-scoring visual matches
-        allResults.filter { it.link != null }.forEach { match ->
-            val platform = SocialMediaDetector.detectPlatform(match.link)
-            // Use baseScore from detector since local score is not yet calculated
-            if (platform.baseScore > 1500) {
-                val username = SocialMediaDetector.extractUsername(match.link, platform)
-                if (username != null && username.length > 2) {
-                    detectedUsernames.add(username)
-                }
-            }
-        }
-
-        if (detectedUsernames.isNotEmpty()) {
-            onLog("CROSS-CORRELATION: Found ${detectedUsernames.size} potential handles...")
-            for (username in detectedUsernames.take(2)) { // Limit to top 2 unique usernames to save API credits
-                onLog("Engaging Social-Analyzer probe for '@$username'...")
-                try {
-                    val response = apiService.searchVisual(
-                        engine = "google",
-                        query = "\"$username\" (site:instagram.com OR site:facebook.com OR site:linkedin.com OR site:twitter.com OR site:tiktok.com)",
-                        apiKey = serpApiKey
-                    )
-
-                    if (response.isSuccessful) {
-                        val body = response.body()
-                        body?.organicResults?.let { results ->
-                            onLog("✓ Cross-Correlation: Found ${results.size} additional profiles for @$username")
-                            correlatedResults.addAll(results.map {
-                                SerpVisualMatch(
-                                    title = it.title,
-                                    link = it.link,
-                                    source = it.source,
-                                    thumbnail = it.thumbnail ?: it.favicon,
-                                    score = 3500 // High score for cross-correlated results
-                                )
-                            })
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Ignore cross-correlation failures
-                }
-            }
-        }
-        allResults.addAll(correlatedResults)
-
-        // ===== PLATFORM-SPECIFIC TARGETED SEARCHES =====
-        if (cleanHint.isNotEmpty()) {
-            onLog("Engaging target-specific social probes...")
-            val platformSearches = mutableListOf(
-                "\"$cleanHint\" site:instagram.com" to "instagram",
-                "\"$cleanHint\" site:facebook.com" to "facebook",
-                "\"$cleanHint\" site:linkedin.com" to "linkedin",
-                "\"$cleanHint\" site:twitter.com" to "twitter",
-                "\"$cleanHint\" site:tiktok.com" to "tiktok",
-                "\"$cleanHint\" profile" to "social_profile",
-                "\"$cleanHint\" bio" to "bio_match"
-            )
-
-            // Add specific OSINT Dorks for better profile discovery
-            if (cleanHint.split(" ").size >= 2) {
-                platformSearches.add("intitle:\"$cleanHint\" (site:facebook.com OR site:instagram.com)" to "combined_social")
-                platformSearches.add("\"$cleanHint\" inurl:profile" to "profile_dork")
-            }
-
-            for ((query, platform) in platformSearches) {
-                try {
-                    onLog("Direct probe: $platform...")
-                    kotlinx.coroutines.delay(600)
-
-                    val response = apiService.searchVisual(
-                        engine = "google",
-                        query = query,
-                        apiKey = serpApiKey
-                    )
-
-                    if (response.isSuccessful) {
-                        val body = response.body()
-                        val results = mutableListOf<SerpVisualMatch>()
-
-                        body?.organicResults?.let { organic ->
-                            results.addAll(organic.map {
-                                SerpVisualMatch(
-                                    title = it.title,
-                                    link = it.link,
-                                    source = it.source,
-                                    thumbnail = it.thumbnail ?: it.favicon,
-                                    score = 4000 // Boost for direct keyword match
-                                )
-                            })
-                        }
-
-                        if (results.isNotEmpty()) {
-                            allResults.addAll(results)
-                            onLog("✓ Found ${results.size} verified leads on $platform")
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Skip failed platform searches
-                }
-            }
-        }
-
-        // ===== BYPASS TECHNIQUES =====
-        if (allResults.size < 5) {
-            onLog("Low results - engaging bypass protocols...")
-            try {
-                // Retry primary engine without keyword hint (bypass content filters)
-                onLog("Bypass #1: Raw image re-scan...")
-                val bypassResponse = apiService.searchVisual(
-                    engine = "yandex_images",
-                    imageUrl = uploadedImageUrl,
-                    query = null,
-                    apiKey = serpApiKey
-                )
-
-                if (bypassResponse.isSuccessful) {
-                    bypassResponse.body()?.visualMatches?.let { allResults.addAll(it) }
-                    bypassResponse.body()?.imageResults?.let {
-                        allResults.addAll(it.map { SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail) })
-                    }
-                }
-            } catch (e: Exception) {
-                // Continue if bypass fails
-            }
-        }
-
-        // Stronger final scoring
         return allResults
             .map { match ->
-                var score = 800 // base
-
-                val title = match.title?.lowercase() ?: ""
+                var score = match.score
                 val link = match.link?.lowercase() ?: ""
-
                 val platform = SocialMediaDetector.detectPlatform(link)
-                score += platform.baseScore * 2
-
-                if (SocialMediaDetector.isProfileUrl(link)) score += 1200
-
-                // Name boost
-                if (cleanHint.isNotEmpty() && title.contains(cleanHint)) score += 1400
-
-                // Face thumbnail bonus
-                if (match.thumbnail != null) score += 600
-
-                // Regional penalty
-                if (link.contains(".ru") || link.contains(".рф") || link.contains("vk.com")) {
-                    score -= 9000
+                score += platform.baseScore
+                
+                if (keywordHint != null && match.title?.lowercase()?.contains(keywordHint.lowercase()) == true) {
+                    score += 1500
                 }
-
-                match.copy(score = score)
+                
+                match.copy(score = score, source = platform.name)
             }
             .sortedByDescending { it.score }
-            .filter { it.score > 1500 }  // Filter weak results
             .distinctBy { it.link }
+    }
+
+    private suspend fun scrapeFreeIndex(imageUrl: String, onLog: (String) -> Unit): List<SerpVisualMatch> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val client = okhttp3.OkHttpClient.Builder()
+            .followRedirects(true)
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+
+        val results = mutableListOf<SerpVisualMatch>()
+        val encodedUrl = android.net.Uri.encode(imageUrl)
+
+        // ENGINE 1: YANDEX (The King of Facial Recognition)
+        try {
+            onLog("Deep-Scanning Global Facial Index (Yandex)...")
+            val yandexUrl = "https://yandex.com/images/search?rpt=imageview&url=$encodedUrl"
+            val request = okhttp3.Request.Builder()
+                .url(yandexUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+                .build()
+
+            val response = client.newCall(request).execute()
+            val html = response.body?.string() ?: ""
+            
+            // Extract sites with matching images and their thumbnails
+            // Pattern for Yandex's JSON data structure
+            val siteMatchRegex = "\\{\"url\":\"(http[s]?://[^\"]+)\",\"title\":\"([^\"]+)\".*?\"thumb\":\\{\"url\":\"([^\"]+)\"".toRegex()
+            siteMatchRegex.findAll(html).forEach { matchResult ->
+                val link = matchResult.groups[1]?.value ?: ""
+                val title = matchResult.groups[2]?.value?.replace("\\u002F", "/") ?: "Web Match"
+                var thumb = matchResult.groups[3]?.value?.replace("\\u002F", "/") ?: ""
+                
+                if (thumb.startsWith("//")) thumb = "https:$thumb"
+                else if (thumb.startsWith("/") && !thumb.startsWith("http")) thumb = "https://yandex.com$thumb"
+
+                if (!link.contains("yandex.") && !link.contains("google.")) {
+                    results.add(SerpVisualMatch(
+                        title = title,
+                        link = link,
+                        source = SocialMediaDetector.detectPlatform(link).name,
+                        thumbnail = if (thumb.isNotEmpty()) thumb else null,
+                        score = 2500
+                    ))
+                }
+            }
+            onLog("✓ Global Index: Found ${results.size} visual leads")
+        } catch (e: Exception) {
+            onLog("⚠ Global Index probe failed")
+        }
+
+        // ENGINE 2: BING (Social Profile Aggregator)
+        try {
+            onLog("Scanning Social Platform Index (Bing)...")
+            val bingUrl = "https://www.bing.com/images/search?view=detailv2&iss=sbi&FORM=IRSBIQ&q=imgurl:$encodedUrl"
+            val request = okhttp3.Request.Builder()
+                .url(bingUrl)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36")
+                .build()
+
+            val response = client.newCall(request).execute()
+            val html = response.body?.string() ?: ""
+            
+            // Extract visual leads with source icons/urls
+            val bingLeadRegex = "mediaurl=(http[s]?%3a%2f%2f[^\"]+?)&.*?expurl=(http[s]?%3a%2f%2f[^\"]+?)&".toRegex()
+            var bingCount = 0
+            bingLeadRegex.findAll(html).forEach { matchResult ->
+                val thumb = android.net.Uri.decode(matchResult.groups[1]?.value ?: "")
+                val link = android.net.Uri.decode(matchResult.groups[2]?.value ?: "")
+                
+                if (link.isNotEmpty() && results.none { it.link == link }) {
+                    val platform = SocialMediaDetector.detectPlatform(link)
+                    results.add(SerpVisualMatch(
+                        title = if (platform.isProfileBased) "${platform.name} Profile" else "Social Lead",
+                        link = link,
+                        source = platform.name,
+                        thumbnail = if (thumb.isNotEmpty()) thumb else null,
+                        score = 2200
+                    ))
+                    bingCount++
+                }
+            }
+            onLog("✓ Social Index: Found $bingCount profile leads")
+        } catch (e: Exception) {
+            onLog("⚠ Social Index probe failed")
+        }
+
+        // ENGINE 3: GOOGLE (OSINT Organic Search)
+        try {
+            onLog("Finalizing Organic Search (Google)...")
+            val googleUrl = "https://www.google.com/searchbyimage?image_url=$encodedUrl&safe=off"
+            val request = okhttp3.Request.Builder()
+                .url(googleUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+                .build()
+
+            val response = client.newCall(request).execute()
+            val html = response.body?.string() ?: ""
+            
+            val organicPattern = "<a href=\"(https?://[^\"]+)\"[^>]*><h3[^>]*>(.*?)</h3>".toRegex(RegexOption.DOT_MATCHES_ALL)
+            organicPattern.findAll(html).forEach { matchResult ->
+                val link = matchResult.groups[1]?.value ?: ""
+                val title = matchResult.groups[2]?.value?.replace("<[^>]*>".toRegex(), "")?.trim() ?: "Organic Match"
+                
+                if (!link.contains("google.com") && results.none { it.link == link }) {
+                    results.add(SerpVisualMatch(
+                        title = title,
+                        link = link,
+                        source = SocialMediaDetector.detectPlatform(link).name,
+                        thumbnail = null,
+                        score = 1800
+                    ))
+                }
+            }
+        } catch (e: Exception) {}
+
+        results.distinctBy { it.link }
     }
 }

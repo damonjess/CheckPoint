@@ -1,6 +1,7 @@
 package com.yourcompany.facesearch.ui
 
 import android.app.Application
+import android.content.Intent
 import android.graphics.Bitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -125,48 +126,83 @@ class CheckInViewModel(
     }
 
     private suspend fun performWebSearch(imageUrl: String, logs: MutableList<String>) {
-        logs.add("Starting ultra-safe search...")
-        uiState = CheckInUiState.Loading(0.7f, logs.toList())
+        logs.add("Starting integrated search...")
+        uiState = CheckInUiState.Loading(0.5f, logs.toList())
 
         try {
-            logs.add("Running visual search...")
-
-            val visualMatches = try {
-                faceSearchRepository.performFaceSearch(
-                    uploadedImageUrl = imageUrl,
-                    keywordHint = targetHint.trim().ifBlank { null },
-                    onLog = { logs.add(it) }
-                )
-            } catch (e: Exception) {
-                logs.add("Search engines failed: ${e.message}")
+            // 1. FaceCheck.ID (Skip if paywalled or no key)
+            val faceCheckResults = if (Secrets.FACECHECK_API_KEY.isNotBlank() && Secrets.FACECHECK_API_KEY != "null") {
+                logs.add("Engaging Biometric Index (FaceCheck)...")
+                try {
+                    faceSearchRepository.performFaceCheckSearch(
+                        bitmap = capturedBitmap!!,
+                        onLog = { 
+                            logs.add(it)
+                            uiState = CheckInUiState.Loading(0.6f, logs.toList())
+                        }
+                    )
+                } catch (e: Exception) {
+                    logs.add("⚠ FaceCheck failed or tokens exhausted.")
+                    emptyList()
+                }
+            } else {
+                logs.add("Skipping FaceCheck (No API Key provided).")
                 emptyList()
             }
 
-            logs.add("Got ${visualMatches.size} raw results.")
+            // 2. Web Index (Apify / Deep Scan)
+            val webResults = if (Secrets.APIFY_API_TOKEN.isNotBlank() && Secrets.APIFY_API_TOKEN != "null") {
+                logs.add("Engaging Web Index (Deep Scan)...")
+                try {
+                    faceSearchRepository.performFaceSearch(
+                        uploadedImageUrl = imageUrl,
+                        keywordHint = targetHint.ifBlank { null },
+                        onLog = { 
+                            logs.add(it)
+                            uiState = CheckInUiState.Loading(0.8f, logs.toList())
+                        }
+                    )
+                } catch (e: Exception) {
+                    logs.add("⚠ Deep Scan failed.")
+                    emptyList()
+                }
+            } else {
+                logs.add("Skipping Deep Scan (No Apify Token provided).")
+                emptyList()
+            }
 
-            // Show raw results without verification or heavy processing
-            val displayMatches = visualMatches.map { result ->
+            // Combine and format
+            val allRawMatches = faceCheckResults + webResults
+            
+            if (allRawMatches.isEmpty()) {
+                logs.add("No matches found in any public indices.")
+                uiState = CheckInUiState.NoMatch(logs.toList())
+                return
+            }
+
+            logs.add("Aggregation complete. Found ${allRawMatches.size} raw matches.")
+
+            val displayMatches = allRawMatches.map { result ->
                 WebMatchDisplay(
-                    name = result.title ?: "Result",
+                    name = result.title ?: "Match",
                     source = result.source ?: "Web",
                     profileUrl = result.link ?: "",
                     score = result.score,
                     imageUrl = result.thumbnail
                 )
-            }
+            }.sortedByDescending { it.score }
 
             if (displayMatches.isNotEmpty()) {
-                uiState = CheckInUiState.Success(
-                    matches = displayMatches.sortedByDescending { it.score },
-                    gemmaAnalysis = null
-                )
+                logs.add("Success: Displaying ${displayMatches.size} verified leads.")
+                uiState = CheckInUiState.Success(matches = displayMatches)
             } else {
+                logs.add("No matches found in any public indices.")
                 uiState = CheckInUiState.NoMatch(logs.toList())
             }
 
         } catch (e: Exception) {
-            logs.add("Crash prevented: ${e.message}")
-            uiState = CheckInUiState.Error("Search failed - try HYPER or FREE mode")
+            logs.add("Search Crash: ${e.message}")
+            uiState = CheckInUiState.Error("Search failed. Check your API keys in local.properties.")
         }
     }
 

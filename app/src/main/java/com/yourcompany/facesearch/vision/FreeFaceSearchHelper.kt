@@ -21,16 +21,24 @@ class FreeFaceSearchHelper(private val context: Context, private val cropper: Na
     suspend fun openGoogleLensOnly(bitmap: Bitmap, nameHint: String?) {
         val uri = saveImage(cropper.prepareFaceForSearch(bitmap))
         
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(Uri.parse("https://lens.google.com/upload"), "image/jpeg")
+        // Use ACTION_SEND for sharing the image to Google Lens or other search apps
+        // This avoids the confusing "ACTION_VIEW with URL + MimeType" which triggers gallery apps
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "image/jpeg"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         
         try {
-            context.startActivity(intent)
+            // Google Lens is part of the Google App, we can try to target it or use a chooser
+            val chooser = Intent.createChooser(intent, "Search with Google Lens / Internet")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
         } catch (e: Exception) {
-            context.startActivity(Intent.createChooser(intent, "Open Google Lens"))
+            // Fallback to browser if everything else fails
+            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://lens.google.com/upload"))
+            browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(browserIntent)
         }
     }
 

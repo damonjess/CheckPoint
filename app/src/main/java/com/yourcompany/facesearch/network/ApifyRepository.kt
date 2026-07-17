@@ -8,12 +8,83 @@ import retrofit2.converter.gson.GsonConverterFactory
 class ApifyRepository(
     private val token: String = Secrets.APIFY_API_TOKEN
 ) {
+    fun hasToken(): Boolean = token.isNotBlank() && token != "null"
+
     private val api: ApifyApiService by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.apify.com/")
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(ApifyApiService::class.java)
+    }
+
+    /**
+     * Reverse Image Search: Uses Yandex/Google Lens scrapers on Apify 
+     * to find visual matches for a hosted image URL.
+     */
+    suspend fun performReverseImageSearch(imageUrl: String, onLog: (String) -> Unit): List<SerpVisualMatch> {
+        // Try multiple actors if one fails
+        val actors = listOf(
+            "johnvc~yandex-reverse-image-search",
+            "getascraper~yandex-reverse-image-search"
+        )
+        
+        if (token.isBlank()) {
+            onLog("⚠ APIFY_API_TOKEN is missing. Skipping deep scan.")
+            return emptyList()
+        }
+
+        for (actorId in actors) {
+            try {
+                onLog("Engaging Deep Scan ($actorId)...")
+                
+                // Flexible input to satisfy different Yandex scrapers
+                val input = mapOf(
+                    "imageUrl" to imageUrl,
+                    "startUrls" to listOf(mapOf("url" to imageUrl)),
+                    "maxItems" to 20
+                )
+                
+                val response = api.runActor(actorId, token, input)
+                
+                if (response.isSuccessful) {
+                    val datasetId = response.body()?.data?.defaultDatasetId
+                    if (datasetId != null) {
+                        onLog("Deep Scan running (Dataset: ${datasetId.take(6)}...)")
+                        
+                        // Poll for completion
+                        repeat(12) {
+                            delay(4000)
+                            val itemsResponse = api.getDatasetItems(datasetId, token)
+                            if (itemsResponse.isSuccessful) {
+                                val items = itemsResponse.body()
+                                if (!items.isNullOrEmpty()) {
+                                    onLog("✓ Found ${items.size} matches via $actorId")
+                                    return items.mapNotNull { item ->
+                                        val title = item["title"]?.toString() ?: item["site"]?.toString() ?: "Web Match"
+                                        val link = item["url"]?.toString() ?: item["link"]?.toString() ?: return@mapNotNull null
+                                        val thumbnail = item["thumbnail"]?.toString() ?: item["imageUrl"]?.toString() ?: item["img"]?.toString()
+                                        
+                                        SerpVisualMatch(
+                                            title = title,
+                                            link = link,
+                                            source = item["source"]?.toString() ?: "Public Index",
+                                            thumbnail = thumbnail,
+                                            score = 2200
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    onLog("⚠ Actor $actorId rejected request: ${response.code()}")
+                }
+            } catch (e: Exception) {
+                onLog("⚠ Actor $actorId error: ${e.message}")
+            }
+        }
+        return emptyList()
     }
 
     /**

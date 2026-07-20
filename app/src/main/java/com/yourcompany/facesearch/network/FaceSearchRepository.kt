@@ -22,15 +22,17 @@ class FaceSearchRepository(
 ) {
 
     private val stealthClient = OkHttpClient.Builder()
-        .connectTimeout(120, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(120, TimeUnit.SECONDS)
+        .connectTimeout(180, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
+        .writeTimeout(180, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
-    // Replace with your actual deployed backend URL 
-    // Use http://10.0.2.2:3000/api/search for Emulator
-    // Use http://127.0.0.1:3000/api/search if using 'adb reverse tcp:3000 tcp:3000'
-    private val BACKEND_URL = "http://localhost:3000/api/search"
+    // Smart discovery: tries local Termux and Emulator Host
+    private val BACKEND_URLS = listOf(
+        "http://127.0.0.1:3000/api/search",
+        "http://10.0.2.2:3000/api/search"
+    )
 
     suspend fun performFaceCheckSearch(
         bitmap: Bitmap,
@@ -72,14 +74,11 @@ class FaceSearchRepository(
             onLog("INITIATING ASYNCHRONOUS PROBE...")
 
             var retryCount = 0
-            val maxRetries = 60 // 2 minutes
+            val maxRetries = 60 
             
             while (retryCount < maxRetries) {
                 val searchResponse = faceCheckApi.search(
-                    FaceCheckSearchRequest(
-                        idSearch = idSearch, 
-                        demo = true 
-                    ),
+                    FaceCheckSearchRequest(idSearch = idSearch, demo = true),
                     bearerToken
                 )
                 
@@ -103,18 +102,13 @@ class FaceSearchRepository(
                             )
                         }
                     }
-                    
-                    if (progress >= 100 || status.contains("completed", ignoreCase = true)) {
-                        break
-                    }
+                    if (progress >= 100 || status.contains("completed", ignoreCase = true)) break
                 } else {
                     onLog("⚠ POLLING ERROR: HTTP ${searchResponse.code()}")
                 }
-                
                 delay(2000)
                 retryCount++
             }
-            
             onLog("⚠ PROBE FINISHED: No results found.")
             return emptyList()
         } catch (e: Exception) {
@@ -130,107 +124,109 @@ class FaceSearchRepository(
     ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
         val verifiedLeads = mutableListOf<SerpVisualMatch>()
         
-        // 1. STABLE API ROUTE (SerpApi) - Recommended for Production
-        if (serpApiKey.isNotBlank() && serpApiKey != "null") {
-            onLog("Engaging Official Visual Search Index (SerpApi)...")
+        // 1. Official Index (SerpApi)
+        if (ApiClient.API_KEY.isNotBlank() && ApiClient.API_KEY != "null") {
+            onLog("Engaging Official Visual Search Index...")
             try {
                 val response = apiService.searchVisual(
                     engine = "google_lens",
                     googleImageUrl = uploadedImageUrl,
                     query = keywordHint,
-                    apiKey = serpApiKey
+                    apiKey = ApiClient.API_KEY
                 )
-                
                 if (response.isSuccessful) {
-                    val apiMatches = response.body()?.visualMatches ?: response.body()?.visualSearchResults
-                    apiMatches?.let { matches ->
-                        onLog("✓ Stable Index: Found ${matches.size} high-fidelity matches")
-                        verifiedLeads.addAll(matches.map { it.copy(source = it.source ?: "Google Lens") })
+                    response.body()?.let { body ->
+                        val matches = body.visualMatches ?: body.visualSearchResults
+                        matches?.let {
+                            onLog("✓ Stable Index: Found ${it.size} high-fidelity matches")
+                            verifiedLeads.addAll(it.map { m -> m.copy(source = m.source ?: "Google Lens") })
+                        }
                     }
-                } else {
-                    onLog("⚠ Stable Index rejection: HTTP ${response.code()}")
                 }
             } catch (e: Exception) {
                 onLog("⚠ Stable Index error: ${e.message}")
             }
         }
 
-        // 2. STEALTH AUTOMATION ROUTE (Node.js Scraper) - Fallback/Free Alternative
+        // 2. Stealth Scraper (Termux)
         if (verifiedLeads.isEmpty()) {
             onLog("Connecting to Stealth Automation Cluster...")
-            try {
-                val jsonPayload = JSONObject().apply {
-                    put("imageUrl", uploadedImageUrl)
-                    put("keywordHint", keywordHint ?: "")
-                }.toString()
+            
+            var success = false
+            for (url in BACKEND_URLS) {
+                if (success) break
+                try {
+                    val label = if (url.contains("127.0.0.1")) "Local Termux" else "Emulator Host"
+                    onLog("Probing $label...")
+                    
+                    val jsonPayload = JSONObject().apply {
+                        put("imageUrl", uploadedImageUrl)
+                        put("keywordHint", keywordHint ?: "")
+                    }.toString()
 
-                val requestBody = jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
-                val request = Request.Builder().url(BACKEND_URL).post(requestBody).build()
+                    val requestBody = jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
+                    val request = Request.Builder().url(url).post(requestBody).build()
 
-                onLog("Executing deep scraper via anti-detection context...")
-                stealthClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val responseData = response.body?.string() ?: ""
-                        if (responseData.isBlank()) {
-                            onLog("⚠ Engine returned empty stream.")
-                            return@use
-                        }
-                        
-                        // Robust parsing: Handle both {success:true, matches:[]} and direct [...] array responses
-                        val matchesArray = try {
-                            if (responseData.trim().startsWith("[")) {
-                                org.json.JSONArray(responseData)
+                    stealthClient.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            success = true
+                            val responseData = response.body?.string() ?: ""
+                            onLog("✓ DATA RECEIVED: ${responseData.length} bytes.")
+                            
+                            val matchesArray = try {
+                                val trimmed = responseData.trim()
+                                if (trimmed.startsWith("[")) {
+                                    org.json.JSONArray(trimmed)
+                                } else if (trimmed.startsWith("{")) {
+                                    val json = JSONObject(trimmed)
+                                    if (json.has("matches")) json.getJSONArray("matches") else null
+                                } else null
+                            } catch (e: Exception) {
+                                onLog("✗ PARSE ERROR: ${e.message}")
+                                null
+                            }
+
+                            if (matchesArray != null && matchesArray.length() > 0) {
+                                onLog("✓ Successfully parsed ${matchesArray.length()} visual targets.")
+                                for (i in 0 until matchesArray.length()) {
+                                    try {
+                                        val item = matchesArray.getJSONObject(i)
+                                        val link = item.optString("link")
+                                        if (link.isNotBlank()) {
+                                            verifiedLeads.add(SerpVisualMatch(
+                                                title = item.optString("title").ifBlank { "Visual Match" },
+                                                link = link,
+                                                source = item.optString("source", "Stealth Engine"),
+                                                thumbnail = item.optString("thumbnail").ifBlank { null },
+                                                score = 1000
+                                            ))
+                                        }
+                                    } catch (e: Exception) { /* Skip */ }
+                                }
                             } else {
-                                val jsonResponse = JSONObject(responseData)
-                                if (jsonResponse.has("matches")) {
-                                    jsonResponse.getJSONArray("matches")
-                                } else if (jsonResponse.optBoolean("success", false)) {
-                                    org.json.JSONArray() // Success but no matches field?
-                                } else {
-                                    onLog("⚠ Engine reported failure: ${jsonResponse.optString("error", "Unknown")}")
-                                    null
-                                }
+                                onLog("⚠ No valid matches found in response.")
                             }
-                        } catch (e: Exception) {
-                            onLog("⚠ Parse error: ${e.message?.take(50)}...")
-                            null
-                        }
-
-                        if (matchesArray != null) {
-                            onLog("Crawl complete. Analyzing ${matchesArray.length()} potential visual hits...")
-                            for (i in 0 until matchesArray.length()) {
-                                val item = matchesArray.getJSONObject(i)
-                                val title = item.optString("title").ifBlank { "Visual Match Profile" }
-                                val link = item.optString("link")
-                                if (link.isNotBlank()) {
-                                    verifiedLeads.add(SerpVisualMatch(
-                                        title = title,
-                                        link = link,
-                                        source = item.optString("source", "Stealth Engine"),
-                                        thumbnail = item.optString("thumbnail").ifBlank { null },
-                                        score = 1000
-                                    ))
-                                }
+                        } else {
+                            onLog("⚠ HTTP ${response.code} from $label")
+                            if (response.code == 504) {
+                                onLog("ℹ Gateway Timeout: Server is likely under high load.")
                             }
                         }
-                    } else {
-                        onLog("⚠ Stealth engine rejection: HTTP ${response.code}")
                     }
+                } catch (e: Exception) {
+                    onLog("⚠ $url fail: ${e.localizedMessage ?: "Refused"}")
                 }
-            } catch (e: Exception) {
-                onLog("⚠ Stealth connection error: ${e.localizedMessage}")
             }
+            if (!success) onLog("✗ Cluster unreachable. Check Termux Port 3000.")
         }
 
-        // SCORING & DEDUPING
-        return@withContext verifiedLeads
+        // Final Processing & Scoring
+        verifiedLeads
             .map { match ->
                 var score = match.score
                 val link = match.link?.lowercase() ?: ""
-                
                 if (link.contains("linkedin.com")) score += 1500
                 if (link.contains("instagram.com") || link.contains("facebook.com")) score += 800
-                
                 if (!keywordHint.isNullOrBlank() && match.title?.lowercase()?.contains(keywordHint.lowercase()) == true) {
                     score += 2000
                 }

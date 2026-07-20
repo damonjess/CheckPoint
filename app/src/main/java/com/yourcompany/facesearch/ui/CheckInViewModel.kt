@@ -127,12 +127,17 @@ class CheckInViewModel(
 
         try {
             logs.add("Running engine route validation [Mode: ${searchMode.name}]...")
+            uiState = CheckInUiState.Loading(0.75f, logs.toList())
 
             val visualMatches = try {
                 faceSearchRepository.performFaceSearch(
                     uploadedImageUrl = imageUrl,
                     keywordHint = hintText.trim().ifBlank { null },
-                    onLog = { logs.add(it) }
+                    onLog = { 
+                        logs.add(it)
+                        // Trigger UI update for every log line
+                        uiState = CheckInUiState.Loading(0.8f, logs.toList())
+                    }
                 )
             } catch (e: Exception) {
                 logs.add("Search engines failed: ${e.message}")
@@ -140,10 +145,12 @@ class CheckInViewModel(
             }
 
             logs.add("Got ${visualMatches.size} raw candidates from crawl.")
+            uiState = CheckInUiState.Loading(0.9f, logs.toList())
 
             // BRANCHING: If mode is AGGRESSIVE/HYPER, apply strict local signature alignment
             var displayMatches = if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
                 logs.add("Deep Mode verified. Extracting target matrices...")
+                uiState = CheckInUiState.Loading(0.95f, logs.toList())
                 verifyResultsLocally(visualMatches, logs)
             } else {
                 // Standard mode processing fallback

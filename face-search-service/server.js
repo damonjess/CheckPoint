@@ -24,31 +24,36 @@ app.post('/api/search', async (req, res) => {
             isFinished = true;
             res.status(504).json({ success: false, error: "Search timeout", matches: [] });
         }
-    }, 120000); // 120 seconds - matches app timeout
+    }, 30000); // 30 seconds max
 
     try {
         console.log("🚀 Launching browser...");
         browser = await puppeteer.launch({
             headless: true,
             executablePath: '/data/data/com.termux/files/usr/bin/chromium-browser',
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--single-process'
+            ]
         });
 
         const page = await browser.newPage();
         await page.setViewport({ width: 1920, height: 1080 });
 
-        const allResults = [];
-
-        // YANDEX
+        // YANDEX - Minimal scrolls for speed
         console.log("🔍 Querying Yandex...");
         try {
             const url = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-            await delay(3000);
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
+            await delay(1500);
 
-            for (let i = 0; i < 8; i++) {
+            // Only 3 scrolls for speed
+            for (let i = 0; i < 3; i++) {
                 await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-                await delay(1000 + Math.random() * 500);
+                await delay(600);
             }
 
             const results = await page.evaluate(() => {
@@ -77,67 +82,19 @@ app.post('/api/search', async (req, res) => {
             });
 
             console.log(`✓ Yandex: ${results.length} results`);
-            allResults.push(...results);
+
+            clearTimeout(timeout);
+            isFinished = true;
+            res.json({ success: true, matches: results.slice(0, 20) });
+
         } catch (e) {
             console.log(`⚠️ Yandex error: ${e.message}`);
-        }
-
-        // TINEYE
-        console.log("🔍 Querying TinEye...");
-        try {
-            await page.goto(`https://tineye.com/search?url=${encodeURIComponent(imageUrl)}`, { waitUntil: 'domcontentloaded', timeout: 20000 });
-            await delay(2000);
-
-            for (let i = 0; i < 4; i++) {
-                await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-                await delay(800);
+            clearTimeout(timeout);
+            if (!isFinished && !res.headersSent) {
+                isFinished = true;
+                res.status(500).json({ success: false, error: e.message, matches: [] });
             }
-
-            const results = await page.evaluate(() => {
-                const items = [];
-                const seen = new Set();
-                document.querySelectorAll('.match, .result, a[href^="http"]').forEach(el => {
-                    try {
-                        const linkEl = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
-                        const href = linkEl ? linkEl.href : '';
-                        const imgEl = el.querySelector('img');
-                        let imgSrc = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || '') : '';
-                        const title = el.textContent.trim().slice(0, 150) || 'TinEye Match';
-                        let source = 'TinEye';
-                        let isSocial = false;
-                        const domains = ['facebook.com', 'instagram.com', 'linkedin.com', 'twitter.com', 'vk.com'];
-                        for (const d of domains) {
-                            if (href.includes(d)) { source = d.split('.')[0]; isSocial = true; break; }
-                        }
-                        if (href && !seen.has(href) && !href.includes('tineye.com')) {
-                            seen.add(href);
-                            items.push({ title, link: href, thumbnail: imgSrc, source, isSocial });
-                        }
-                    } catch(e) {}
-                });
-                return items;
-            });
-
-            console.log(`✓ TinEye: ${results.length} results`);
-            allResults.push(...results);
-        } catch (e) {
-            console.log(`⚠️ TinEye error: ${e.message}`);
         }
-
-        // Deduplicate
-        const seen = new Set();
-        const uniqueResults = [];
-        for (const item of allResults) {
-            const key = item.link || `${item.title}_${item.source}`;
-            if (!seen.has(key)) { seen.add(key); uniqueResults.push(item); }
-        }
-
-        console.log(`📊 Raw: ${allResults.length} | Unique: ${uniqueResults.length}`);
-        console.log(`✅ Final: ${uniqueResults.length} matches`);
-
-        clearTimeout(timeout);
-        isFinished = true;
-        res.json({ success: true, matches: uniqueResults.slice(0, 30) });
 
     } catch (error) {
         console.log(`⚠️ Error: ${error.message}`);

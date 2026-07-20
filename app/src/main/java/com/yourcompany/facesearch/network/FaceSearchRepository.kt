@@ -22,15 +22,15 @@ class FaceSearchRepository(
 ) {
 
     private val stealthClient = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(120, TimeUnit.SECONDS)
         .build()
 
     // Replace with your actual deployed backend URL 
     // Use http://10.0.2.2:3000/api/search for Emulator
     // Use http://127.0.0.1:3000/api/search if using 'adb reverse tcp:3000 tcp:3000'
-    private val BACKEND_URL = "http://127.0.0.1:3000/api/search"
+    private val BACKEND_URL = "http://localhost:3000/api/search"
 
     suspend fun performFaceCheckSearch(
         bitmap: Bitmap,

@@ -16,3 +16,11 @@ local.properties
 
 # Secrets
 app/src/main/java/com/yourcompany/facesearch/network/Secrets.kt
+
+# Node
+node_modules/
+face-search-service/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env

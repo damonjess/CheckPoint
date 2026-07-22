@@ -22,10 +22,10 @@ class FaceSearchRepository(
 ) {
 
     private val stealthClient = OkHttpClient.Builder()
-        .connectTimeout(180, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)
-        .writeTimeout(180, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
+        .connectTimeout(15, TimeUnit.SECONDS) // Fast fail for discovery
+        .readTimeout(60, TimeUnit.SECONDS)    // Allow 60s for Puppeteer to finish
+        .writeTimeout(20, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)      // We handle retries manually via BACKEND_URLS
         .build()
 
     // Smart discovery: tries local Termux and Emulator Host
@@ -147,8 +147,10 @@ class FaceSearchRepository(
                 val request = Request.Builder().url(url).post(requestBody).build()
 
                 stealthClient.newCall(request).execute().use { response ->
+                    // If we got ANY response, we stop trying other URLs to avoid "double scanning"
+                    success = true 
+                    
                     if (response.isSuccessful) {
-                        success = true
                         val responseData = response.body?.string() ?: ""
                         onLog("✓ DATA RECEIVED: ${responseData.length} bytes")
 
@@ -169,12 +171,13 @@ class FaceSearchRepository(
                         }
 
                         if (matchesArray != null && matchesArray.length() > 0) {
-                            onLog("✓ Found ${matchesArray.length()} visual targets in cluster.")
+                            var validLinks = 0
                             for (i in 0 until matchesArray.length()) {
                                 try {
                                     val item = matchesArray.getJSONObject(i)
                                     val link = item.optString("link")
                                     if (link.isNotBlank()) {
+                                        validLinks++
                                         verifiedLeads.add(SerpVisualMatch(
                                             title = item.optString("title").ifBlank { "Visual Match" },
                                             link = link,
@@ -185,18 +188,22 @@ class FaceSearchRepository(
                                     }
                                 } catch (e: Exception) { /* Skip */ }
                             }
+                            onLog("✓ Parsed $validLinks valid visual targets from cluster.")
                         } else if (matchesArray != null) {
                             onLog("ℹ Cluster returned 0 results for this probe.")
                         }
                     } else {
-                        onLog("⚠ HTTP ${response.code} from $label")
+                        onLog("⚠ Cluster error: HTTP ${response.code}")
                         val errorBody = response.body?.string() ?: "No error body"
                         onLog("  -> ${errorBody.take(100)}")
                     }
                 }
+            } catch (e: java.io.IOException) {
+                // Connection failed (Refused, Timeout, etc.) - Try next URL
+                onLog("✗ Connection failed: $url")
             } catch (e: Exception) {
-                val errorMsg = e.localizedMessage ?: e.message ?: "Connection Refused"
-                onLog("✗ $url fail: $errorMsg")
+                onLog("✗ Unexpected error: ${e.message}")
+                success = true // Stop on logic errors
             }
         }
         if (!success) onLog("✗ Cluster unreachable. Check Termux Port 3000.")

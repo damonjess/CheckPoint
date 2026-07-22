@@ -256,14 +256,23 @@ class CheckInViewModel(
         val verified = mutableListOf<WebMatchDisplay>()
         val hint = targetHint.lowercase()
         
-        for (match in matches.take(15)) {
-            if (match.thumbnail.isNullOrBlank()) continue
+        onLog("Biometric Verification: Processing top ${minOf(matches.size, 30)} leads...")
+        
+        for (match in matches.take(30)) {
+            if (match.thumbnail.isNullOrBlank()) {
+                if (debugMode) onLog("× Skipping: No thumbnail for ${match.source}")
+                continue
+            }
             try {
-                val thumb = loadThumbnailBitmap(match.thumbnail) ?: continue
+                val thumb = loadThumbnailBitmap(match.thumbnail)
+                if (thumb == null) {
+                    if (debugMode) onLog("× Skipping: Failed to load ${match.thumbnail.take(20)}...")
+                    continue
+                }
+                
                 val similarity = faceVerifier.verifyFaceMatch(thumb, sourceEmbedding)
                 
                 val nameScore = if (hint.isNotBlank() && match.title?.lowercase()?.contains(hint) == true) 0.25f else 0f
-                
                 val finalScore = (similarity ?: 0f) + nameScore
                 
                 if (finalScore > 0.40f) { // Further relaxed
@@ -275,12 +284,14 @@ class CheckInViewModel(
                         score = match.score + (finalScore * 18000).toInt(),
                         imageUrl = match.thumbnail
                     ))
-                    onLog("✓ Match verified: ${"%.2f".format(similarity ?: 0f)} similarity")
+                    onLog("✓ Match verified: ${"%.2f".format(similarity ?: 0f)} similarity [${match.source}]")
                 } else {
-                    if (debugMode) onLog("× Low similarity: ${"%.2f".format(similarity ?: 0f)}")
+                    if (debugMode) onLog("× Threshold: ${"%.2f".format(similarity ?: 0f)} < 0.40")
                 }
                 thumb.recycleSafely()
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                if (debugMode) onLog("× Verify error: ${e.message}")
+            }
         }
         return verified
     }
@@ -293,10 +304,17 @@ class CheckInViewModel(
 
     fun onConfirmFreeSearch(bitmap: Bitmap) {
         if (isSearching) return
+        
+        val original = capturedBitmap ?: bitmap
+        
+        // AGGRESSIVE/HYPER modes trigger the internal deep search pipeline
+        if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
+            onPhotoCaptured(original)
+            return
+        }
+
         isSearching = true
         viewModelScope.launch {
-            val original = capturedBitmap ?: bitmap
-            
             try {
                 // FREE mode: Skip upload entirely, just open browser tabs
                 if (searchMode == SearchMode.FREE) {
@@ -307,14 +325,9 @@ class CheckInViewModel(
                     return@launch
                 }
                 
-                if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
-                    uiState = CheckInUiState.Loading(0.1f, listOf("Starting deep search..."))
-                    onPhotoCaptured(original)
-                } else {
-                    freeSearch.searchMyPhoto(original, targetHint)
-                    delay(1000)
-                    uiState = CheckInUiState.Idle
-                }
+                freeSearch.searchMyPhoto(original, targetHint)
+                delay(1000)
+                uiState = CheckInUiState.Idle
             } catch (e: Exception) {
                 uiState = CheckInUiState.Error("Search operation failed: ${e.message}", listOf("Engine error"))
             } finally {

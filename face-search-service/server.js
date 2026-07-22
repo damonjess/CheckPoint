@@ -9,6 +9,10 @@ app.use(express.json());
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+app.get('/ping', (req, res) => {
+    res.json({ status: "online", engines: ["yandex", "bing"] });
+});
+
 app.post('/api/search', async (req, res) => {
     const { imageUrl, keywordHint } = req.body;
     console.log(`📸 Search: ${imageUrl} | Hint: ${keywordHint || 'None'}`);
@@ -19,13 +23,13 @@ app.post('/api/search', async (req, res) => {
 
     let browser;
     let isFinished = false;
-    // Aggressive 15-second timeout - forces super fast response
+    // 40-second timeout - Bing/Yandex together take more time
     const timeout = setTimeout(() => {
         if (!isFinished && !res.headersSent) {
             isFinished = true;
             res.json({ success: false, error: "Search timeout", matches: [] });
         }
-    }, 15000);
+    }, 40000);
 
     try {
         console.log("🚀 Launching browser...");
@@ -44,63 +48,87 @@ app.post('/api/search', async (req, res) => {
         const page = await browser.newPage();
         await page.setViewport({ width: 1920, height: 1080 });
 
+        const allMatches = [];
+
         // =============================================
-        // ONLY YANDEX - SUPER FAST (2 scrolls)
+        // 1. YANDEX (fast mode)
         // =============================================
-        console.log("🔍 Querying Yandex (fast mode)...");
+        console.log("🔍 Querying Yandex...");
         try {
-            const url = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 5000 });
-            await delay(800);
+            const yandexUrl = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
+            await page.goto(yandexUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
+            await delay(500);
 
-            // Only 2 scrolls
-            for (let i = 0; i < 2; i++) {
-                await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-                await delay(400);
-            }
-
-            const results = await page.evaluate(() => {
+            const yandexResults = await page.evaluate(() => {
                 const items = [];
                 const seen = new Set();
                 document.querySelectorAll('.serp-item, .CbirSites-Item, a[href^="http"]').forEach(el => {
                     try {
                         const linkEl = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
                         const href = linkEl ? linkEl.href : '';
+                        if (!href || seen.has(href) || href.includes('yandex.')) return;
+
+                        seen.add(href);
                         const imgEl = el.querySelector('img');
-                        let imgSrc = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || '') : '';
+                        const imgSrc = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || '') : '';
                         const title = el.textContent.trim().slice(0, 100) || 'Visual Match';
-                        let source = 'Yandex';
-                        let isSocial = false;
-                        const domains = ['facebook.com', 'instagram.com', 'linkedin.com', 'twitter.com', 'vk.com'];
-                        for (const d of domains) {
-                            if (href.includes(d)) { source = d.split('.')[0]; isSocial = true; break; }
-                        }
-                        if (href && !seen.has(href) && !href.includes('yandex.com')) {
-                            seen.add(href);
-                            items.push({ title, link: href, thumbnail: imgSrc, source, isSocial });
-                        }
+                        items.push({ title, link: href, thumbnail: imgSrc, source: 'Yandex' });
                     } catch(e) {}
                 });
                 return items;
             });
-
-            console.log(`✓ Yandex: ${results.length} results`);
-
-            clearTimeout(timeout);
-            isFinished = true;
-            res.json({ success: true, matches: results.slice(0, 10) });
-
+            console.log(`✓ Yandex: ${yandexResults.length} found`);
+            allMatches.push(...yandexResults.slice(0, 15));
         } catch (e) {
             console.log(`⚠️ Yandex error: ${e.message}`);
-            clearTimeout(timeout);
-            if (!isFinished && !res.headersSent) {
-                isFinished = true;
-                res.json({ success: false, error: e.message, matches: [] });
-            }
         }
 
+        // =============================================
+        // 2. BING (fast mode)
+        // =============================================
+        console.log("🔍 Querying Bing Visual Search...");
+        try {
+            // Bing often works better with detailv2 URL for image uploads
+            const bingUrl = `https://www.bing.com/images/search?view=detailv2&iss=sbi&FORM=IRSBIQ&redirecturl=${encodeURIComponent(imageUrl)}`;
+            await page.goto(bingUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+            await delay(1000);
+
+            const bingResults = await page.evaluate(() => {
+                const items = [];
+                const seen = new Set();
+                // Bing results are often in .rich_img_grid or similar
+                document.querySelectorAll('.is_m, .is_v, .ovr, a[href^="http"]').forEach(el => {
+                    try {
+                        const linkEl = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
+                        const href = linkEl ? linkEl.href : '';
+                        if (!href || seen.has(href) || href.includes('bing.') || href.includes('microsoft.')) return;
+
+                        seen.add(href);
+                        const title = el.textContent.trim().slice(0, 80) || 'Bing Match';
+                        const imgEl = el.querySelector('img');
+                        const imgSrc = imgEl ? (imgEl.src || '') : '';
+                        items.push({ title, link: href, thumbnail: imgSrc, source: 'Bing' });
+                    } catch(e) {}
+                });
+                return items;
+            });
+            console.log(`✓ Bing: ${bingResults.length} found`);
+            allMatches.push(...bingResults.slice(0, 15));
+        } catch (e) {
+            console.log(`⚠️ Bing error: ${e.message}`);
+        }
+
+        clearTimeout(timeout);
+        isFinished = true;
+
+        // Final response
+        res.json({
+            success: true,
+            matches: allMatches.sort((a, b) => b.isSocial - a.isSocial).slice(0, 40)
+        });
+
     } catch (error) {
-        console.log(`⚠️ Error: ${error.message}`);
+        console.log(`⚠️ Scraper Error: ${error.message}`);
         clearTimeout(timeout);
         if (!isFinished && !res.headersSent) {
             isFinished = true;
@@ -113,5 +141,5 @@ app.post('/api/search', async (req, res) => {
 
 const PORT = 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`⚡ ULTRA-FAST scraper online on port ${PORT}`);
+    console.log(`⚡ MULTI-ENGINE scraper online on port ${PORT}`);
 });

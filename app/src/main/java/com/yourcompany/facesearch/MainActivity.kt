@@ -42,20 +42,19 @@ class MainActivity : ComponentActivity() {
 
         // Connectivity Probe
         lifecycleScope.launch(Dispatchers.IO) {
-            val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).build()
+            val client = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).build()
             val urls = listOf("http://127.0.0.1:3000/ping", "http://10.0.2.2:3000/ping", "http://localhost:3000/ping")
             for (url in urls) {
                 try {
                     val request = Request.Builder().url(url).build()
                     client.newCall(request).execute().use { response ->
                         if (response.isSuccessful) {
-                            val msg = "✓ Backend Cluster Detected at $url"
-                            Log.i("FaceSearch", msg)
-                            // Optionally we could show a toast or update VM
+                            val data = response.body?.string() ?: ""
+                            Log.i("FaceSearch", "✓ Backend Cluster Detected at $url: $data")
                         }
                     }
                 } catch (e: Exception) { 
-                    Log.d("FaceSearch", "Probe $url failed: ${e.message}")
+                    Log.d("FaceSearch", "Probe $url failed")
                 }
             }
         }

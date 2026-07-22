@@ -273,31 +273,25 @@ class CheckInViewModel(
     }
 
     fun onConfirmFreeSearch(bitmap: Bitmap) {
-        if (isSearching) return
         viewModelScope.launch {
             val original = capturedBitmap ?: bitmap
             
-            // FREE mode: Skip upload entirely, just open browser tabs
+            // FORCE FREE MODE: Skip ALL uploads, just open browser
             if (searchMode == SearchMode.FREE) {
-                isSearching = true
-                uiState = CheckInUiState.Loading(0.1f, listOf("Opening search engines..."))
-                freeSearch.searchMyPhotoDirect(original, targetHint)
-                delay(1000)
+                // Save image locally and open browsers directly
+                val uri = freeSearch.saveImageDirect(original)
+                freeSearch.openBrowsersDirect(uri, targetHint)
                 uiState = CheckInUiState.Idle
-                isSearching = false
                 return@launch
             }
             
-            // For other modes, use the normal flow
             if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
+                uiState = CheckInUiState.Loading(0.1f, listOf("Starting deep search..."))
                 onPhotoCaptured(original)
             } else {
-                isSearching = true
-                uiState = CheckInUiState.Loading(0.1f, listOf("Starting deep search..."))
                 freeSearch.searchMyPhoto(original, targetHint)
                 delay(1000)
                 uiState = CheckInUiState.Idle
-                isSearching = false
             }
         }
     }

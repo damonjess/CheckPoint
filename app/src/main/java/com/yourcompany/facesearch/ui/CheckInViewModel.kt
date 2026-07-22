@@ -59,25 +59,42 @@ class CheckInViewModel(
     var searchMode by mutableStateOf(SearchMode.PRECISION)
     var debugMode by mutableStateOf(false)
     
+    private var isSearching = false
     private var sourceEmbedding: FloatArray? = null
 
     fun onPhotoCaptured(bitmap: Bitmap) {
+        if (isSearching) return
+        isSearching = true
         capturedBitmap = bitmap
         
         viewModelScope.launch {
             val logs = mutableListOf("Initializing local optics...")
+            fun addLog(msg: String) {
+                logs.add(msg)
+                uiState = when (val current = uiState) {
+                    is CheckInUiState.Loading -> current.copy(logs = logs.toList())
+                    is CheckInUiState.Error -> current.copy(logs = logs.toList())
+                    is CheckInUiState.NoFaceDetected -> current.copy(logs = logs.toList())
+                    else -> CheckInUiState.Loading(0.2f, logs.toList())
+                }
+            }
+
             uiState = CheckInUiState.Loading(0.1f, logs.toList())
             
             val maxMemory = Runtime.getRuntime().maxMemory() / 1024 / 1024
             val totalMemory = Runtime.getRuntime().totalMemory() / 1024 / 1024
-            logs.add("System: Memory $totalMemory MB / $maxMemory MB")
-            uiState = CheckInUiState.Loading(0.15f, logs.toList())
+            addLog("System: Memory $totalMemory MB / $maxMemory MB")
             
             if (searchMode != SearchMode.RAW) {
-                logs.add("Running Quality Gate...")
+                addLog("Running Quality Gate...")
                 val quality = nativeFaceCropper.validateFaceQuality(bitmap)
                 if (!quality.isGood) {
-                    uiState = CheckInUiState.Error(quality.message)
+                    uiState = if (quality.message.contains("No face", ignoreCase = true)) {
+                        CheckInUiState.NoFaceDetected(logs.toList())
+                    } else {
+                        CheckInUiState.Error(quality.message, logs.toList())
+                    }
+                    isSearching = false
                     return@launch
                 }
             }
@@ -85,18 +102,24 @@ class CheckInViewModel(
             try {
                 val processedBitmap = when (searchMode) {
                     SearchMode.HYPER, SearchMode.AGGRESSIVE -> {
+                        addLog("Applying structural fingerprints...")
                         val base = nativeFaceCropper.cropForSocialProfile(bitmap)
-                        // Make it more unique for better discrimination
                         ImageEnhancer.applyStructuralFingerprint(base)
                     }
-                    SearchMode.BYPASS -> withContext(Dispatchers.Default) {
-                        ImageEnhancer.applyCamouflage(nativeFaceCropper.cropContextual(bitmap))
+                    SearchMode.BYPASS -> {
+                        addLog("Applying camouflage filters...")
+                        withContext(Dispatchers.Default) {
+                            ImageEnhancer.applyCamouflage(nativeFaceCropper.cropContextual(bitmap))
+                        }
                     }
-                    else -> nativeFaceCropper.cropAndAlignFace(bitmap)
+                    else -> {
+                        addLog("Aligning biometric plane...")
+                        nativeFaceCropper.cropAndAlignFace(bitmap)
+                    }
                 }
 
                 if (searchMode != SearchMode.RAW) {
-                    logs.add("Extracting biometric signature...")
+                    addLog("Extracting biometric signature...")
                     sourceEmbedding = withContext(Dispatchers.Default) {
                         val align = nativeFaceCropper.cropAndAlignFace(bitmap)
                         faceEmbedder.getEmbedding(align)
@@ -104,54 +127,59 @@ class CheckInViewModel(
                 }
 
                 uiState = CheckInUiState.Loading(0.25f, logs.toList())
-                logs.add("Hosting probe image...")
+                addLog("Initiating probe hosting...")
 
                 val uploadBitmap = nativeFaceCropper.prepareFaceForSearch(processedBitmap)
-                val publicUrl = imageUploadRepository.uploadImage(uploadBitmap)
+                val publicUrl = imageUploadRepository.uploadImage(uploadBitmap, ::addLog)
 
                 if (publicUrl != null) {
-                    logs.add("Upload successful. Starting search...")
+                    addLog("✓ Probe active at ${publicUrl.take(30)}...")
                     performWebSearch(publicUrl, targetHint.trim(), logs)
                 } else {
-                    uiState = CheckInUiState.Error("Image hosting failed.")
+                    uiState = CheckInUiState.Error("Image hosting failed. Check console for details.", logs.toList())
                 }
             } catch (e: Exception) {
-                uiState = CheckInUiState.Error("Processing failed: ${e.message}")
+                uiState = CheckInUiState.Error("Processing failed: ${e.message}", logs.toList())
+            } finally {
+                isSearching = false
             }
         }
     }
 
     private suspend fun performWebSearch(imageUrl: String, hintText: String, logs: MutableList<String>) {
-        logs.add("Starting ultra-safe search...")
+        fun addLog(msg: String) {
+            logs.add(msg)
+            uiState = when (val current = uiState) {
+                is CheckInUiState.Loading -> current.copy(logs = logs.toList())
+                is CheckInUiState.Error -> current.copy(logs = logs.toList())
+                is CheckInUiState.NoMatch -> current.copy(logs = logs.toList())
+                else -> CheckInUiState.Loading(0.8f, logs.toList())
+            }
+        }
+
+        addLog("Routing search request through automation cluster...")
         uiState = CheckInUiState.Loading(0.7f, logs.toList())
 
         try {
-            logs.add("Running engine route validation [Mode: ${searchMode.name}]...")
-            uiState = CheckInUiState.Loading(0.75f, logs.toList())
-
             val visualMatches = try {
                 faceSearchRepository.performFaceSearch(
                     uploadedImageUrl = imageUrl,
                     keywordHint = hintText.trim().ifBlank { null },
-                    onLog = { 
-                        logs.add(it)
-                        // Trigger UI update for every log line
-                        uiState = CheckInUiState.Loading(0.8f, logs.toList())
-                    }
+                    onLog = ::addLog
                 )
             } catch (e: Exception) {
-                logs.add("Search engines failed: ${e.message}")
+                addLog("✗ CRITICAL SEARCH ERROR: ${e.message}")
                 emptyList()
             }
 
-            logs.add("Got ${visualMatches.size} raw candidates from crawl.")
+            addLog("Processing results: ${visualMatches.size} candidates found.")
             uiState = CheckInUiState.Loading(0.9f, logs.toList())
 
             // BRANCHING: If mode is AGGRESSIVE/HYPER, apply strict local signature alignment
             var displayMatches = if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
-                logs.add("Deep Mode verified. Extracting target matrices...")
+                addLog("Deep Mode verified. Extracting target matrices...")
                 uiState = CheckInUiState.Loading(0.95f, logs.toList())
-                verifyResultsLocally(visualMatches, logs)
+                verifyResultsLocally(visualMatches, ::addLog)
             } else {
                 // Standard mode processing fallback
                 visualMatches.map { result ->
@@ -168,7 +196,7 @@ class CheckInViewModel(
 
             // FALLBACK: If filtering was too strict, show at least top 3 raw matches
             if (displayMatches.isEmpty() && visualMatches.isNotEmpty()) {
-                logs.add("⚠ High-confidence filter rejected all leads. Showing raw visual matches instead.")
+                addLog("⚠ High-confidence filter rejected all leads. Showing raw visual matches instead.")
                 displayMatches = visualMatches.take(5).map { result ->
                     WebMatchDisplay(
                         name = result.title ?: "Visual Match",
@@ -180,7 +208,7 @@ class CheckInViewModel(
                 }
             }
 
-            logs.add("Search phase complete. ${displayMatches.size} visual leads ready.")
+            addLog("Search phase complete. ${displayMatches.size} visual leads ready.")
 
             if (displayMatches.isNotEmpty()) {
                 uiState = CheckInUiState.Success(
@@ -191,20 +219,20 @@ class CheckInViewModel(
             } else {
                 // Fallback assistance to help users pivot if zero leads clear the threshold
                 if (visualMatches.isNotEmpty()) {
-                    logs.add("ℹ Hint: ${visualMatches.size} traces found but filtered out by local signature limits.")
+                    addLog("ℹ Hint: ${visualMatches.size} traces found but filtered out by local signature limits.")
                 }
                 uiState = CheckInUiState.NoMatch(logs.toList())
             }
 
         } catch (e: Exception) {
-            logs.add("Crash prevented: ${e.message}")
-            uiState = CheckInUiState.Error("Search failed - fallback to FREE mode suggested")
+            addLog("Crash prevented: ${e.message}")
+            uiState = CheckInUiState.Error("Search failed - fallback to FREE mode suggested", logs.toList())
         }
     }
 
     private suspend fun verifyResultsLocally(
         matches: List<SerpVisualMatch>, 
-        logs: MutableList<String>
+        onLog: (String) -> Unit
     ): List<WebMatchDisplay> {
         val verified = mutableListOf<WebMatchDisplay>()
         val hint = targetHint.lowercase()
@@ -228,9 +256,9 @@ class CheckInViewModel(
                         score = match.score + (finalScore * 18000).toInt(),
                         imageUrl = match.thumbnail
                     ))
-                    logs.add("✓ Match verified: ${"%.2f".format(similarity ?: 0f)} similarity")
+                    onLog("✓ Match verified: ${"%.2f".format(similarity ?: 0f)} similarity")
                 } else {
-                    if (debugMode) logs.add("× Low similarity: ${"%.2f".format(similarity ?: 0f)}")
+                    if (debugMode) onLog("× Low similarity: ${"%.2f".format(similarity ?: 0f)}")
                 }
                 thumb.recycleSafely()
             } catch (e: Exception) {}
@@ -241,18 +269,35 @@ class CheckInViewModel(
     fun onRetry() {
         uiState = CheckInUiState.Idle
         capturedBitmap = null
+        isSearching = false
     }
 
     fun onConfirmFreeSearch(bitmap: Bitmap) {
+        if (isSearching) return
         viewModelScope.launch {
             val original = capturedBitmap ?: bitmap
+            
+            // FREE mode: Skip upload entirely, just open browser tabs
+            if (searchMode == SearchMode.FREE) {
+                isSearching = true
+                uiState = CheckInUiState.Loading(0.1f, listOf("Opening search engines..."))
+                freeSearch.searchMyPhotoDirect(original, targetHint)
+                delay(1000)
+                uiState = CheckInUiState.Idle
+                isSearching = false
+                return@launch
+            }
+            
+            // For other modes, use the normal flow
             if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
-                uiState = CheckInUiState.Loading(0.1f, listOf("Starting deep search..."))
                 onPhotoCaptured(original)
             } else {
+                isSearching = true
+                uiState = CheckInUiState.Loading(0.1f, listOf("Starting deep search..."))
                 freeSearch.searchMyPhoto(original, targetHint)
                 delay(1000)
                 uiState = CheckInUiState.Idle
+                isSearching = false
             }
         }
     }

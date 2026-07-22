@@ -30,6 +30,7 @@ class FaceSearchRepository(
 
     // Smart discovery: tries local Termux and Emulator Host
     private val BACKEND_URLS = listOf(
+        "http://localhost:3000/api/search",
         "http://127.0.0.1:3000/api/search",
         "http://10.0.2.2:3000/api/search"
     )
@@ -123,10 +124,82 @@ class FaceSearchRepository(
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
         val verifiedLeads = mutableListOf<SerpVisualMatch>()
-        
-        // 1. Official Index (SerpApi)
-        if (ApiClient.API_KEY.isNotBlank() && ApiClient.API_KEY != "null") {
-            onLog("Engaging Official Visual Search Index...")
+
+        // 1. Stealth Scraper (Termux) - TRY THIS FIRST
+        onLog("Connecting to Stealth Automation Cluster...")
+        var success = false
+        for (url in BACKEND_URLS) {
+            if (success) break
+            try {
+                val label = if (url.contains("localhost") || url.contains("127.0.0.1")) "Local Termux" else "Emulator Host"
+                onLog("Probing $label...")
+
+                val jsonPayload = JSONObject().apply {
+                    put("imageUrl", uploadedImageUrl)
+                    put("keywordHint", keywordHint ?: "")
+                }.toString()
+
+                val requestBody = jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
+                val request = Request.Builder().url(url).post(requestBody).build()
+
+                stealthClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        success = true
+                        val responseData = response.body?.string() ?: ""
+                        onLog("✓ DATA RECEIVED: ${responseData.length} bytes")
+
+                        val matchesArray = try {
+                            val trimmed = responseData.trim()
+                            if (trimmed.startsWith("[")) {
+                                org.json.JSONArray(trimmed)
+                            } else if (trimmed.startsWith("{")) {
+                                val json = JSONObject(trimmed)
+                                if (json.has("matches")) json.getJSONArray("matches") else null
+                            } else {
+                                onLog("⚠ Unexpected response format: ${trimmed.take(50)}...")
+                                null
+                            }
+                        } catch (e: Exception) {
+                            onLog("✗ JSON PARSE ERROR: ${e.message}")
+                            null
+                        }
+
+                        if (matchesArray != null && matchesArray.length() > 0) {
+                            onLog("✓ Found ${matchesArray.length()} visual targets in cluster.")
+                            for (i in 0 until matchesArray.length()) {
+                                try {
+                                    val item = matchesArray.getJSONObject(i)
+                                    val link = item.optString("link")
+                                    if (link.isNotBlank()) {
+                                        verifiedLeads.add(SerpVisualMatch(
+                                            title = item.optString("title").ifBlank { "Visual Match" },
+                                            link = link,
+                                            source = item.optString("source", "Stealth Engine"),
+                                            thumbnail = item.optString("thumbnail").ifBlank { null },
+                                            score = 1000
+                                        ))
+                                    }
+                                } catch (e: Exception) { /* Skip */ }
+                            }
+                        } else if (matchesArray != null) {
+                            onLog("ℹ Cluster returned 0 results for this probe.")
+                        }
+                    } else {
+                        onLog("⚠ HTTP ${response.code} from $label")
+                        val errorBody = response.body?.string() ?: "No error body"
+                        onLog("  -> ${errorBody.take(100)}")
+                    }
+                }
+            } catch (e: Exception) {
+                val errorMsg = e.localizedMessage ?: e.message ?: "Connection Refused"
+                onLog("✗ $url fail: $errorMsg")
+            }
+        }
+        if (!success) onLog("✗ Cluster unreachable. Check Termux Port 3000.")
+
+        // 2. Official Index (SerpApi) - ONLY IF Stealth fails
+        if (verifiedLeads.isEmpty() && ApiClient.API_KEY.isNotBlank() && ApiClient.API_KEY != "null") {
+            onLog("Engaging Official Visual Search Index (fallback)...")
             try {
                 val response = apiService.searchVisual(
                     engine = "google_lens",
@@ -146,78 +219,6 @@ class FaceSearchRepository(
             } catch (e: Exception) {
                 onLog("⚠ Stable Index error: ${e.message}")
             }
-        }
-
-        // 2. Stealth Scraper (Termux)
-        if (verifiedLeads.isEmpty()) {
-            onLog("Connecting to Stealth Automation Cluster...")
-            
-            var success = false
-            for (url in BACKEND_URLS) {
-                if (success) break
-                try {
-                    val label = if (url.contains("127.0.0.1")) "Local Termux" else "Emulator Host"
-                    onLog("Probing $label...")
-                    
-                    val jsonPayload = JSONObject().apply {
-                        put("imageUrl", uploadedImageUrl)
-                        put("keywordHint", keywordHint ?: "")
-                    }.toString()
-
-                    val requestBody = jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
-                    val request = Request.Builder().url(url).post(requestBody).build()
-
-                    stealthClient.newCall(request).execute().use { response ->
-                        if (response.isSuccessful) {
-                            success = true
-                            val responseData = response.body?.string() ?: ""
-                            onLog("✓ DATA RECEIVED: ${responseData.length} bytes.")
-                            
-                            val matchesArray = try {
-                                val trimmed = responseData.trim()
-                                if (trimmed.startsWith("[")) {
-                                    org.json.JSONArray(trimmed)
-                                } else if (trimmed.startsWith("{")) {
-                                    val json = JSONObject(trimmed)
-                                    if (json.has("matches")) json.getJSONArray("matches") else null
-                                } else null
-                            } catch (e: Exception) {
-                                onLog("✗ PARSE ERROR: ${e.message}")
-                                null
-                            }
-
-                            if (matchesArray != null && matchesArray.length() > 0) {
-                                onLog("✓ Successfully parsed ${matchesArray.length()} visual targets.")
-                                for (i in 0 until matchesArray.length()) {
-                                    try {
-                                        val item = matchesArray.getJSONObject(i)
-                                        val link = item.optString("link")
-                                        if (link.isNotBlank()) {
-                                            verifiedLeads.add(SerpVisualMatch(
-                                                title = item.optString("title").ifBlank { "Visual Match" },
-                                                link = link,
-                                                source = item.optString("source", "Stealth Engine"),
-                                                thumbnail = item.optString("thumbnail").ifBlank { null },
-                                                score = 1000
-                                            ))
-                                        }
-                                    } catch (e: Exception) { /* Skip */ }
-                                }
-                            } else {
-                                onLog("⚠ No valid matches found in response.")
-                            }
-                        } else {
-                            onLog("⚠ HTTP ${response.code} from $label")
-                            if (response.code == 504) {
-                                onLog("ℹ Gateway Timeout: Server is likely under high load.")
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    onLog("⚠ $url fail: ${e.localizedMessage ?: "Refused"}")
-                }
-            }
-            if (!success) onLog("✗ Cluster unreachable. Check Termux Port 3000.")
         }
 
         // Final Processing & Scoring

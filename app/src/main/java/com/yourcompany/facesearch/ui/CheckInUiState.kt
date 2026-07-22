@@ -14,9 +14,9 @@ sealed class CheckInUiState {
         val logs: List<String> = emptyList()
     ) : CheckInUiState()
     data class Confirming(val faceBitmap: Bitmap) : CheckInUiState()
-    object NoFaceDetected : CheckInUiState()
+    data class NoFaceDetected(val logs: List<String> = emptyList()) : CheckInUiState()
     data class NoMatch(val logs: List<String> = emptyList()) : CheckInUiState()
-    data class Error(val message: String) : CheckInUiState()
+    data class Error(val message: String, val logs: List<String> = emptyList()) : CheckInUiState()
 }
 
 data class WebMatchDisplay(

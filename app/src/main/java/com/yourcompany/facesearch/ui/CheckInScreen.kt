@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -65,7 +66,6 @@ fun CheckInScreen(
     onGoogleLensOnlySearch: (Bitmap) -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
-    val clipboardManager = LocalClipboardManager.current
 
     Scaffold(
         topBar = {
@@ -283,47 +283,12 @@ fun CheckInScreen(
                                 color = Amber
                             )
                             Spacer(modifier = Modifier.height(12.dp))
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                            SherlockConsole(
+                                logs = uiState.logs,
                                 modifier = Modifier.fillMaxSize(),
-                                shape = RoundedCornerShape(8.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    Column(
-                                        modifier = Modifier.padding(12.dp).fillMaxSize().verticalScroll(consoleScrollState)
-                                    ) {
-                                        Text(
-                                            "SHERLOCK OSINT CONSOLE v2.1",
-                                            color = Amber,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Black,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        uiState.logs.forEach { log ->
-                                            Text(
-                                                text = "> $log",
-                                                color = Amber.copy(alpha = 0.9f),
-                                                fontSize = 11.sp,
-                                                fontFamily = FontFamily.Monospace
-                                            )
-                                        }
-                                        BlinkingCursor()
-                                    }
-                                    
-                                    // Copy Logs Button
-                                    IconButton(
-                                        onClick = {
-                                            val logText = uiState.logs.joinToString("\n")
-                                            clipboardManager.setText(AnnotatedString(logText))
-                                        },
-                                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
-                                    ) {
-                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = Amber.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                            }
+                                showCursor = true,
+                                scrollState = consoleScrollState
+                            )
                         }
                     }
 
@@ -393,42 +358,35 @@ fun CheckInScreen(
                                 color = Amber
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = Color.Black),
-                                modifier = Modifier.fillMaxWidth().height(150.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.2f))
-                            ) {
-                                val logScroll = rememberScrollState()
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    Column(modifier = Modifier.padding(10.dp).verticalScroll(logScroll)) {
-                                        uiState.logs.forEach { log ->
-                                            Text(
-                                                text = "> $log", 
-                                                color = Amber.copy(alpha = 0.8f), 
-                                                fontSize = 10.sp, 
-                                                fontFamily = FontFamily.Monospace
-                                            )
-                                        }
-                                    }
-                                    // Copy button for the success console too
-                                    IconButton(
-                                        onClick = {
-                                            val logText = uiState.logs.joinToString("\n")
-                                            clipboardManager.setText(AnnotatedString(logText))
-                                        },
-                                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
-                                    ) {
-                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = Amber.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
-                                    }
-                                }
-                            }
+                            SherlockConsole(
+                                logs = uiState.logs,
+                                modifier = Modifier.fillMaxWidth().height(150.dp)
+                            )
                             Spacer(modifier = Modifier.height(32.dp))
                         }
                     }
 
                     is CheckInUiState.NoFaceDetected -> {
-                        ErrorState("No face detected", "Try HYPER or RAW mode if precision fails.", onRetryClick)
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            ErrorState("No face detected", "Try HYPER or RAW mode if precision fails.", onRetryClick)
+                            
+                            if (uiState.logs.isNotEmpty()) {
+                                Text(
+                                    "DIAGNOSTIC CONSOLE",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Amber,
+                                    modifier = Modifier.align(Alignment.Start)
+                                )
+                                SherlockConsole(
+                                    logs = uiState.logs,
+                                    modifier = Modifier.fillMaxWidth().height(200.dp)
+                                )
+                            }
+                        }
                     }
 
                     is CheckInUiState.NoMatch -> {
@@ -444,39 +402,17 @@ fun CheckInScreen(
                             )
 
                             // Always show console logs if results are zero, so errors aren't hidden
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    "SHERLOCK OSINT CONSOLE",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Amber
-                                )
-                                IconButton(
-                                    onClick = {
-                                        val logText = uiState.logs.joinToString("\n")
-                                        clipboardManager.setText(AnnotatedString(logText))
-                                    },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = Amber, modifier = Modifier.size(14.dp))
-                                }
-                            }
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = Color.Black),
-                                modifier = Modifier.fillMaxWidth().height(200.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
-                            ) {
-                                val logScroll = rememberScrollState()
-                                Column(modifier = Modifier.padding(12.dp).verticalScroll(logScroll)) {
-                                    uiState.logs.forEach { log ->
-                                        Text(text = "> $log", color = Amber, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                                    }
-                                }
-                            }
+                            Text(
+                                "SHERLOCK OSINT CONSOLE",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Amber,
+                                modifier = Modifier.align(Alignment.Start)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            SherlockConsole(
+                                logs = uiState.logs,
+                                modifier = Modifier.fillMaxWidth().height(200.dp)
+                            )
                             
                 Button(
                     onClick = { capturedBitmap?.let { onConfirmFreeSearch(it) } },
@@ -494,9 +430,91 @@ fun CheckInScreen(
                     }
 
                     is CheckInUiState.Error -> {
-                        ErrorState("Search Error", uiState.message, onRetryClick)
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            ErrorState("Search Error", uiState.message, onRetryClick)
+                            
+                            if (uiState.logs.isNotEmpty()) {
+                                Text(
+                                    "DIAGNOSTIC CONSOLE",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Amber,
+                                    modifier = Modifier.align(Alignment.Start)
+                                )
+                                SherlockConsole(
+                                    logs = uiState.logs,
+                                    modifier = Modifier.fillMaxWidth().height(200.dp)
+                                )
+                            }
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun SherlockConsole(
+    logs: List<String>,
+    modifier: Modifier = Modifier,
+    showCursor: Boolean = false,
+    scrollState: ScrollState = rememberScrollState()
+) {
+    val clipboardManager = LocalClipboardManager.current
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.Black),
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Amber.copy(alpha = 0.3f))
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .padding(12.dp)
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+            ) {
+                Text(
+                    "SHERLOCK OSINT CONSOLE v2.1",
+                    color = Amber,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                logs.forEach { log ->
+                    Text(
+                        text = "> $log",
+                        color = Amber.copy(alpha = 0.9f),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                if (showCursor) {
+                    BlinkingCursor()
+                }
+            }
+
+            // Copy Logs Button
+            IconButton(
+                onClick = {
+                    val logText = logs.joinToString("\n")
+                    clipboardManager.setText(AnnotatedString(logText))
+                },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+            ) {
+                Icon(
+                    Icons.Default.ContentCopy,
+                    contentDescription = "Copy Logs",
+                    tint = Amber.copy(alpha = 0.5f),
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
     }

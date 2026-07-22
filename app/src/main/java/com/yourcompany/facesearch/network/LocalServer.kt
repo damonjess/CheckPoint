@@ -25,6 +25,9 @@ object LocalServer {
     private var faceEmbedder: FaceEmbedder? = null
     private lateinit var appContext: Context
 
+    // Memory-mapped probe storage
+    var currentProbeImage: ByteArray? = null
+
     fun start(context: Context) {
         if (server != null) return
 
@@ -37,6 +40,16 @@ object LocalServer {
             install(CORS) { anyHost() }
 
             routing {
+                // Termux hosting bypass: serve the current probe directly from RAM
+                get("/probe.jpg") {
+                    val img = currentProbeImage
+                    if (img != null) {
+                        call.respondBytes(img, ContentType.Image.JPEG)
+                    } else {
+                        call.respond(HttpStatusCode.NotFound, "No probe staged")
+                    }
+                }
+
                 post("/api/v1/face-search") {
                     try {
                         val multipart = call.receiveMultipart()

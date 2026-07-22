@@ -20,14 +20,33 @@ class FreeFaceSearchHelper(private val context: Context, private val cropper: Na
 
     /**
      * DIRECT search - NO upload needed. Saves image locally and opens browser tabs.
-     * This is used by FREE mode when ImgBB is down.
+     * This is used by FREE mode when ImgBB is down or bypassed.
      */
     fun searchMyPhotoDirect(photoBitmap: Bitmap, myName: String? = null) {
         // Save the image locally
         val uri = saveImageDirect(photoBitmap)
 
-        // Open browser tabs directly with the local image
-        openBrowsersDirect(uri, myName)
+        // 1. Open the primary visual search engines in the browser
+        val searchUrls = listOf(
+            "https://lens.google.com/upload",
+            "https://www.bing.com/images/searchbyimage",
+            "https://yandex.com/images/search"
+        )
+
+        searchUrls.forEachIndexed { index, url ->
+            // Delay slightly between opening tabs to avoid system hanging
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try { context.startActivity(intent) } catch (e: Exception) {}
+            }, index * 800L)
+        }
+
+        // 2. Open the Share Chooser so the user can pick "Search with Google Lens" or a browser to upload to
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            openBrowsersDirect(uri, myName)
+        }, (searchUrls.size * 800L) + 500L)
     }
 
 
@@ -113,25 +132,26 @@ class FreeFaceSearchHelper(private val context: Context, private val cropper: Na
     }
 
     /**
-     * Opens browsers directly with the local image URI - NO UPLOAD!
+     * Opens a system share chooser with the local image URI.
      */
     fun openBrowsersDirect(uri: Uri, name: String?) {
-        // Create a chooser to share the image
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "image/jpeg"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_TEXT, "Searching for: ${name ?: "this person"}")
+            putExtra(Intent.EXTRA_TEXT, "OSINT Search for: ${name ?: "Unknown Person"}")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         
         try {
-            val chooser = Intent.createChooser(shareIntent, "Search with Google Lens / Browser")
+            val title = if (name.isNullOrBlank()) "Visual Search" else "Search Socials: $name"
+            val chooser = Intent.createChooser(shareIntent, title)
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(chooser)
         } catch (e: Exception) {
-            // Fallback: open browser directly
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://lens.google.com/upload"))
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Fallback: open Google Lens upload page directly
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://lens.google.com/upload")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
             context.startActivity(intent)
         }
     }

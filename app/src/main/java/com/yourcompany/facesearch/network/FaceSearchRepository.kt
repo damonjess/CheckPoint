@@ -120,6 +120,7 @@ class FaceSearchRepository(
 
     suspend fun performFaceSearch(
         uploadedImageUrl: String,
+        localImageUrl: String? = null,
         keywordHint: String? = null,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
@@ -134,8 +135,11 @@ class FaceSearchRepository(
                 val label = if (url.contains("localhost") || url.contains("127.0.0.1")) "Local Termux" else "Emulator Host"
                 onLog("Probing $label...")
 
+                // Use localImageUrl for Termux if provided, otherwise fallback to public
+                val targetImageUrl = if (label == "Local Termux" && localImageUrl != null) localImageUrl else uploadedImageUrl
+
                 val jsonPayload = JSONObject().apply {
-                    put("imageUrl", uploadedImageUrl)
+                    put("imageUrl", targetImageUrl)
                     put("keywordHint", keywordHint ?: "")
                 }.toString()
 

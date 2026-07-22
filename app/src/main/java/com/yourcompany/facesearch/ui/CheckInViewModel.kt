@@ -59,47 +59,54 @@ class CheckInViewModel(
     var searchMode by mutableStateOf(SearchMode.PRECISION)
     var debugMode by mutableStateOf(false)
     
-    private var isSearching = false
+    var isSearching by mutableStateOf(false)
+        private set
+
     private var sourceEmbedding: FloatArray? = null
 
     fun onPhotoCaptured(bitmap: Bitmap) {
         if (isSearching) return
-        isSearching = true
         capturedBitmap = bitmap
         
+        // FREE MODE BYPASS: Don't start the loading sequence automatically
+        if (searchMode == SearchMode.FREE) {
+            uiState = CheckInUiState.Idle
+            return
+        }
+
+        isSearching = true
         viewModelScope.launch {
-            val logs = mutableListOf("Initializing local optics...")
-            fun addLog(msg: String) {
-                logs.add(msg)
-                uiState = when (val current = uiState) {
-                    is CheckInUiState.Loading -> current.copy(logs = logs.toList())
-                    is CheckInUiState.Error -> current.copy(logs = logs.toList())
-                    is CheckInUiState.NoFaceDetected -> current.copy(logs = logs.toList())
-                    else -> CheckInUiState.Loading(0.2f, logs.toList())
-                }
-            }
-
-            uiState = CheckInUiState.Loading(0.1f, logs.toList())
-            
-            val maxMemory = Runtime.getRuntime().maxMemory() / 1024 / 1024
-            val totalMemory = Runtime.getRuntime().totalMemory() / 1024 / 1024
-            addLog("System: Memory $totalMemory MB / $maxMemory MB")
-            
-            if (searchMode != SearchMode.RAW) {
-                addLog("Running Quality Gate...")
-                val quality = nativeFaceCropper.validateFaceQuality(bitmap)
-                if (!quality.isGood) {
-                    uiState = if (quality.message.contains("No face", ignoreCase = true)) {
-                        CheckInUiState.NoFaceDetected(logs.toList())
-                    } else {
-                        CheckInUiState.Error(quality.message, logs.toList())
-                    }
-                    isSearching = false
-                    return@launch
-                }
-            }
-
             try {
+                val logs = mutableListOf("Initializing local optics...")
+                fun addLog(msg: String) {
+                    logs.add(msg)
+                    uiState = when (val current = uiState) {
+                        is CheckInUiState.Loading -> current.copy(logs = logs.toList())
+                        is CheckInUiState.Error -> current.copy(logs = logs.toList())
+                        is CheckInUiState.NoFaceDetected -> current.copy(logs = logs.toList())
+                        else -> CheckInUiState.Loading(0.2f, logs.toList())
+                    }
+                }
+
+                uiState = CheckInUiState.Loading(0.1f, logs.toList())
+                
+                val maxMemory = Runtime.getRuntime().maxMemory() / 1024 / 1024
+                val totalMemory = Runtime.getRuntime().totalMemory() / 1024 / 1024
+                addLog("System: Memory $totalMemory MB / $maxMemory MB")
+                
+                if (searchMode != SearchMode.RAW) {
+                    addLog("Running Quality Gate...")
+                    val quality = nativeFaceCropper.validateFaceQuality(bitmap)
+                    if (!quality.isGood) {
+                        uiState = if (quality.message.contains("No face", ignoreCase = true)) {
+                            CheckInUiState.NoFaceDetected(logs.toList())
+                        } else {
+                            CheckInUiState.Error(quality.message, logs.toList())
+                        }
+                        return@launch
+                    }
+                }
+
                 val processedBitmap = when (searchMode) {
                     SearchMode.HYPER, SearchMode.AGGRESSIVE -> {
                         addLog("Applying structural fingerprints...")
@@ -129,24 +136,35 @@ class CheckInViewModel(
                 uiState = CheckInUiState.Loading(0.25f, logs.toList())
                 addLog("Initiating probe hosting...")
 
+                // 1. Stage locally for Termux Bypass
+                val localUrl = imageUploadRepository.stageLocalProbe(processedBitmap)
+                addLog("✓ Local probe staged.")
+
+                // 2. Attempt Public Upload
                 val uploadBitmap = nativeFaceCropper.prepareFaceForSearch(processedBitmap)
                 val publicUrl = imageUploadRepository.uploadImage(uploadBitmap, ::addLog)
 
                 if (publicUrl != null) {
                     addLog("✓ Probe active at ${publicUrl.take(30)}...")
-                    performWebSearch(publicUrl, targetHint.trim(), logs)
+                    performWebSearch(publicUrl, localUrl, targetHint.trim(), logs)
                 } else {
-                    uiState = CheckInUiState.Error("Image hosting failed. Check console for details.", logs.toList())
+                    addLog("⚠ Public hosting failed. Using local probe only.")
+                    performWebSearch("", localUrl, targetHint.trim(), logs)
                 }
             } catch (e: Exception) {
-                uiState = CheckInUiState.Error("Processing failed: ${e.message}", logs.toList())
+                uiState = CheckInUiState.Error("Processing failed: ${e.message}", emptyList())
             } finally {
                 isSearching = false
             }
         }
     }
 
-    private suspend fun performWebSearch(imageUrl: String, hintText: String, logs: MutableList<String>) {
+    private suspend fun performWebSearch(
+        publicImageUrl: String, 
+        localImageUrl: String?,
+        hintText: String, 
+        logs: MutableList<String>
+    ) {
         fun addLog(msg: String) {
             logs.add(msg)
             uiState = when (val current = uiState) {
@@ -163,7 +181,8 @@ class CheckInViewModel(
         try {
             val visualMatches = try {
                 faceSearchRepository.performFaceSearch(
-                    uploadedImageUrl = imageUrl,
+                    uploadedImageUrl = publicImageUrl,
+                    localImageUrl = localImageUrl,
                     keywordHint = hintText.trim().ifBlank { null },
                     onLog = ::addLog
                 )
@@ -273,25 +292,33 @@ class CheckInViewModel(
     }
 
     fun onConfirmFreeSearch(bitmap: Bitmap) {
+        if (isSearching) return
+        isSearching = true
         viewModelScope.launch {
             val original = capturedBitmap ?: bitmap
             
-            // FORCE FREE MODE: Skip ALL uploads, just open browser
-            if (searchMode == SearchMode.FREE) {
-                // Save image locally and open browsers directly
-                val uri = freeSearch.saveImageDirect(original)
-                freeSearch.openBrowsersDirect(uri, targetHint)
-                uiState = CheckInUiState.Idle
-                return@launch
-            }
-            
-            if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
-                uiState = CheckInUiState.Loading(0.1f, listOf("Starting deep search..."))
-                onPhotoCaptured(original)
-            } else {
-                freeSearch.searchMyPhoto(original, targetHint)
-                delay(1000)
-                uiState = CheckInUiState.Idle
+            try {
+                // FREE mode: Skip upload entirely, just open browser tabs
+                if (searchMode == SearchMode.FREE) {
+                    uiState = CheckInUiState.Loading(0.5f, listOf("Opening search engines...", "Preparing local image for sharing..."))
+                    freeSearch.searchMyPhotoDirect(original, targetHint)
+                    delay(1500)
+                    uiState = CheckInUiState.Idle
+                    return@launch
+                }
+                
+                if (searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER) {
+                    uiState = CheckInUiState.Loading(0.1f, listOf("Starting deep search..."))
+                    onPhotoCaptured(original)
+                } else {
+                    freeSearch.searchMyPhoto(original, targetHint)
+                    delay(1000)
+                    uiState = CheckInUiState.Idle
+                }
+            } catch (e: Exception) {
+                uiState = CheckInUiState.Error("Search operation failed: ${e.message}", listOf("Engine error"))
+            } finally {
+                isSearching = false
             }
         }
     }

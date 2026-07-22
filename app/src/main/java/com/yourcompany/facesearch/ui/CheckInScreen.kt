@@ -54,6 +54,7 @@ fun CheckInScreen(
     capturedBitmap: Bitmap?,
     uiState: CheckInUiState,
     searchMode: SearchMode,
+    isSearching: Boolean,
     targetHint: String,
     debugMode: Boolean,
     onTargetHintChange: (String) -> Unit,
@@ -66,6 +67,7 @@ fun CheckInScreen(
     onGoogleLensOnlySearch: (Bitmap) -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
+    val isLoading = uiState is CheckInUiState.Loading || isSearching
 
     Scaffold(
         topBar = {
@@ -86,8 +88,8 @@ fun CheckInScreen(
 
             PhotoPreview(
                 bitmap = capturedBitmap,
-                isScanning = uiState is CheckInUiState.Loading,
-                size = if (uiState is CheckInUiState.Success || uiState is CheckInUiState.Loading) 100.dp else 180.dp
+                isScanning = isLoading,
+                size = if (uiState is CheckInUiState.Success || isLoading) 100.dp else 180.dp
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -99,7 +101,7 @@ fun CheckInScreen(
                 Button(
                     onClick = onCapturePhotoClick,
                     modifier = Modifier.weight(1f),
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 ) {
                     Icon(Icons.Default.CameraAlt, contentDescription = null)
                     Spacer(modifier = Modifier.width(4.dp))
@@ -109,7 +111,7 @@ fun CheckInScreen(
                 OutlinedButton(
                     onClick = onSelectGalleryClick,
                     modifier = Modifier.weight(1f),
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 ) {
                     Icon(Icons.Default.PhotoLibrary, contentDescription = null)
                     Spacer(modifier = Modifier.width(4.dp))
@@ -127,7 +129,7 @@ fun CheckInScreen(
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("e.g. John Doe Facebook") },
                 singleLine = true,
-                enabled = uiState !is CheckInUiState.Loading,
+                enabled = !isLoading,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Amber,
                     focusedLabelColor = Amber
@@ -170,63 +172,63 @@ fun CheckInScreen(
                     icon = Icons.Default.FilterCenterFocus,
                     selected = searchMode == SearchMode.PRECISION,
                     onClick = { onSearchModeChange(SearchMode.PRECISION) },
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 )
                 ModeChip(
                     label = "Bypass",
                     icon = Icons.Default.Security,
                     selected = searchMode == SearchMode.BYPASS,
                     onClick = { onSearchModeChange(SearchMode.BYPASS) },
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 )
                 ModeChip(
                     label = "Hyper",
                     icon = Icons.Default.Bolt,
                     selected = searchMode == SearchMode.HYPER,
                     onClick = { onSearchModeChange(SearchMode.HYPER) },
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 )
                 ModeChip(
                     label = "Social",
                     icon = Icons.Default.People,
                     selected = searchMode == SearchMode.SOCIAL,
                     onClick = { onSearchModeChange(SearchMode.SOCIAL) },
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 )
                 ModeChip(
                     label = "Social Opt",
                     icon = Icons.Default.Person,
                     selected = searchMode == SearchMode.SOCIAL_OPTIMIZED,
                     onClick = { onSearchModeChange(SearchMode.SOCIAL_OPTIMIZED) },
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 )
                 ModeChip(
                     label = "🔥 Aggressive",
                     icon = Icons.Default.Bolt,
                     selected = searchMode == SearchMode.AGGRESSIVE,
                     onClick = { onSearchModeChange(SearchMode.AGGRESSIVE) },
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 )
                 ModeChip(
                     label = "Raw",
                     icon = Icons.Default.Image,
                     selected = searchMode == SearchMode.RAW,
                     onClick = { onSearchModeChange(SearchMode.RAW) },
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 )
                 ModeChip(
                     label = "Free",
                     icon = Icons.Default.FilterCenterFocus,
                     selected = searchMode == SearchMode.FREE,
                     onClick = { onSearchModeChange(SearchMode.FREE) },
-                    enabled = uiState !is CheckInUiState.Loading
+                    enabled = !isLoading
                 )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             val isFreeMode = searchMode == SearchMode.FREE || searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER
-            if (isFreeMode && capturedBitmap != null && uiState !is CheckInUiState.Loading) {
+            if (isFreeMode && capturedBitmap != null && !isLoading) {
                 Button(
                     onClick = { onConfirmFreeSearch(capturedBitmap) },
                     modifier = Modifier

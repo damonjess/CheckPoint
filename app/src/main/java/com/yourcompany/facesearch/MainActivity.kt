@@ -37,19 +37,26 @@ class MainActivity : ComponentActivity() {
         // Initialize LiteRT (TensorFlow Lite) from Google Play Services
         TfLite.initialize(this)
 
+        // Start Local Hosting Service for Termux Bypass
+        LocalServer.start(this)
+
         // Connectivity Probe
         lifecycleScope.launch(Dispatchers.IO) {
-            val client = OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).build()
-            val urls = listOf("http://127.0.0.1:3000/ping", "http://10.0.2.2:3000/ping")
+            val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).build()
+            val urls = listOf("http://127.0.0.1:3000/ping", "http://10.0.2.2:3000/ping", "http://localhost:3000/ping")
             for (url in urls) {
                 try {
                     val request = Request.Builder().url(url).build()
                     client.newCall(request).execute().use { response ->
                         if (response.isSuccessful) {
-                            Log.i("FaceSearch", "✓ Backend Cluster Detected at $url")
+                            val msg = "✓ Backend Cluster Detected at $url"
+                            Log.i("FaceSearch", msg)
+                            // Optionally we could show a toast or update VM
                         }
                     }
-                } catch (e: Exception) { /* Silent fail */ }
+                } catch (e: Exception) { 
+                    Log.d("FaceSearch", "Probe $url failed: ${e.message}")
+                }
             }
         }
 
@@ -83,6 +90,7 @@ class MainActivity : ComponentActivity() {
                         capturedBitmap = checkInViewModel.capturedBitmap,
                         uiState = checkInViewModel.uiState,
                         searchMode = checkInViewModel.searchMode,
+                        isSearching = checkInViewModel.isSearching,
                         targetHint = checkInViewModel.targetHint,
                         debugMode = checkInViewModel.debugMode,
                         onTargetHintChange = { checkInViewModel.onTargetHintChange(it) },

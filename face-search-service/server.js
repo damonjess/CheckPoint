@@ -19,12 +19,13 @@ app.post('/api/search', async (req, res) => {
 
     let browser;
     let isFinished = false;
+    // Reduced timeout to 25 seconds - forces faster response
     const timeout = setTimeout(() => {
         if (!isFinished && !res.headersSent) {
             isFinished = true;
             res.status(504).json({ success: false, error: "Search timeout", matches: [] });
         }
-    }, 30000); // 30 seconds max
+    }, 25000);
 
     try {
         console.log("🚀 Launching browser...");
@@ -43,17 +44,20 @@ app.post('/api/search', async (req, res) => {
         const page = await browser.newPage();
         await page.setViewport({ width: 1920, height: 1080 });
 
-        // YANDEX - Minimal scrolls for speed
+        const allResults = [];
+
+        // =============================================
+        // ONLY YANDEX (FAST)
+        // =============================================
         console.log("🔍 Querying Yandex...");
         try {
             const url = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
-            await delay(1500);
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 8000 });
+            await delay(1000);
 
-            // Only 3 scrolls for speed
             for (let i = 0; i < 3; i++) {
                 await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-                await delay(600);
+                await delay(500);
             }
 
             const results = await page.evaluate(() => {
@@ -82,19 +86,72 @@ app.post('/api/search', async (req, res) => {
             });
 
             console.log(`✓ Yandex: ${results.length} results`);
-
-            clearTimeout(timeout);
-            isFinished = true;
-            res.json({ success: true, matches: results.slice(0, 20) });
-
+            allResults.push(...results);
         } catch (e) {
             console.log(`⚠️ Yandex error: ${e.message}`);
-            clearTimeout(timeout);
-            if (!isFinished && !res.headersSent) {
-                isFinished = true;
-                res.status(500).json({ success: false, error: e.message, matches: [] });
+        }
+
+        // =============================================
+        // ONLY TINEYE (FAST)
+        // =============================================
+        console.log("🔍 Querying TinEye...");
+        try {
+            await page.goto(`https://tineye.com/search?url=${encodeURIComponent(imageUrl)}`, { waitUntil: 'domcontentloaded', timeout: 8000 });
+            await delay(1000);
+
+            for (let i = 0; i < 2; i++) {
+                await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+                await delay(500);
+            }
+
+            const results = await page.evaluate(() => {
+                const items = [];
+                const seen = new Set();
+                document.querySelectorAll('.match, .result, a[href^="http"]').forEach(el => {
+                    try {
+                        const linkEl = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
+                        const href = linkEl ? linkEl.href : '';
+                        const imgEl = el.querySelector('img');
+                        let imgSrc = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || '') : '';
+                        const title = el.textContent.trim().slice(0, 150) || 'TinEye Match';
+                        let source = 'TinEye';
+                        let isSocial = false;
+                        const domains = ['facebook.com', 'instagram.com', 'linkedin.com', 'twitter.com', 'vk.com'];
+                        for (const d of domains) {
+                            if (href.includes(d)) { source = d.split('.')[0]; isSocial = true; break; }
+                        }
+                        if (href && !seen.has(href) && !href.includes('tineye.com')) {
+                            seen.add(href);
+                            items.push({ title, link: href, thumbnail: imgSrc, source, isSocial });
+                        }
+                    } catch(e) {}
+                });
+                return items;
+            });
+
+            console.log(`✓ TinEye: ${results.length} results`);
+            allResults.push(...results);
+        } catch (e) {
+            console.log(`⚠️ TinEye error: ${e.message}`);
+        }
+
+        // Deduplicate
+        const seen = new Set();
+        const uniqueResults = [];
+        for (const item of allResults) {
+            const key = item.link || `${item.title}_${item.source}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniqueResults.push(item);
             }
         }
+
+        console.log(`📊 Raw: ${allResults.length} | Unique: ${uniqueResults.length}`);
+        console.log(`✅ Final: ${uniqueResults.length} matches`);
+
+        clearTimeout(timeout);
+        isFinished = true;
+        res.json({ success: true, matches: uniqueResults.slice(0, 30) });
 
     } catch (error) {
         console.log(`⚠️ Error: ${error.message}`);
@@ -110,5 +167,5 @@ app.post('/api/search', async (req, res) => {
 
 const PORT = 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🕵️ Stealth scraper online on port ${PORT}`);
+    console.log(`🕵️ FAST Stealth scraper online on port ${PORT}`);
 });

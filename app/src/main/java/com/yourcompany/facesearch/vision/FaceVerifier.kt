@@ -1,9 +1,11 @@
 package com.yourcompany.facesearch.vision
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 
 /**
  * Verifies search result accuracy by comparing face embeddings.
@@ -14,16 +16,15 @@ class FaceVerifier(context: Context) {
     private val faceCropper = NativeFaceCropper()
     
     companion object {
-        // Very strict threshold for verifying matches
         const val VERIFICATION_THRESHOLD = 0.62f
-        
-        // Looser threshold for soft filtering (show as less confident)
         const val SOFT_FILTER_THRESHOLD = 0.50f
     }
 
     /**
      * Verifies if a face in a search result matches the source face.
      * Returns confidence score (0-1), or null if verification failed.
+     * 
+     * FIX: Converts hardware bitmaps to software bitmaps for pixel access.
      */
     suspend fun verifyFaceMatch(
         searchResultBitmap: Bitmap,
@@ -33,27 +34,51 @@ class FaceVerifier(context: Context) {
         
         return withContext(Dispatchers.Default) {
             try {
+                // FIX 1: Convert hardware bitmap to software bitmap
+                val safeBitmap = ensureSoftwareBitmap(searchResultBitmap)
+                
                 // 1. Detect and extract face from search result
-                val resultFace = faceCropper.getTightFaceCrop(searchResultBitmap) ?: return@withContext null
+                val resultFace = faceCropper.getTightFaceCrop(safeBitmap) ?: return@withContext null
                 
                 // 2. Generate embedding for result
                 val resultEmbedding = faceEmbedder.getEmbedding(resultFace)
                 
-                // Clean up
-                if (resultFace != searchResultBitmap) {
-                    resultFace.recycle()
-                }
-
-                if (resultEmbedding == null) return@withContext null
-                
                 // 3. Compare embeddings
-                val similarity = FaceMatcher.cosineSimilarity(sourceEmbedding, resultEmbedding)
+                val similarity = if (resultEmbedding != null) {
+                    FaceMatcherExt.cosineSimilarity(sourceEmbedding, resultEmbedding)
+                } else {
+                    null
+                }
                 
-                similarity.takeIf { it > SOFT_FILTER_THRESHOLD }
+                // FIX 2: DON'T recycle manually - let GC handle it
+                // if (resultFace != safeBitmap) { resultFace.recycle() } // REMOVED
+                
+                similarity?.takeIf { it > SOFT_FILTER_THRESHOLD }
             } catch (e: Exception) {
                 android.util.Log.e("FaceVerifier", "Error verifying face: ${e.message}")
                 null
             }
+        }
+    }
+
+    /**
+     * Converts a hardware bitmap to a software bitmap for pixel access.
+     */
+    private fun ensureSoftwareBitmap(bitmap: Bitmap): Bitmap {
+        // If it's already a software bitmap, return it
+        if (bitmap.config != null && bitmap.config != Bitmap.Config.HARDWARE) {
+            return bitmap
+        }
+        
+        // Convert to software bitmap by copying
+        return try {
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
+            val bytes = stream.toByteArray()
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: bitmap
+        } catch (e: Exception) {
+            android.util.Log.e("FaceVerifier", "Failed to convert hardware bitmap", e)
+            bitmap
         }
     }
 

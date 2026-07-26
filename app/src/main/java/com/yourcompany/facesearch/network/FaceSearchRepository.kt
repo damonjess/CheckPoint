@@ -120,7 +120,6 @@ class FaceSearchRepository(
 
     suspend fun performFaceSearch(
         uploadedImageUrl: String,
-        localImageUrl: String? = null,
         keywordHint: String? = null,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
@@ -134,12 +133,10 @@ class FaceSearchRepository(
             try {
                 val label = if (url.contains("localhost") || url.contains("127.0.0.1")) "Local Termux" else "Emulator Host"
                 onLog("Probing $label...")
-
-                // Use localImageUrl for Termux if provided, otherwise fallback to public
-                val targetImageUrl = if (label == "Local Termux" && localImageUrl != null) localImageUrl else uploadedImageUrl
+                onLog("📤 SENDING TO TERMUX: $uploadedImageUrl")
 
                 val jsonPayload = JSONObject().apply {
-                    put("imageUrl", targetImageUrl)
+                    put("imageUrl", uploadedImageUrl)
                     put("keywordHint", keywordHint ?: "")
                 }.toString()
 
@@ -237,11 +234,22 @@ class FaceSearchRepository(
             .map { match ->
                 var score = match.score
                 val link = match.link?.lowercase() ?: ""
-                if (link.contains("linkedin.com")) score += 1500
-                if (link.contains("instagram.com") || link.contains("facebook.com")) score += 800
-                if (!keywordHint.isNullOrBlank() && match.title?.lowercase()?.contains(keywordHint.lowercase()) == true) {
+                val title = match.title?.lowercase() ?: ""
+                
+                // Use SocialMediaDetector for dynamic scoring
+                val platformScore = SocialMediaDetector.detectPlatform(match.link)
+                score += platformScore.baseScore
+                
+                // Boost if title matches hint
+                if (!keywordHint.isNullOrBlank() && title.contains(keywordHint.lowercase())) {
                     score += 2000
                 }
+                
+                // Boost social profile links
+                if (link.contains("/profile") || link.contains("/user/") || link.contains("/@") || link.contains("/in/")) {
+                    score += 400
+                }
+                
                 match.copy(score = score)
             }
             .sortedByDescending { it.score }

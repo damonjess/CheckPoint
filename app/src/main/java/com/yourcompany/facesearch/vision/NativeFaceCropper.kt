@@ -86,10 +86,8 @@ class NativeFaceCropper {
         
         val scaled = Bitmap.createScaledBitmap(faceCrop, finalWidth, finalHeight, true)
         
-        // Recycle intermediate bitmap to prevent memory leak
-        if (faceCrop != original) {
-            faceCrop.recycle()
-        }
+        // FIX: DON'T recycle faceCrop - let GC handle it
+        // if (faceCrop != original) { faceCrop.recycle() } // REMOVED
         
         return scaled
     }
@@ -163,7 +161,6 @@ class NativeFaceCropper {
                         // 3. CROP AND APPLY ALIGNMENT
                         val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
                         val aligned = Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, rotationMatrix, true)
-                        cropped.recycle()
 
                         continuation.resume(aligned)
                     } else {
@@ -239,7 +236,6 @@ class NativeFaceCropper {
 
                         val cropped = Bitmap.createBitmap(bitmap, left, top, finalWidth, finalHeight)
                         val enhanced = ImageEnhancer.enhance(cropped)
-                        cropped.recycle()
                         continuation.resume(enhanced)
                     } else {
                         continuation.resume(ImageEnhancer.enhance(bitmap))
@@ -281,8 +277,6 @@ class NativeFaceCropper {
                         val contextCrop = Bitmap.createBitmap(bitmap, cLeft, cTop, contextWidth, contextHeight)
                         val contextScaled = Bitmap.createScaledBitmap(contextCrop, 1024, 512, true)
                         canvas.drawBitmap(contextScaled, 0f, 0f, null)
-                        contextCrop.recycle()
-                        contextScaled.recycle()
 
                         // 2. BOTTOM LEFT: High-Contrast Face
                         val faceLeft = box.left.coerceIn(0, bitmap.width - 1)
@@ -294,13 +288,10 @@ class NativeFaceCropper {
                         val enhancedFace = ImageEnhancer.enhance(faceCrop)
                         val faceScaled = Bitmap.createScaledBitmap(enhancedFace, 512, 512, true)
                         canvas.drawBitmap(faceScaled, 0f, 512f, null)
-                        enhancedFace.recycle()
-                        faceScaled.recycle()
 
                         // 3. BOTTOM RIGHT: Grayscale Bypass
                         val matrix = Matrix().apply { postScale(-1f, 1f) }
                         val mirroredFace = Bitmap.createBitmap(faceCrop, 0, 0, faceCrop.width, faceCrop.height, matrix, true)
-                        faceCrop.recycle()
                             
                         // Convert to Grayscale (Bypasses color-based privacy filters)
                         val grayFace = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
@@ -311,13 +302,9 @@ class NativeFaceCropper {
                         grayPaint.colorFilter = ColorMatrixColorFilter(cm)
                         val mirroredScaled = Bitmap.createScaledBitmap(mirroredFace, 512, 512, true)
                         grayCanvas.drawBitmap(mirroredScaled, 0f, 0f, grayPaint)
-                        mirroredFace.recycle()
-                        mirroredScaled.recycle()
                         
                         val camoFace = ImageEnhancer.applyCamouflage(grayFace)
                         canvas.drawBitmap(camoFace, 512f, 512f, null)
-                        grayFace.recycle()
-                        camoFace.recycle()
                         
                         continuation.resume(composite)
                     } else {
@@ -325,7 +312,6 @@ class NativeFaceCropper {
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("NativeFaceCropper", "Error in createHyperProbe: ${e.message}")
-                    if (!composite.isRecycled) composite.recycle()
                     continuation.resume(bitmap)
                 }
             }
@@ -379,7 +365,6 @@ class NativeFaceCropper {
                             cropped
                         }
                         
-                        cropped.recycle()
                         continuation.resume(aligned)
                     } else {
                         continuation.resume(bitmap)
@@ -427,7 +412,6 @@ class NativeFaceCropper {
                     val faceCrop = Bitmap.createBitmap(original, faceLeft, faceTop, faceWidth, faceHeight)
                     val contrast = ImageEnhancer.applyStructuralFingerprint(faceCrop)
                     probes.add(ImageEnhancer.applyCamouflage(contrast))
-                    faceCrop.recycle()
                     
                     // Variant 3: Grayscale mirror (strong bypass)
                     val grayMatrix = ColorMatrix().apply { setSaturation(0f) }

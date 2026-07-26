@@ -14,15 +14,53 @@ object SocialMediaDetector {
         val lower = link.lowercase()
 
         return when {
+            // Major Social
             lower.contains("instagram.com") || lower.contains("instagr.am") -> PlatformScore("Instagram", 2500, true)
             lower.contains("facebook.com") || lower.contains("fb.com") -> PlatformScore("Facebook", 2200, true)
             lower.contains("linkedin.com") -> PlatformScore("LinkedIn", 2100, true)
             lower.contains("tiktok.com") -> PlatformScore("TikTok", 2000, true)
             lower.contains("twitter.com") || lower.contains("x.com") -> PlatformScore("Twitter", 1900, true)
+            lower.contains("vk.com") || lower.contains("vkontakte") -> PlatformScore("VKontakte", 1800, true)
             lower.contains("youtube.com") -> PlatformScore("YouTube", 1400, false)
-            lower.contains("snapchat.com") || lower.contains("snap") -> PlatformScore("Snapchat", 1300, true)
-            lower.contains("reddit.com") -> PlatformScore("Reddit", 800, false)
-            lower.contains("pinterest.com") -> PlatformScore("Pinterest", 700, false)
+            
+            // Messaging
+            lower.contains("t.me") || lower.contains("telegram.org") -> PlatformScore("Telegram", 1700, true)
+            lower.contains("wa.me") || lower.contains("whatsapp.com") -> PlatformScore("WhatsApp", 1600, true)
+            lower.contains("snapchat.com") -> PlatformScore("Snapchat", 1300, true)
+            lower.contains("discord.com") -> PlatformScore("Discord", 1200, true)
+            
+            // Professional/Tech
+            lower.contains("github.com") -> PlatformScore("GitHub", 1500, true)
+            lower.contains("gitlab.com") -> PlatformScore("GitLab", 1400, true)
+            lower.contains("stackoverflow.com") -> PlatformScore("Stack Overflow", 1300, false)
+            lower.contains("medium.com") -> PlatformScore("Medium", 1200, true)
+            lower.contains("dev.to") -> PlatformScore("Dev.to", 1100, true)
+            lower.contains("hashnode.com") -> PlatformScore("Hashnode", 1000, true)
+            
+            // Q&A
+            lower.contains("quora.com") -> PlatformScore("Quora", 1100, true)
+            lower.contains("stackexchange.com") -> PlatformScore("Stack Exchange", 1000, false)
+            
+            // Other
+            lower.contains("ok.ru") -> PlatformScore("Odnoklassniki", 900, true)
+            lower.contains("flickr.com") -> PlatformScore("Flickr", 700, false)
+            lower.contains("tumblr.com") -> PlatformScore("Tumblr", 600, false)
+            lower.contains("patreon.com") -> PlatformScore("Patreon", 800, true)
+            lower.contains("substack.com") -> PlatformScore("Substack", 700, true)
+            lower.contains("twitch.tv") -> PlatformScore("Twitch", 1500, true)
+            lower.contains("onlyfans.com") -> PlatformScore("OnlyFans", 500, true)
+            
+            // Dating
+            lower.contains("tinder.com") -> PlatformScore("Tinder", 400, true)
+            lower.contains("bumble.com") -> PlatformScore("Bumble", 400, true)
+            
+            // Chinese
+            lower.contains("weibo.com") -> PlatformScore("Weibo", 800, true)
+            lower.contains("douyin.com") -> PlatformScore("Douyin", 700, true)
+            lower.contains("xiaohongshu.com") -> PlatformScore("Xiaohongshu", 600, true)
+            lower.contains("zhihu.com") -> PlatformScore("Zhihu", 600, true)
+            
+            // Default
             else -> PlatformScore("Web", 500, false)
         }
     }

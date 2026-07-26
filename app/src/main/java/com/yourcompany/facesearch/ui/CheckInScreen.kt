@@ -22,6 +22,15 @@ import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Help
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -705,6 +714,15 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
                             match.source.contains("linkedin", ignoreCase = true) -> Icons.Default.People
                             match.source.contains("facebook", ignoreCase = true) -> Icons.Default.People
                             match.source.contains("instagram", ignoreCase = true) -> Icons.Default.CameraAlt
+                            match.source.contains("github", ignoreCase = true) -> Icons.Default.Code
+                            match.source.contains("telegram", ignoreCase = true) -> Icons.Default.Send
+                            match.source.contains("youtube", ignoreCase = true) -> Icons.Default.PlayCircle
+                            match.source.contains("tiktok", ignoreCase = true) -> Icons.Default.MusicNote
+                            match.source.contains("pinterest", ignoreCase = true) -> Icons.Default.PushPin
+                            match.source.contains("reddit", ignoreCase = true) -> Icons.Default.Forum
+                            match.source.contains("quora", ignoreCase = true) -> Icons.Default.Help
+                            match.source.contains("medium", ignoreCase = true) -> Icons.Default.Description
+                            match.source.contains("vkontakte", ignoreCase = true) || match.source.contains("vk.com", ignoreCase = true) -> Icons.Default.Public
                             else -> Icons.Default.Person
                         },
                         contentDescription = null,
@@ -779,10 +797,23 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
                         match.source.contains("facebook", ignoreCase = true) -> Color(0xFF1877F2).copy(alpha = 0.1f)
                         match.source.contains("instagram", ignoreCase = true) -> Color(0xFFE4405F).copy(alpha = 0.1f)
                         match.source.contains("linkedin", ignoreCase = true) -> Color(0xFF0A66C2).copy(alpha = 0.1f)
-                        match.source.contains("twitter", ignoreCase = true) || match.source.contains(" x.", ignoreCase = true) -> Color(0xFF000000).copy(alpha = 0.1f)
-                        match.source.contains("pinterest", ignoreCase = true) -> Color(0xFFE60023).copy(alpha = 0.1f)
+                        match.source.contains("twitter", ignoreCase = true) -> Color(0xFF000000).copy(alpha = 0.1f)
+                        match.source.contains("vkontakte", ignoreCase = true) || match.source.contains("vk.com", ignoreCase = true) -> Color(0xFF0077FF).copy(alpha = 0.1f)
+                        match.source.contains("telegram", ignoreCase = true) -> Color(0xFF26A5E4).copy(alpha = 0.1f)
+                        match.source.contains("github", ignoreCase = true) -> Color(0xFF333333).copy(alpha = 0.1f)
+                        match.source.contains("medium", ignoreCase = true) -> Color(0xFF000000).copy(alpha = 0.1f)
+                        match.source.contains("quora", ignoreCase = true) -> Color(0xFFB92B27).copy(alpha = 0.1f)
                         match.source.contains("youtube", ignoreCase = true) -> Color(0xFFFF0000).copy(alpha = 0.1f)
-                        match.source.contains("tiktok", ignoreCase = true) -> Color(0xFF000000).copy(alpha = 0.1f)
+                        match.source.contains("pinterest", ignoreCase = true) -> Color(0xFFE60023).copy(alpha = 0.1f)
+                        match.source.contains("reddit", ignoreCase = true) -> Color(0xFFFF4500).copy(alpha = 0.1f)
+                        match.source.contains("tiktok", ignoreCase = true) -> Color(0xFFEE1D52).copy(alpha = 0.1f)
+                        match.source.contains("snapchat", ignoreCase = true) -> Color(0xFFFFFC00).copy(alpha = 0.1f)
+                        match.source.contains("discord", ignoreCase = true) -> Color(0xFF5865F2).copy(alpha = 0.1f)
+                        match.source.contains("gitlab", ignoreCase = true) -> Color(0xFFFC6D26).copy(alpha = 0.1f)
+                        match.source.contains("stackoverflow", ignoreCase = true) -> Color(0xFFF48024).copy(alpha = 0.1f)
+                        match.source.contains("weibo", ignoreCase = true) -> Color(0xFFFF8200).copy(alpha = 0.1f)
+                        match.source.contains("twitch", ignoreCase = true) -> Color(0xFF9146FF).copy(alpha = 0.1f)
+                        match.source.contains("zhihu", ignoreCase = true) -> Color(0xFF0084FF).copy(alpha = 0.1f)
                         else -> MaterialTheme.colorScheme.secondaryContainer
                     },
                     shape = RoundedCornerShape(4.dp)
@@ -797,9 +828,23 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
                             match.source.contains("facebook", ignoreCase = true) -> Color(0xFF1877F2)
                             match.source.contains("instagram", ignoreCase = true) -> Color(0xFFE4405F)
                             match.source.contains("linkedin", ignoreCase = true) -> Color(0xFF0A66C2)
-                            match.source.contains("pinterest", ignoreCase = true) -> Color(0xFFE60023)
+                            match.source.contains("twitter", ignoreCase = true) -> Color(0xFF000000)
+                            match.source.contains("vkontakte", ignoreCase = true) || match.source.contains("vk.com", ignoreCase = true) -> Color(0xFF0077FF)
+                            match.source.contains("telegram", ignoreCase = true) -> Color(0xFF26A5E4)
+                            match.source.contains("github", ignoreCase = true) -> Color(0xFF333333)
+                            match.source.contains("medium", ignoreCase = true) -> Color(0xFF000000)
+                            match.source.contains("quora", ignoreCase = true) -> Color(0xFFB92B27)
                             match.source.contains("youtube", ignoreCase = true) -> Color(0xFFFF0000)
+                            match.source.contains("pinterest", ignoreCase = true) -> Color(0xFFE60023)
+                            match.source.contains("reddit", ignoreCase = true) -> Color(0xFFFF4500)
                             match.source.contains("tiktok", ignoreCase = true) -> Color(0xFFEE1D52)
+                            match.source.contains("snapchat", ignoreCase = true) -> Color(0xFFFFFC00)
+                            match.source.contains("discord", ignoreCase = true) -> Color(0xFF5865F2)
+                            match.source.contains("gitlab", ignoreCase = true) -> Color(0xFFFC6D26)
+                            match.source.contains("stackoverflow", ignoreCase = true) -> Color(0xFFF48024)
+                            match.source.contains("weibo", ignoreCase = true) -> Color(0xFFFF8200)
+                            match.source.contains("twitch", ignoreCase = true) -> Color(0xFF9146FF)
+                            match.source.contains("zhihu", ignoreCase = true) -> Color(0xFF0084FF)
                             else -> MaterialTheme.colorScheme.onSecondaryContainer
                         }
                     )

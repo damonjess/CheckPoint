@@ -14,8 +14,6 @@ val localProperties = Properties().apply {
 }
 val serpApiKey = localProperties.getProperty("SERP_API_KEY") ?: ""
 val imgbbApiKey = localProperties.getProperty("IMGBB_API_KEY") ?: ""
-val apifyApiToken = localProperties.getProperty("APIFY_API_TOKEN") ?: ""
-val facecheckApiKey = localProperties.getProperty("FACECHECK_API_KEY") ?: ""
 
 android {
     namespace = "com.yourcompany.facesearch"
@@ -32,8 +30,6 @@ android {
         
         buildConfigField("String", "SERP_API_KEY", "\"$serpApiKey\"")
         buildConfigField("String", "IMGBB_API_KEY", "\"$imgbbApiKey\"")
-        buildConfigField("String", "APIFY_API_TOKEN", "\"$apifyApiToken\"")
-        buildConfigField("String", "FACECHECK_API_KEY", "\"$facecheckApiKey\"")
     }
 
     buildTypes {
@@ -98,9 +94,7 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
 
-    // Retrofit + OkHttp (networking)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.converter.gson)
+    // Networking (OkHttp only)
     implementation(libs.okhttp.logging.interceptor)
 
     // ML Kit
@@ -133,9 +127,6 @@ dependencies {
     // Image Loading
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
-
-    // HTML Parsing
-    implementation(libs.jsoup)
 
     // Ktor Server (embedded)
     implementation("io.ktor:ktor-server-core:2.3.12")

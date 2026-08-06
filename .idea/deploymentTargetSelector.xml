@@ -6,11 +6,11 @@
         <option name="selectionMode" value="DROPDOWN" />
         <DialogSelection />
       </SelectionState>
-      <SelectionState runConfigName="androidTest">
+      <SelectionState runConfigName="main">
         <option name="selectionMode" value="DROPDOWN" />
         <DialogSelection />
       </SelectionState>
-      <SelectionState runConfigName="main">
+      <SelectionState runConfigName="androidTest">
         <option name="selectionMode" value="DROPDOWN" />
         <DialogSelection />
       </SelectionState>

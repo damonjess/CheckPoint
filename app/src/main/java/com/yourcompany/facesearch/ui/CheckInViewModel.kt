@@ -65,7 +65,11 @@ class CheckInViewModel(
     var debugMode by mutableStateOf(false)
 
     fun onPhotoCaptured(bitmap: Bitmap) {
-        if (isSearching) return
+        if (isSearching) {
+            val current = (uiState as? CheckInUiState.Loading)?.logs ?: emptyList()
+            uiState = CheckInUiState.Loading(0.3f, current + "Already searching...")
+            return
+        }
         capturedBitmap = bitmap
         
         // FREE MODE BYPASS: Don't start the loading sequence automatically
@@ -125,7 +129,9 @@ class CheckInViewModel(
         val rawResults = faceSearchRepository.performFaceSearch(
             bitmap = bitmap,
             keywordHint = combinedHint,
-            searchMode = searchMode,
+            imageUrl = publicUrl, // Pass the URL we already have!
+            deepCrawl = searchMode == SearchMode.DEEP_CRAWL,
+            searchMode = searchMode.name,
             onLog = ::addLog
         )
 
@@ -155,10 +161,10 @@ class CheckInViewModel(
     }
 
     fun onConfirmFreeSearch(bitmap: Bitmap) {
-        viewModelScope.launch {
-            if (isSearching) return@launch
-            isSearching = true
+        if (isSearching) return
+        isSearching = true
 
+        viewModelScope.launch {
             try {
                 val exifHints = extractExifHints(bitmap)
                 val combinedHint = listOf(targetHint, exifHints)

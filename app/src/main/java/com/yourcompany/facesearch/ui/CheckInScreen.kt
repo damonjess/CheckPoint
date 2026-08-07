@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.yourcompany.facesearch.ui.components.SocialOrbitSearchScreen
 
 // High-contrast Amber for better readability
 private val Amber = Color(0xFFFFB000)
@@ -286,24 +287,27 @@ fun CheckInScreen(
                             consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
                         }
 
-                        Column(modifier = Modifier.fillMaxWidth().height(400.dp)) {
-                            LinearProgressIndicator(
-                                progress = { uiState.progress },
-                                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
-                                color = Amber,
-                                trackColor = Amber.copy(alpha = 0.1f),
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            SocialOrbitSearchScreen(
+                                faceBitmap = capturedBitmap,
+                                progress = uiState.progress,
+                                statusText = uiState.logs.lastOrNull() ?: "Scanning socials...",
+                                modifier = Modifier.fillMaxWidth().height(320.dp)
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Spacer(modifier = Modifier.height(20.dp))
+                            
                             Text(
-                                text = "SEARCH PROGRESS: ${(uiState.progress * 100).toInt()}% | MODE: ${searchMode.name}",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
+                                "LIVE OSINT EXTRACTION CONSOLE",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
                                 color = Amber
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
                             SherlockConsole(
                                 logs = uiState.logs,
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier.fillMaxWidth().height(200.dp),
                                 showCursor = true,
                                 scrollState = consoleScrollState
                             )

@@ -1,6 +1,8 @@
 package com.yourcompany.facesearch.network
 
 import android.content.Context
+import android.util.Base64
+import com.yourcompany.facesearch.ui.SearchMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -9,6 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 class FaceSearchRepository(
@@ -37,29 +40,20 @@ class FaceSearchRepository(
     suspend fun performFaceSearch(
         bitmap: android.graphics.Bitmap,
         keywordHint: String? = null,
+        searchMode: SearchMode = SearchMode.PRECISION,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
 
         val allResults = mutableListOf<SerpVisualMatch>()
-        val logs = mutableListOf<String>()
-
-        // === STEP 1: HOST IMAGE FOR FREE ===
-        onLog("Staging probe on free hosting...")
-        val publicUrl = freeHost.upload(bitmap) { msg ->
-            logs.add(msg)
-            onLog(msg)
-        }
-
-        if (publicUrl != null) {
-            onLog("✓ Probe live: ${publicUrl.take(40)}...")
-        } else {
-            onLog("⚠ Hosting failed. Attempting local-only search...")
-        }
-
-        val imageUrl = publicUrl ?: ""
+        
+        // === STEP 1: CONVERT TO BASE64 (BYPASS EXTERNAL HOSTS) ===
+        onLog("Encoding image for direct transmission...")
+        val stream = ByteArrayOutputStream()
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, stream)
+        val base64Image = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
 
         // === STEP 2: TERMUX BACKEND ===
-        onLog("Connecting to Stealth Automation Cluster...")
+        onLog("Sending probe directly to Cluster (Local-Only)...")
         var connected = false
 
         for (url in backendUrls) {
@@ -69,8 +63,11 @@ class FaceSearchRepository(
                 onLog("Probing $label...")
 
                 val payload = JSONObject().apply {
-                    put("imageUrl", imageUrl)
+                    put("imageBase64", base64Image)
                     put("keywordHint", keywordHint ?: "")
+                    if (searchMode == SearchMode.DEEP_CRAWL) {
+                        put("deepCrawl", true)
+                    }
                 }.toString()
 
                 val req = Request.Builder()
@@ -97,21 +94,22 @@ class FaceSearchRepository(
             }
         }
 
-        // === STEP 3: IN-APP WEBVIEW FALLBACK ===
-        if (allResults.isEmpty() && publicUrl != null) {
-            onLog("Termux unreachable. Activating in-app WebView fallback...")
-            try {
-                val scraper = WebViewScraper(context)
-                val webResults = scraper.scrapeYandex(publicUrl)
-                if (webResults.isNotEmpty()) {
-                    allResults.addAll(webResults)
-                    onLog("✓ WebView fallback: ${webResults.size} results")
-                } else {
-                    onLog("⚠ WebView fallback returned 0 results")
+        // === STEP 3: FALLBACK TO WEBVIEW (Still uses hosting if termux fails) ===
+        if (allResults.isEmpty()) {
+            onLog("Termux cluster unreachable. Attempting legacy hosting fallback...")
+            val publicUrl = freeHost.upload(bitmap) { onLog(it) }
+            if (publicUrl != null) {
+                try {
+                    val scraper = WebViewScraper(context)
+                    val webResults = scraper.scrapeYandex(publicUrl)
+                    if (webResults.isNotEmpty()) {
+                        allResults.addAll(webResults)
+                        onLog("✓ WebView fallback: ${webResults.size} results")
+                    }
+                    scraper.destroy()
+                } catch (e: Exception) {
+                    onLog("⚠ WebView error: ${e.message}")
                 }
-                scraper.destroy()
-            } catch (e: Exception) {
-                onLog("⚠ WebView error: ${e.message}")
             }
         }
 
@@ -119,8 +117,10 @@ class FaceSearchRepository(
             onLog("✗ No free engines returned results.")
         }
 
-        // === STEP 4: SCORE & DEDUPLICATE ===
-        allResults.map { match ->
+        // === STEP 4: FILTER, SCORE & DEDUPLICATE ===
+        allResults
+            .filter { !isGarbageResult(it, keywordHint) }
+            .map { match ->
             var score = match.score
             val link = match.link?.lowercase() ?: ""
             val title = match.title?.lowercase() ?: ""
@@ -141,6 +141,28 @@ class FaceSearchRepository(
         }
         .sortedByDescending { it.score }
         .distinctBy { it.link }
+    }
+
+    private fun isGarbageResult(match: SerpVisualMatch, keywordHint: String?): Boolean {
+        val title = match.title ?: ""
+        val link = match.link ?: ""
+
+        // Block dimension-only titles: "620×634", "600x600Андрей"
+        if (Regex("^\\d+\\s*[×xX]\\s*\\d+").containsMatchIn(title) && title.length < 20) return true
+
+        // Block known spam domains
+        val spammy = listOf("znakomstva", "dating", "sex.", "escort", "bride", "dosug", "sintim")
+        val combined = "$link $title".lowercase()
+        if (spammy.any { combined.contains(it) }) return true
+
+        // If hint is English/Latin, penalize heavy Cyrillic unless it's VK
+        val hint = keywordHint?.lowercase()?.trim() ?: ""
+        if (hint.isNotBlank() && hint.all { it in 'a'..'z' || it in 'A'..'Z' || it.isWhitespace() || it.isDigit() }) {
+            val cyrillicCount = title.count { it in '\u0400'..'\u04FF' }
+            if (cyrillicCount > 5 && !link.contains("vk.com")) return true
+        }
+
+        return false
     }
 
     private fun parseMatches(jsonData: String, onLog: (String) -> Unit): List<SerpVisualMatch> {

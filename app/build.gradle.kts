@@ -86,6 +86,7 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.material)
+    implementation(libs.androidx.exifinterface)
 
 
     // CameraX

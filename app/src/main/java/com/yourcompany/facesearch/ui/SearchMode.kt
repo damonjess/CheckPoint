@@ -8,5 +8,6 @@ enum class SearchMode {
     SOCIAL_OPTIMIZED,
     AGGRESSIVE,
     RAW,
-    FREE
+    FREE,
+    DEEP_CRAWL
 }

@@ -1,40 +1,24 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const fetch = require('node-fetch');
 
 puppeteer.use(StealthPlugin());
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
-// ========== UTILS ==========
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-async function safePageGoto(page, url, options = { waitUntil: 'load', timeout: 20000 }) {
-    let retries = 2;
-    while (retries > 0) {
-        try {
-            await page.goto(url, options);
-            return true;
-        } catch (e) {
-            if (e.message.includes('detached') || e.message.includes('Navigation timeout')) {
-                console.log(`   🔄 Retrying navigation (${retries} left)...`);
-                await delay(2000);
-                retries--;
-            } else {
-                throw e;
-            }
-        }
-    }
-    return false;
-}
 
 const SOCIAL_DOMAINS = {
     'facebook.com': 'Facebook', 'fb.com': 'Facebook',
     'instagram.com': 'Instagram', 'instagr.am': 'Instagram',
     'linkedin.com': 'LinkedIn',
     'twitter.com': 'Twitter', 'x.com': 'Twitter',
-    'vk.com': 'VKontakte', 'vkontakte.ru': 'VKontakte',
+    'vk.com': 'VKontakte',
     'tiktok.com': 'TikTok',
     'youtube.com': 'YouTube', 'youtu.be': 'YouTube',
     'pinterest.com': 'Pinterest',
@@ -42,385 +26,583 @@ const SOCIAL_DOMAINS = {
     'github.com': 'GitHub',
     'medium.com': 'Medium',
     'quora.com': 'Quora',
-    't.me': 'Telegram', 'telegram.me': 'Telegram',
+    't.me': 'Telegram',
     'twitch.tv': 'Twitch',
-    'snapchat.com': 'Snapchat',
-    'discord.com': 'Discord', 'discord.gg': 'Discord',
-    'gitlab.com': 'GitLab',
-    'stackoverflow.com': 'Stack Overflow',
-    'dev.to': 'Dev.to',
-    'ok.ru': 'Odnoklassniki',
-    'weibo.com': 'Weibo',
-    'douyin.com': 'Douyin',
-    'xiaohongshu.com': 'Xiaohongshu',
     'threads.net': 'Threads',
     'bsky.app': 'Bluesky'
 };
 
-// ========== GOOGLE DORKING ==========
+const SPAM_DOMAINS = [
+    'znakomstva', 'znaomstva', 'dating', 'sex.', 'porn', 'xxx',
+    'escort', 'bride', 'mail-order', 'russian-brides', 'dosug',
+    ' intim ', 'sintim', 'erotica', 'nude', 'naked'
+];
+
+const DIMENSION_REGEX = /^\d+\s*[×xX*]\s*\d+/;
+
+// Temporary local image server (no external hosting needed)
+let tempServer = null;
+let tempPort = 3001;
+
+function startTempServer(imagePath) {
+    if (tempServer) tempServer.close();
+    tempServer = http.createServer((req, res) => {
+        if (req.url === '/probe.jpg') {
+            const data = fs.readFileSync(imagePath);
+            res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+            res.end(data);
+        } else {
+            res.writeHead(404);
+            res.end();
+        }
+    }).listen(tempPort, '0.0.0.0'); // Listen on all interfaces
+    return `http://127.0.0.1:${tempPort}/probe.jpg`;
+}
+
+function cleanTitle(raw) {
+    if (!raw) return 'Visual Match';
+    let t = raw
+        .replace(/^\d+\s*[×xX*]\s*\d+[A-Za-zА-Яа-я]?\s*/, '')
+        .replace(/^\d+\s*[×xX*]\s*\d+\s*/, '')
+        .replace(/\.(jpg|jpeg|png|gif|webp|bmp)\b/gi, '')
+        .replace(/^\s*-\s*/, '')
+        .trim();
+    return t.slice(0, 180) || 'Visual Match';
+}
+
+function isSpam(link, title) {
+    const combined = ((link || '') + ' ' + (title || '')).toLowerCase();
+    return SPAM_DOMAINS.some(d => combined.includes(d));
+}
+
+function detectSource(href) {
+    const h = href.toLowerCase();
+    for (const [domain, name] of Object.entries(SOCIAL_DOMAINS)) {
+        if (h.includes(domain)) return name;
+    }
+    return 'Web';
+}
+
+// ===== USERNAME PIVOT =====
+function extractUsernames(results) {
+    const users = new Set();
+    const patterns = [
+        /instagram\.com\/([A-Za-z0-9_.]+)/,
+        /twitter\.com\/([A-Za-z0-9_]+)/,
+        /x\.com\/([A-Za-z0-9_]+)/,
+        /github\.com\/([A-Za-z0-9-]+)/,
+        /tiktok\.com\/@([A-Za-z0-9_.]+)/,
+        /t\.me\/([A-Za-z0-9_]+)/,
+    ];
+
+    results.forEach(r => {
+        if (!r.link) return;
+        patterns.forEach(p => {
+            const m = r.link.match(p);
+            if (m && m[1] && m[1].length > 2) users.add(m[1]);
+        });
+    });
+    return Array.from(users);
+}
+
 async function dorkSocialProfiles(page, keywordHint) {
     const results = [];
     if (!keywordHint || keywordHint.length < 3) return results;
 
-    const lowerHint = keywordHint.toLowerCase();
-    let targetSites = Object.keys(SOCIAL_DOMAINS);
-    let queryModifiers = '';
+    console.log(`  🔍 Dorking (Bing Master) for: ${keywordHint}`);
+    const cleanHint = keywordHint.replace(/[^\w\s\-_.]/g, '').trim();
 
-    // If hint points to a specific platform, narrow down
-    if (lowerHint.includes('instagram')) {
-        targetSites = ['instagram.com'];
-        queryModifiers = '"@"';
-    } else if (lowerHint.includes('facebook')) {
-        targetSites = ['facebook.com'];
-        queryModifiers = '"profile" OR "people"';
-    } else if (lowerHint.includes('linkedin')) {
-        targetSites = ['linkedin.com/in'];
-        queryModifiers = '"linkedin.com/in/"';
-    } else if (lowerHint.includes('twitter') || lowerHint.includes('x.com')) {
-        targetSites = ['twitter.com', 'x.com'];
-        queryModifiers = '"@"';
-    } else if (lowerHint.includes('github')) {
-        targetSites = ['github.com'];
-        queryModifiers = '"github.com/"';
-    } else if (lowerHint.includes('tiktok')) {
-        targetSites = ['tiktok.com'];
-        queryModifiers = '"@"';
-    } else if (lowerHint.includes('telegram')) {
-        targetSites = ['t.me'];
-        queryModifiers = '"t.me/"';
-    }
+    const platforms = [
+        { site: 'instagram.com', q: `"${cleanHint}" instagram` },
+        { site: 'facebook.com', q: `"${cleanHint}" facebook` },
+        { site: 'linkedin.com', q: `"${cleanHint}" linkedin` },
+        { site: 'twitter.com', q: `"${cleanHint}" twitter` },
+        { site: 'github.com', q: `"${cleanHint}" github` },
+        { site: 'tiktok.com', q: `"${cleanHint}" tiktok` }
+    ];
 
-    // Split into chunks of 6 sites to avoid Google query length limits
-    const chunkSize = 6;
-    for (let i = 0; i < targetSites.length; i += chunkSize) {
-        const chunk = targetSites.slice(i, i + chunkSize);
-        const siteClause = chunk.map(s => `site:${s}`).join(' OR ');
-        const masterQuery = `(${siteClause}) "${keywordHint}" ${queryModifiers}`;
-
-        console.log(`  🔍 Dorking chunk ${Math.floor(i/chunkSize) + 1} for: ${keywordHint}`);
-
+    for (const plat of platforms) {
         try {
-            const url = `https://www.google.com/search?q=${encodeURIComponent(masterQuery)}&num=100`;
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            const url = `https://www.bing.com/search?q=${encodeURIComponent(plat.q)}&count=50`;
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
+            await delay(1500);
 
-            const success = await safePageGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-            if (!success) continue;
-
-            // Fix the selector error: use standard CSS selectors or evaluate
-            const consentBtn = await page.evaluateHandle(() => {
-                const buttons = Array.from(document.querySelectorAll('button'));
-                return buttons.find(b => b.innerText.includes('Accept all') || b.innerText.includes('I agree')) || null;
-            });
-
-            if (consentBtn.asElement()) {
-                await consentBtn.asElement().click();
-                await delay(1000);
-            }
-
-            const pageResults = await page.evaluate((socialDomains) => {
-                const items = [];
+            const items = await page.evaluate((site, socialDomains) => {
+                const out = [];
                 const seen = new Set();
                 const socialMap = JSON.parse(socialDomains);
 
-                document.querySelectorAll('div.g, a[href^="http"]').forEach(el => {
+                document.querySelectorAll('li.b_algo, a[href^="http"]').forEach(el => {
                     try {
-                        const linkEl = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
-                        if (!linkEl) return;
-                        const href = linkEl.href;
-                        const titleEl = el.querySelector('h3') || el;
-                        const title = titleEl.textContent.trim().slice(0, 150);
+                        const a = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
+                        if (!a) return;
+                        const href = a.href;
+                        if (!href || seen.has(href) || href.includes('bing.com')) return;
 
-                        if (!href || href.includes('google.com') || seen.has(href)) return;
-
-                        let source = 'Web';
+                        const isTarget = href.includes(site);
                         let isSocial = false;
-                        for (const [domain, name] of Object.entries(socialMap)) {
-                            if (href.includes(domain)) { source = name; isSocial = true; break; }
+                        let source = 'Web';
+                        for (const [d, n] of Object.entries(socialMap)) {
+                            if (href.includes(d)) { source = n; isSocial = true; break; }
                         }
-                        if (!isSocial) return;
+                        if (!isTarget && !isSocial) return;
 
-                        let score = 100;
-                        if (href.includes('/in/') || href.includes('/profile') || href.includes('/people/') || href.includes('/@')) score += 50;
-
+                        const title = (el.querySelector('h2, a')?.textContent || el.textContent || '').trim().slice(0, 150);
                         seen.add(href);
-                        items.push({ title: title || `${source} Profile`, link: href, thumbnail: '', source, isSocial, score });
-                    } catch(e) {}
+                        out.push({ title, link: href, thumbnail: '', source, isSocial, score: isSocial ? 300 : 80 });
+                    } catch (e) {}
                 });
-                return items;
-            }, JSON.stringify(SOCIAL_DOMAINS));
+                return out;
+            }, plat.site, JSON.stringify(SOCIAL_DOMAINS));
 
-            results.push(...pageResults);
-            await delay(1000); // Small pause between chunks
+            console.log(`    ✓ Bing (${plat.site}): ${items.length} leads`);
+            results.push(...items);
         } catch (e) {
-            console.log(`    ⚠️ Google chunk error: ${e.message}`);
+            console.log(`    ⚠️ Bing dork error (${plat.site}): ${e.message}`);
         }
     }
-
-    console.log(`    ✓ Total Google Master results: ${results.length} leads found`);
     return results;
 }
 
-// ========== MAIN SEARCH ENDPOINT ==========
-app.post('/api/search', async (req, res) => {
-    const { imageUrl, keywordHint } = req.body;
-    console.log(`📸 Search: ${imageUrl} | Hint: ${keywordHint || 'None'}`);
+// ========== MICROFORMAT / OPEN GRAPH EXTRACTOR ==========
+async function extractPublicImagesFromProfile(page, profileUrl, onLog) {
+    const images = [];
+    try {
+        onLog(`  🔬 Deep crawling: ${profileUrl.slice(0, 60)}...`);
 
-    if (!imageUrl) {
-        return res.status(400).json({ error: 'Missing imageUrl' });
+        await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        await delay(1500);
+
+        const metaImages = await page.evaluate(() => {
+            const out = [];
+            const selectors = [
+                'meta[property="og:image"]',
+                'meta[name="twitter:image"]',
+                'meta[property="twitter:image"]',
+                'meta[itemprop="image"]',
+                'meta[property="og:image:secure_url"]',
+                'link[rel="image_src"]',
+                'meta[property="instapp:owner_user_id"]',
+            ];
+
+            selectors.forEach(sel => {
+                document.querySelectorAll(sel).forEach(el => {
+                    const url = el.getAttribute('content') || el.getAttribute('href');
+                    if (url && url.startsWith('http')) out.push(url);
+                });
+            });
+
+            document.querySelectorAll('img[src*="fbcdn.net"], img[src*="instagram.com"], img[src*="cdninstagram"]').forEach(img => {
+                if (img.src.startsWith('http')) out.push(img.src);
+            });
+
+            return [...new Set(out)];
+        });
+
+        for (const imgUrl of metaImages) {
+            if (imgUrl.includes('emoji') || imgUrl.includes('pixel') || imgUrl.includes('1x1')) continue;
+            if (imgUrl.endsWith('.ico') || imgUrl.endsWith('.svg')) continue;
+            images.push(imgUrl);
+            onLog(`    📸 Extracted public CDN: ${imgUrl.slice(0, 80)}...`);
+        }
+
+        if (images.length === 0) {
+            onLog(`    ℹ No public images found (profile may use JS rendering)`);
+        }
+    } catch (e) {
+        onLog(`    ⚠️ Deep crawl failed: ${e.message}`);
     }
+    return images;
+}
+
+// ========== RECURSIVE AVATAR SEARCH ==========
+async function recursiveAvatarSearch(browser, seedImageUrl, keywordHint, onLog) {
+    const allMatches = [];
+    const seenImageUrls = new Set([seedImageUrl]);
+    const seenProfileUrls = new Set();
+    const crawlDepth = 2;
+
+    let currentImages = [seedImageUrl];
+
+    for (let depth = 0; depth < crawlDepth; depth++) {
+        onLog(`\n🔄 RECURSIVE DEPTH ${depth + 1}: ${currentImages.length} image(s) to probe`);
+
+        const nextImages = [];
+
+        for (const imgUrl of currentImages) {
+            const page = await browser.newPage();
+            await page.setViewport({ width: 1920, height: 1080 });
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+
+            try {
+                const url = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imgUrl)}`;
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12000 });
+                await delay(2000);
+
+                const items = await page.evaluate((socialDomains) => {
+                    const out = [], seen = new Set();
+                    const socialMap = JSON.parse(socialDomains);
+
+                    document.querySelectorAll('.serp-item, .CbirSites-Item, a[href^="http"]').forEach(el => {
+                        try {
+                            const a = el.querySelector('a[href^="http"]');
+                            if (!a) return;
+                            const href = a.href;
+                            if (!href || seen.has(href) || href.includes('yandex.com')) return;
+
+                            const imgEl = el.querySelector('img');
+                            const thumb = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || '') : '';
+                            const title = el.textContent.trim().slice(0, 100) || 'Visual Match';
+
+                            let source = 'Yandex';
+                            let isSocial = false;
+                            for (const [d, n] of Object.entries(socialMap)) {
+                                if (href.includes(d)) { source = n; isSocial = true; break; }
+                            }
+
+                            seen.add(href);
+                            out.push({ title, link: href, thumbnail: thumb, source, isSocial, score: isSocial ? 200 : 60 });
+                        } catch(e) {}
+                    });
+                    return out;
+                }, JSON.stringify(SOCIAL_DOMAINS));
+
+                items.forEach(item => {
+                    if (!seenProfileUrls.has(item.link)) {
+                        seenProfileUrls.add(item.link);
+                        allMatches.push(item);
+                    }
+                });
+
+                onLog(`   ✓ Depth ${depth + 1}: ${items.length} profiles from image probe`);
+
+                const socialProfiles = items.filter(i => i.isSocial).slice(0, 5);
+                for (const profile of socialProfiles) {
+                    if (seenProfileUrls.has(profile.link + '_crawled')) continue;
+                    seenProfileUrls.add(profile.link + '_crawled');
+
+                    const publicImages = await extractPublicImagesFromProfile(page, profile.link, onLog);
+
+                    for (const pubImg of publicImages) {
+                        if (!seenImageUrls.has(pubImg)) {
+                            seenImageUrls.add(pubImg);
+                            nextImages.push(pubImg);
+                            onLog(`    ⬇️ Queued new avatar for next depth: ${pubImg.slice(0, 50)}...`);
+                        }
+                    }
+                }
+
+            } catch (e) {
+                onLog(`   ⚠️ Depth ${depth + 1} error: ${e.message}`);
+            }
+
+            await page.close();
+        }
+
+        currentImages = nextImages;
+        if (currentImages.length === 0) {
+            onLog(`🛑 No new avatars discovered. Halting recursion.`);
+            break;
+        }
+    }
+
+    return allMatches;
+}
+
+app.post('/api/search', async (req, res) => {
+    const { imageUrl: clientUrl, imageBase64, keywordHint, deepCrawl } = req.body;
+    let imageUrl = clientUrl;
+    let localFilePath = null;
+
+    if (imageBase64) {
+        const buffer = Buffer.from(imageBase64, 'base64');
+        const tmpDir = '/data/data/com.termux/files/usr/tmp';
+        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+        localFilePath = path.join(tmpDir, 'probe.jpg');
+        fs.writeFileSync(localFilePath, buffer);
+        imageUrl = startTempServer(localFilePath);
+        console.log(`📸 Local probe serving at ${imageUrl}`);
+    }
+
+    console.log(`\n📸 Search: ${imageUrl?.slice(0, 60)}... | Hint: ${keywordHint || 'None'} | DeepCrawl: ${!!deepCrawl}`);
+
+    if (!imageUrl) return res.status(400).json({ error: 'Missing image' });
 
     let browser;
     let isFinished = false;
     const timeout = setTimeout(() => {
         if (!isFinished && !res.headersSent) {
             isFinished = true;
-            res.status(504).json({ success: false, error: "Search timeout", matches: [] });
+            res.status(504).json({ success: false, error: 'Search timeout', matches: [] });
         }
-    }, 60000);
+    }, deepCrawl ? 120000 : 85000); // More time for deep crawl
 
     try {
         browser = await puppeteer.launch({
             headless: true,
             executablePath: '/data/data/com.termux/files/usr/bin/chromium-browser',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--single-process',
-                '--disable-gpu',
-                '--no-zygote',
-                '--disable-extensions'
-            ]
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process']
         });
 
-        const allResults = [];
+        const allRaw = [];
         const pages = [];
-
         async function getPage() {
-            const page = await browser.newPage();
-            await page.setViewport({ width: 1280, height: 720 });
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-            pages.push(page);
-            return page;
+            const p = await browser.newPage();
+            await p.setViewport({ width: 1920, height: 1080 });
+            await p.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            pages.push(p);
+            return p;
         }
 
-        // ========== ENGINE 1: YANDEX ==========
-        const yandexTask = async () => {
-            const page = await getPage();
-            try {
-                console.log("🔍 Querying Yandex...");
-                const url = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
-                await safePageGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-                await delay(2000);
-                for (let i = 0; i < 3; i++) {
-                    await page.evaluate(() => window.scrollBy(0, 500));
-                    await delay(500);
+        if (deepCrawl) {
+            console.log('🕸️ Activating Deep Recursive Crawl...');
+            const recursiveResults = await recursiveAvatarSearch(browser, imageUrl, keywordHint, (msg) => console.log(msg));
+            allRaw.push(...recursiveResults);
+        } else {
+            // Standard Parallel Engines
+            const yandexJob = (async () => {
+                const page = await getPage();
+                try {
+                    console.log('🔍 Querying Yandex...');
+                    if (localFilePath) {
+                        await page.goto('https://yandex.com/images/search', { waitUntil: 'domcontentloaded' });
+                        const uploadBtn = await page.waitForSelector('.input__icon_type_camera, .CbirHeader-Camera', { timeout: 5000 });
+                        await uploadBtn.click();
+                        const fileInput = await page.waitForSelector('input[type="file"]', { timeout: 5000 });
+                        await fileInput.uploadFile(localFilePath);
+                    } else {
+                        const url = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(imageUrl)}`;
+                        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                    }
+                    await delay(3500);
+                    for (let i = 0; i < 5; i++) {
+                        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+                        await delay(700);
+                    }
+
+                    const items = await page.evaluate(() => {
+                        const out = [], seen = new Set();
+                        document.querySelectorAll('.serp-item, .CbirSites-Item').forEach(el => {
+                            try {
+                                const a = el.querySelector('a[href^="http"]');
+                                if (!a) return;
+                                const href = a.href;
+                                if (!href || seen.has(href) || href.includes('yandex.com')) return;
+                                const img = el.querySelector('img');
+                                let thumb = img ? (img.src || img.getAttribute('data-src') || '') : '';
+                                const title = el.querySelector('.CbirSites-ItemTitle, .serp-item__title, a')?.textContent || '';
+                                seen.add(href);
+                                out.push({ title, link: href, thumbnail: thumb, source: 'Yandex', isSocial: false, score: 50 });
+                            } catch (e) {}
+                        });
+                        return out;
+                    });
+                    return items;
+                } catch (e) { console.log(`   ⚠️ Yandex error: ${e.message}`); return []; }
+            })();
+
+            const bingJob = (async () => {
+                const page = await getPage();
+                try {
+                    console.log('🔍 Querying Bing Visual...');
+                    if (localFilePath) {
+                        await page.goto('https://www.bing.com/visualsearch', { waitUntil: 'domcontentloaded' });
+                        const fileInput = await page.waitForSelector('input[type="file"]', { timeout: 5000 });
+                        await fileInput.uploadFile(localFilePath);
+                    } else {
+                        const url = `https://www.bing.com/images/search?view=detailv2&iss=sbi&form=SBIVSP&q=imgurl:${encodeURIComponent(imageUrl)}&imgurl=${encodeURIComponent(imageUrl)}`;
+                        await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 });
+                    }
+                    await delay(3500);
+
+                    const items = await page.evaluate(() => {
+                        const out = [], seen = new Set();
+                        document.querySelectorAll('.imgpt, .richImage, .vsc_match').forEach(el => {
+                            try {
+                                const a = el.querySelector('a[href^="http"]');
+                                if (!a) return;
+                                const href = a.href;
+                                if (!href || seen.has(href) || href.includes('bing.com')) return;
+                                const img = el.querySelector('img');
+                                let thumb = img ? (img.src || img.getAttribute('data-src') || '') : '';
+                                const title = el.getAttribute('aria-label') || el.textContent.trim() || 'Visual Match';
+                                seen.add(href);
+                                out.push({ title, link: href, thumbnail: thumb, source: 'Bing', isSocial: false, score: 45 });
+                            } catch (e) {}
+                        });
+                        return out;
+                    });
+                    return items;
+                } catch (e) { console.log(`   ⚠️ Bing error: ${e.message}`); return []; }
+            })();
+
+            const tineyeJob = (async () => {
+                const page = await getPage();
+                try {
+                    console.log('🔍 Querying TinEye...');
+                    if (localFilePath) {
+                        await page.goto('https://tineye.com/', { waitUntil: 'domcontentloaded' });
+                        const fileInput = await page.waitForSelector('input[type="file"]', { timeout: 5000 });
+                        await fileInput.uploadFile(localFilePath);
+                    } else {
+                        const url = `https://tineye.com/search?url=${encodeURIComponent(imageUrl)}`;
+                        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                    }
+                    await delay(3000);
+                    const items = await page.evaluate(() => {
+                        const out = [], seen = new Set();
+                        document.querySelectorAll('.match, .search-result').forEach(el => {
+                            try {
+                                const a = el.querySelector('a[href^="http"]');
+                                if (!a) return;
+                                const href = a.href;
+                                if (!href || seen.has(href) || href.includes('tineye.com')) return;
+                                const img = el.querySelector('img');
+                                const thumb = img ? (img.src || '') : '';
+                                const title = el.textContent.trim().slice(0, 100) || 'TinEye Match';
+                                seen.add(href);
+                                out.push({ title, link: href, thumbnail: thumb, source: 'TinEye', isSocial: false, score: 40 });
+                            } catch (e) {}
+                        });
+                        return out;
+                    });
+                    return items;
+                } catch (e) { console.log(`   ⚠️ TinEye error: ${e.message}`); return []; }
+            })();
+
+            const baiduJob = (async () => {
+                const page = await getPage();
+                try {
+                    console.log('🔍 Querying Baidu...');
+                    const url = `https://graph.baidu.com/s?sign=&wd=&f=general&tn=wise&image=${encodeURIComponent(imageUrl)}`;
+                    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                    await delay(2500);
+                    const items = await page.evaluate(() => {
+                        const out = [], seen = new Set();
+                        document.querySelectorAll('a[href^="http"]').forEach(el => {
+                            try {
+                                const href = el.href;
+                                if (!href || seen.has(href) || href.includes('baidu.com')) return;
+                                const title = el.textContent.trim().slice(0, 100) || 'Baidu Match';
+                                seen.add(href);
+                                out.push({ title, link: href, thumbnail: '', source: 'Baidu', isSocial: false, score: 35 });
+                            } catch (e) {}
+                        });
+                        return out;
+                    });
+                    return items;
+                } catch (e) { console.log(`   ⚠️ Baidu error: ${e.message}`); return []; }
+            })();
+
+            const sogouJob = (async () => {
+                const page = await getPage();
+                try {
+                    console.log('🔍 Querying Sogou...');
+                    const url = `https://pic.sogou.com/ris?query=${encodeURIComponent(imageUrl)}&flag=1&drag=0`;
+                    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                    await delay(2500);
+
+                    const items = await page.evaluate(() => {
+                        const out = [], seen = new Set();
+                        document.querySelectorAll('a[href^="http"]').forEach(el => {
+                            try {
+                                const href = el.href;
+                                if (!href || seen.has(href) || href.includes('sogou.com')) return;
+                                const title = el.textContent.trim().slice(0, 100) || 'Sogou Match';
+                                seen.add(href);
+                                out.push({ title, link: href, thumbnail: '', source: 'Sogou', isSocial: false, score: 40 });
+                            } catch(e) {}
+                        });
+                        return out;
+                    });
+                    return items;
+                } catch (e) { console.log(`   ⚠️ Sogou error: ${e.message}`); return []; }
+            })();
+
+            const dorkJob = (async () => {
+                if (!keywordHint || keywordHint.length < 3) return [];
+                const page = await getPage();
+                return dorkSocialProfiles(page, keywordHint);
+            })();
+
+            const settled = await Promise.allSettled([yandexJob, bingJob, tineyeJob, baiduJob, sogouJob, dorkJob]);
+            settled.forEach(r => { if (r.status === 'fulfilled') allRaw.push(...r.value); });
+        }
+
+        console.log(`🧹 Cleaning ${allRaw.length} raw results...`);
+        const cleaned = [];
+        const seenLinks = new Set();
+
+        for (const raw of allRaw) {
+            const title = cleanTitle(raw.title);
+            const link = raw.link || '';
+            const source = raw.source === 'Web' ? detectSource(link) : raw.source;
+            if (isSpam(link, title)) continue;
+            if (DIMENSION_REGEX.test(title) && title.length < 15) continue;
+            if (seenLinks.has(link)) continue;
+            seenLinks.add(link);
+            let score = raw.score || 50;
+            const lowerLink = link.toLowerCase();
+            if (Object.keys(SOCIAL_DOMAINS).some(d => lowerLink.includes(d))) {
+                score += 200;
+                if (lowerLink.includes('/profile') || lowerLink.includes('/in/') || lowerLink.includes('/@')) score += 100;
+            }
+            if (keywordHint) {
+                const hint = keywordHint.toLowerCase();
+                const t = title.toLowerCase();
+                if (t.includes(hint)) score += 300;
+                if (hint.split(' ').filter(w => w.length > 2).every(w => t.includes(w))) score += 200;
+            }
+            cleaned.push({
+                title, link, thumbnail: raw.thumbnail || '', source,
+                isSocial: Object.keys(SOCIAL_DOMAINS).some(d => lowerLink.includes(d)),
+                score
+            });
+        }
+
+        cleaned.sort((a, b) => b.score - a.score);
+
+        // ===== USERNAME PIVOT =====
+        const usernames = extractUsernames(cleaned);
+        if (usernames.length > 0) {
+            console.log(`🎯 Pivoting on usernames: ${usernames.join(', ')}`);
+            const pivotPage = await getPage();
+            for (const user of usernames.slice(0, 3)) {
+                try {
+                    const pivotResults = await dorkSocialProfiles(pivotPage, user);
+                    pivotResults.forEach(pr => {
+                        if (!seenLinks.has(pr.link)) {
+                            seenLinks.add(pr.link);
+                            cleaned.push(pr);
+                        }
+                    });
+                } catch (e) {
+                    console.log(`⚠️ Pivot error for ${user}: ${e.message}`);
                 }
-
-                const results = await page.evaluate((socialDomains) => {
-                    const items = [];
-                    const seen = new Set();
-                    const socialMap = JSON.parse(socialDomains);
-
-                    document.querySelectorAll('.serp-item, .CbirSites-Item, a[href^="http"]').forEach(el => {
-                        try {
-                            const linkEl = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
-                            const href = linkEl ? linkEl.href : '';
-                            if (!href || seen.has(href) || href.includes('yandex.com')) return;
-
-                            const imgEl = el.querySelector('img');
-                            let imgSrc = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || '') : '';
-                            const title = el.textContent.trim().slice(0, 100) || 'Visual Match';
-
-                            let source = 'Yandex';
-                            let isSocial = false;
-                            for (const [domain, name] of Object.entries(socialMap)) {
-                                if (href.includes(domain)) { source = name; isSocial = true; break; }
-                            }
-
-                            seen.add(href);
-                            items.push({ title, link: href, thumbnail: imgSrc, source, isSocial, score: isSocial ? 150 : 50 });
-                        } catch(e) {}
-                    });
-                    return items;
-                }, JSON.stringify(SOCIAL_DOMAINS));
-
-                console.log(`   ✓ Yandex: ${results.length} results`);
-                return results;
-            } catch (e) {
-                console.log(`   ⚠️ Yandex error: ${e.message}`);
-                return [];
             }
-        };
+            cleaned.sort((a, b) => b.score - a.score);
+        }
 
-        // ========== ENGINE 2: BING ==========
-        const bingTask = async () => {
-            const page = await getPage();
-            try {
-                console.log("🔍 Querying Bing Visual...");
-                const url = `https://www.bing.com/images/search?view=detailv2&iss=sbi&form=SBIVSP&sbisrc=UrlPaste&q=imgurl:${encodeURIComponent(imageUrl)}&imgurl=${encodeURIComponent(imageUrl)}`;
-                await safePageGoto(page, url, { waitUntil: 'load', timeout: 15000 });
-                await delay(2500);
-
-                const results = await page.evaluate((socialDomains) => {
-                    const items = [];
-                    const seen = new Set();
-                    const socialMap = JSON.parse(socialDomains);
-
-                    document.querySelectorAll('.imgpt, a[href^="http"]').forEach(el => {
-                        try {
-                            const linkEl = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
-                            const href = linkEl ? linkEl.href : '';
-                            if (!href || seen.has(href) || href.includes('bing.com')) return;
-
-                            const imgEl = el.querySelector('img');
-                            let imgSrc = imgEl ? (imgEl.src || imgEl.getAttribute('data-src') || '') : '';
-                            const title = el.getAttribute('aria-label') || el.textContent.trim().slice(0, 100) || 'Visual Match';
-
-                            let source = 'Bing';
-                            let isSocial = false;
-                            for (const [domain, name] of Object.entries(socialMap)) {
-                                if (href.includes(domain)) { source = name; isSocial = true; break; }
-                            }
-
-                            seen.add(href);
-                            items.push({ title, link: href, thumbnail: imgSrc, source, isSocial, score: isSocial ? 140 : 45 });
-                        } catch(e) {}
-                    });
-                    return items;
-                }, JSON.stringify(SOCIAL_DOMAINS));
-
-                console.log(`   ✓ Bing: ${results.length} results`);
-                return results;
-            } catch (e) {
-                console.log(`   ⚠️ Bing error: ${e.message}`);
-                return [];
-            }
-        };
-
-        // ========== ENGINE 3: TINEYE ==========
-        const tineyeTask = async () => {
-            const page = await getPage();
-            try {
-                console.log("🔍 Querying TinEye...");
-                const url = `https://tineye.com/search?url=${encodeURIComponent(imageUrl)}`;
-                await safePageGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-                await delay(2000);
-
-                const results = await page.evaluate((socialDomains) => {
-                    const items = [];
-                    const seen = new Set();
-                    const socialMap = JSON.parse(socialDomains);
-
-                    document.querySelectorAll('.match, a[href^="http"]').forEach(el => {
-                        try {
-                            const linkEl = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
-                            const href = linkEl ? linkEl.href : '';
-                            if (!href || seen.has(href) || href.includes('tineye.com')) return;
-
-                            const imgEl = el.querySelector('img');
-                            let imgSrc = imgEl ? (imgEl.src || '') : '';
-                            const title = el.textContent.trim().slice(0, 100) || 'TinEye Match';
-
-                            let source = 'TinEye';
-                            let isSocial = false;
-                            for (const [domain, name] of Object.entries(socialMap)) {
-                                if (href.includes(domain)) { source = name; isSocial = true; break; }
-                            }
-
-                            seen.add(href);
-                            items.push({ title, link: href, thumbnail: imgSrc, source, isSocial, score: isSocial ? 130 : 40 });
-                        } catch(e) {}
-                    });
-                    return items;
-                }, JSON.stringify(SOCIAL_DOMAINS));
-
-                console.log(`   ✓ TinEye: ${results.length} results`);
-                return results;
-            } catch (e) {
-                console.log(`   ⚠️ TinEye error: ${e.message}`);
-                return [];
-            }
-        };
-
-        // ========== ENGINE 4: BAIDU ==========
-        const baiduTask = async () => {
-            const page = await getPage();
-            try {
-                console.log("🔍 Querying Baidu...");
-                const url = `https://graph.baidu.com/s?sign=&wd=&f=general&tn=wise&from=index&word=&rn=60&pageFrom=graph_upload_bdbox&page=&range=&sort=&query=&extUiData%5BisLogoShow%5D=1&isLogoShow=1&showType=showNormal&ua=&image=&image=${encodeURIComponent(imageUrl)}&filename=&simid=&cs=&os=&`;
-                await safePageGoto(page, url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-                await delay(2500);
-
-                const results = await page.evaluate((socialDomains) => {
-                    const items = [];
-                    const seen = new Set();
-                    const socialMap = JSON.parse(socialDomains);
-
-                    document.querySelectorAll('a[href^="http"]').forEach(el => {
-                        try {
-                            const href = el.href;
-                            if (!href || seen.has(href) || href.includes('baidu.com')) return;
-
-                            const title = el.textContent.trim().slice(0, 100) || 'Baidu Match';
-                            let source = 'Baidu';
-                            let isSocial = false;
-                            for (const [domain, name] of Object.entries(socialMap)) {
-                                if (href.includes(domain)) { source = name; isSocial = true; break; }
-                            }
-
-                            seen.add(href);
-                            items.push({ title, link: href, thumbnail: '', source, isSocial, score: isSocial ? 120 : 35 });
-                        } catch(e) {}
-                    });
-                    return items;
-                }, JSON.stringify(SOCIAL_DOMAINS));
-
-                console.log(`   ✓ Baidu: ${results.length} results`);
-                return results;
-            } catch (e) {
-                console.log(`   ⚠️ Baidu error: ${e.message}`);
-                return [];
-            }
-        };
-
-        // ========== ENGINE 5: GOOGLE DORKING ==========
-        const dorkTask = async () => {
-            if (!keywordHint || keywordHint.length < 3) return [];
-            const page = await getPage();
-            return dorkSocialProfiles(page, keywordHint);
-        };
-
-        // Run in batches to save memory in Termux
-        const batch1 = await Promise.allSettled([yandexTask(), bingTask()]);
-        const batch2 = await Promise.allSettled([tineyeTask(), baiduTask()]);
-        const batch3 = await Promise.allSettled([dorkTask()]);
-
-        [...batch1, ...batch2, ...batch3].forEach(result => {
-            if (result.status === 'fulfilled') allResults.push(...result.value);
-        });
-
-        const unique = Array.from(new Map(allResults.map(item => [item.link, item])).values())
-            .sort((a, b) => b.score - a.score);
-
+        console.log(`🎯 Clean results: ${cleaned.length}`);
         clearTimeout(timeout);
         isFinished = true;
+        res.json({ success: true, matches: cleaned.slice(0, 50), deepCrawl: !!deepCrawl });
 
-        console.log(`🎯 Total unique results: ${unique.length}`);
-        res.json({ success: true, matches: unique.slice(0, 50) });
-
-    } catch (error) {
-        console.log(`⚠️ Critical Error: ${error.message}`);
+    } catch (err) {
+        console.log(`⚠️ Critical: ${err.message}`);
         clearTimeout(timeout);
-        if (!isFinished) res.status(500).json({ success: false, error: error.message });
+        if (!isFinished) res.status(500).json({ success: false, error: err.message, matches: [] });
     } finally {
         if (browser) await browser.close().catch(() => {});
+        if (tempServer) tempServer.close();
     }
 });
 
-app.get('/ping', (req, res) => res.json({ status: 'ok', service: 'face-search-scraper' }));
+app.get('/ping', (req, res) => res.json({ status: 'ok', service: 'free-scraper-v2' }));
 
 const PORT = 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`⚡ FREE SCRAPER online on port ${PORT} (Yandex | Bing | TinEye | Baidu | Google Dorking)`);
+    console.log(`⚡ FREE SCRAPER v2 on port ${PORT}`);
+    console.log(`   Direct Base64 Transfer Enabled`);
+    console.log(`   Engines: Yandex | Bing | TinEye | Baidu | Sogou | Bing Dorking\n`);
 });

@@ -19,6 +19,7 @@ mlkitFaceDetection = "16.1.7"
 coil = "3.0.4"
 playServicesTflite = "16.5.0"
 jsoup = "1.17.2"
+exifinterface = "1.4.2"
 
 
 [libraries]
@@ -58,6 +59,7 @@ play-services-tflite-java = { group = "com.google.android.gms", name = "play-ser
 play-services-tflite-support = { group = "com.google.android.gms", name = "play-services-tflite-support", version.ref = "playServicesTflite" }
 tensorflow_lite = { group = "org.tensorflow", name = "tensorflow-lite", version = "2.16.1" }
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
+androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifinterface" }
 
 
 [plugins]

@@ -232,6 +232,13 @@ fun CheckInScreen(
                     onClick = { onSearchModeChange(SearchMode.FREE) },
                     enabled = !isLoading
                 )
+                ModeChip(
+                    label = "🕸️ Deep Crawl",
+                    icon = Icons.Default.Public,
+                    selected = searchMode == SearchMode.DEEP_CRAWL,
+                    onClick = { onSearchModeChange(SearchMode.DEEP_CRAWL) },
+                    enabled = !isLoading
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -680,6 +687,16 @@ private fun PhotoPreview(bitmap: Bitmap?, isScanning: Boolean = false, size: and
 private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () -> Unit) {
     val isHighConfidence = match.score > 5000
     
+    val cleanName = remember(match.name) {
+        match.name
+            .replace(Regex("^\\d+\\s*[×xX]\\s*\\d+[A-Za-zА-Яа-я]?\\s*"), "") // strip "620×634А"
+            .replace(Regex("\\.(jpg|jpeg|png|gif|webp)\\b", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("^\\s*-\\s*"), "")
+            .trim()
+            .take(120)
+            .ifBlank { "Visual Match" }
+    }
+    
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -752,7 +769,7 @@ private fun MatchCard(match: WebMatchDisplay, debugMode: Boolean, onClick: () ->
                 }
 
                 Text(
-                    text = match.name,
+                    text = cleanName,
                     fontWeight = FontWeight.Bold,
                     fontSize = if (isHighConfidence) 18.sp else 16.sp,
                     maxLines = 3,

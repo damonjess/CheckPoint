@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import coil3.ImageLoader
@@ -29,6 +30,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.Locale
 
 class CheckInViewModel(
     application: Application
@@ -101,17 +105,37 @@ class CheckInViewModel(
 
         addLog("✓ Probe hosted: ${publicUrl.take(35)}...")
 
+        if (searchMode == SearchMode.DEEP_CRAWL) {
+            addLog("🕸️ DEEP CRAWL: Activating recursive avatar extraction...")
+            addLog("This will extract og:image tags from private profiles...")
+        }
+
+        // Upgrade 5: EXIF Metadata Extraction
+        val exifHints = extractExifHints(bitmap)
+        val combinedHint = listOf(targetHint, exifHints)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .ifBlank { null }
+
+        if (exifHints.isNotBlank()) {
+            addLog("EXIF hints found: $exifHints")
+        }
+
         // Run the free scraper
-        val results = faceSearchRepository.performFaceSearch(
+        val rawResults = faceSearchRepository.performFaceSearch(
             bitmap = bitmap,
-            keywordHint = targetHint.trim().ifBlank { null },
+            keywordHint = combinedHint,
+            searchMode = searchMode,
             onLog = ::addLog
         )
 
-        if (results.isEmpty()) {
+        if (rawResults.isEmpty()) {
             uiState = CheckInUiState.NoMatch(logs.toList())
             return
         }
+
+        addLog("Verifying matches via local biometric embedding...")
+        val results = verifyResults(rawResults, bitmap)
 
         val display = results.map {
             WebMatchDisplay(
@@ -136,10 +160,15 @@ class CheckInViewModel(
             isSearching = true
 
             try {
+                val exifHints = extractExifHints(bitmap)
+                val combinedHint = listOf(targetHint, exifHints)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ")
+
                 when (searchMode) {
                     SearchMode.FREE -> {
                         // Pure browser intent mode — no servers needed
-                        freeSearchHelper.launchDirectSearch(bitmap, targetHint)
+                        freeSearchHelper.launchDirectSearch(bitmap, combinedHint)
                         delay(1500)
                         uiState = CheckInUiState.Idle
                     }
@@ -182,6 +211,79 @@ class CheckInViewModel(
         isSearching = false
         uiState = CheckInUiState.Idle
         capturedBitmap = null
+    }
+
+    private suspend fun verifyResults(
+        results: List<SerpVisualMatch>,
+        sourceBitmap: Bitmap
+    ): List<SerpVisualMatch> {
+        if (results.isEmpty()) return emptyList()
+
+        val cropped = nativeFaceCropper.cropAndAlignFace(sourceBitmap)
+        val sourceEmbedding = faceEmbedder.getEmbedding(cropped)
+        
+        if (sourceEmbedding == null) return results
+
+        val verified = mutableListOf<SerpVisualMatch>()
+
+        for (match in results.take(15)) { // check top 15 only (speed)
+            if (match.thumbnail.isNullOrBlank()) continue
+
+            try {
+                val thumb = loadThumbnailBitmap(match.thumbnail) ?: continue
+                val similarity = faceVerifier.verifyFaceMatch(thumb, sourceEmbedding) ?: 0f
+
+                if (similarity > 0.45f) {
+                    // Boost score based on face similarity
+                    verified.add(match.copy(score = match.score + (similarity * 5000).toInt()))
+                }
+            } catch (e: Exception) { /* skip bad thumbnail */ }
+        }
+
+        return if (verified.isEmpty()) results else verified.sortedByDescending { it.score }
+    }
+
+    private fun extractExifHints(bitmap: Bitmap): String {
+        val stream = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
+        val bytes = stream.toByteArray()
+        
+        return try {
+            val exif = ExifInterface(ByteArrayInputStream(bytes))
+            val latLong = exif.latLong
+            
+            val hints = mutableListOf<String>()
+            
+            if (latLong != null && latLong.size >= 2) {
+                // Round to city-level precision
+                val lat = String.format(Locale.US, "%.1f", latLong[0])
+                val lon = String.format(Locale.US, "%.1f", latLong[1])
+                hints.add("$lat $lon")
+            }
+            
+            exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)?.let {
+                if (it.length >= 4) hints.add(it.take(4))
+            }
+            
+            exif.getAttribute(ExifInterface.TAG_MAKE)?.let { hints.add(it) }
+            
+            hints.joinToString(" ")
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private suspend fun loadThumbnailBitmap(url: String): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            val request = ImageRequest.Builder(getApplication())
+                .data(url)
+                .allowHardware(false) // Important for face processing
+                .build()
+            val result = getApplication<Application>().imageLoader.execute(request)
+            result.image?.toBitmap()
+        } catch (e: Exception) {
+            null
+        }
     }
 
     override fun onCleared() {

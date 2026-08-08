@@ -1,0 +1,14 @@
+- [ ] Setting up Data Models and Constants
+    - [ ] Create `SourceStyle.kt`
+    - [ ] Update `WebMatchDisplay.kt`
+- [ ] Extracting UI Components
+    - [ ] Extract `MatchCard.kt`
+    - [ ] Extract `SearchModeSelector.kt`
+    - [ ] Extract `PhotoCaptureActions.kt`
+    - [ ] Extract `CheckInContent.kt`
+- [ ] Refactoring `CheckInScreen.kt`
+    - [ ] Simplify orchestrator
+    - [ ] Convert match list to `LazyColumn`
+    - [ ] Clean up imports and hardcoded values
+- [ ] Verification
+    - [ ] Build and manual test

@@ -238,7 +238,7 @@ class CheckInViewModel(
 
         if (useTermux) {
             addLog("Probing for local Termux backend...")
-            val available = withTimeoutOrNull(2500L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
+            val available = withTimeoutOrNull(5000L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
             if (!available) {
                 addLog("No local Termux server detected; falling back to in-app WebView scanning.")
                 useTermux = false
@@ -297,6 +297,8 @@ class CheckInViewModel(
                         searchMode = searchMode.name,
                         onLog = ::addLog
                     )
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e // Don't log cancellation as an error
                 } catch (e: Exception) {
                     addLog("⚠ Termux call failed: ${e.message}")
                     null
@@ -322,22 +324,28 @@ class CheckInViewModel(
                 }
             }
 
-            // If Termux is in use, prefer its results first and cancel web scraping if Termux returns hits
             if (useTermux) {
-                val response = try { withTimeoutOrNull(10000L) { termuxDeferred.await() } } catch (e: Exception) { null }
+                // Puppeteer on a phone needs 30-90s. Don't kill it at 10s.
+                val response = try { 
+                    withTimeoutOrNull(90000L) { termuxDeferred.await() } 
+                } catch (e: kotlinx.coroutines.CancellationException) { 
+                    throw e 
+                } catch (e: Exception) { 
+                    addLog("⚠ Termux call failed: ${e.message}")
+                    null 
+                }
+                
                 if (response == null) {
-                    addLog("⚠ Termux call timed out locally; falling back to in-app WebView.")
-                    if (!termuxDeferred.isCompleted) termuxDeferred.cancel()
-                    // Wait for web results instead
-                    val webResults = try { webDeferred.await() } catch (e: Exception) { emptyList<SerpVisualMatch>() }
+                    addLog("⚠ Termux call timed out after 90s; falling back to in-app WebView.")
+                    val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
                     if (webResults.isNotEmpty()) {
                         allRawResults.addAll(webResults)
                         updateResultsLive(webResults, logs)
                     }
                     return@coroutineScope
                 }
-                if (response != null && response.success && !response.matches.isNullOrEmpty()) {
-                    // Got results from Termux — cancel web scraping to finish fast
+                
+                if (response.success && !response.matches.isNullOrEmpty()) {
                     if (!webDeferred.isCompleted) webDeferred.cancel()
                     val newMatches = response.matches.map {
                         SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail, score = it.score)
@@ -345,17 +353,15 @@ class CheckInViewModel(
                     allRawResults.addAll(newMatches)
                     updateResultsLive(newMatches, logs)
                 } else {
-                    if (response?.error != null) addLog("⚠ Termux error: ${response.error}")
-                    // Fall back to web scraping (wait for it)
-                    val webResults = try { webDeferred.await() } catch (e: CancellationException) { emptyList<SerpVisualMatch>() }
+                    if (response.error != null) addLog("⚠ Termux error: ${response.error}")
+                    val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
                     if (webResults.isNotEmpty()) {
                         allRawResults.addAll(webResults)
                         updateResultsLive(webResults, logs)
                     }
                 }
             } else {
-                // No Termux: just wait for web results
-                val webResults = try { webDeferred.await() } catch (e: Exception) { emptyList<SerpVisualMatch>() }
+                val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
                 if (webResults.isNotEmpty()) {
                     allRawResults.addAll(webResults)
                     updateResultsLive(webResults, logs)

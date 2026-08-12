@@ -52,12 +52,35 @@ class FaceSearchRepository(private val context: Context) {
 
     private val freeHost = FreeImageHost()
 
-    // Physical phone: only localhost is needed. Emulator uses 10.0.2.2.
-    private val potentialBackends = listOf(
-        "http://localhost:3000/api/search",
-        "http://127.0.0.1:3000/api/search",
-        "http://10.0.2.2:3000/api/search" // For emulators
-    )
+    // Also probe the device's actual LAN IPs (Termux might not bridge to 127.0.0.1 on some ROMs)
+    private fun getDeviceIpAddresses(): List<String> {
+        val ips = mutableListOf<String>()
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val intf = interfaces.nextElement()
+                if (intf.isLoopback) continue
+                val addrs = intf.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val addr = addrs.nextElement()
+                    if (addr is java.net.Inet4Address && !addr.isLoopbackAddress) {
+                        addr.hostAddress?.let { ips.add(it) }
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        return ips
+    }
+
+    private val potentialBackends: List<String> by lazy {
+        val base = listOf(
+            "http://localhost:3000/api/search",
+            "http://127.0.0.1:3000/api/search",
+            "http://10.0.2.2:3000/api/search" // Emulator bridge
+        )
+        val deviceIps = getDeviceIpAddresses().map { "http://$it:3000/api/search" }
+        base + deviceIps
+    }
 
     private var activeBackend: String? = null
 
@@ -174,19 +197,19 @@ class FaceSearchRepository(private val context: Context) {
         bitmap: android.graphics.Bitmap,
         faceBitmap: android.graphics.Bitmap? = null,
         keywordHint: String? = null,
-        imageUrl: String? = null, // Accept pre-uploaded URL
+        imageUrl: String? = null,
         searchMode: String = "HYPER",
         onLog: (String) -> Unit = {}
     ): ServerSearchResponse {
         Log.e("CheckIn", "!!! REPO LOG !!! performLocalServerSearch started. Mode: $searchMode")
-        
+
         // 1. Use existing URL or upload the FACE image if possible, otherwise full
         val publicUrl = if (imageUrl != null && imageUrl.startsWith("http") && !imageUrl.contains("127.0.0.1") && !imageUrl.contains("localhost")) {
             imageUrl
         } else {
             val probe = faceBitmap ?: bitmap
             onLog("Uploading face probe to Termux host...")
-            freeHost.upload(probe) { log -> 
+            freeHost.upload(probe) { log ->
                 onLog(log)
                 Log.e("CheckIn", "REPO_UPLOAD_LOG: $log")
             }
@@ -206,11 +229,14 @@ class FaceSearchRepository(private val context: Context) {
         }
         Log.e("CheckIn", "REPO LOG: Image ready: $publicUrl. Calling Termux...")
 
-        // 2. Call your Termux server
+        // 2. Determine the correct backend URL
+        val backendBase = activeBackend ?: "http://127.0.0.1:3000"
+        onLog("Connecting to Termux at $backendBase...")
+        Log.e("CheckIn", "Using Termux backend: $backendBase")
+
         val backendMode = mapModeForBackend(searchMode)
         onLog("Initializing Termux Stealth Scan ($backendMode)...")
-        onLog("Sequential engine probe started (Yandex -> Bing -> Baidu)...")
-        
+
         val request = ServerSearchRequest(
             imageUrl = publicUrl,
             keywordHint = keywordHint,
@@ -219,11 +245,12 @@ class FaceSearchRepository(private val context: Context) {
             localFaceUrl = "http://127.0.0.1:8080/face.jpg",
             searchTarget = "FACE"
         )
-        
-        return try {
-            val response = RetrofitClient.instance.searchByImage(request)
 
-            // If Termux reports success but all engines returned zero results, treat as a blocked failure
+        return try {
+            // Use the discovered backend instead of hardcoded 127.0.0.1
+            val api = RetrofitClient.getInstance(backendBase)
+            val response = api.searchByImage(request)
+
             val total = response.matches?.size ?: 0
             val allZeroEngines = response.meta?.engines?.values?.all { it.count == 0 } ?: false
             if (response.success && total == 0 && allZeroEngines) {
@@ -242,9 +269,11 @@ class FaceSearchRepository(private val context: Context) {
             val errorMsg = when {
                 e.message?.contains("ECONNREFUSED") == true -> "Termux Server disconnected"
                 e.message?.contains("timeout") == true -> "Termux Timed Out (Bypassing blocks...)"
+                e.message?.contains("CLEARTEXT") == true -> "HTTP blocked by Android (fix: usesCleartextTraffic)"
                 else -> "Termux Error: ${e.message ?: "Unknown network failure"}"
             }
             onLog("✗ $errorMsg")
+            Log.e("CheckIn", "Termux call failed: ${e.message}", e)
             ServerSearchResponse(
                 success = false,
                 error = errorMsg
@@ -252,32 +281,34 @@ class FaceSearchRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Quick probe to see if any configured local backend is reachable (ping).
-     * Uses a very short timeout client so UI remains responsive.
-     */
     suspend fun isLocalBackendAvailable(): Boolean = withContext(Dispatchers.IO) {
         for (backend in potentialBackends) {
             try {
-                // map /api/search -> /api/ping (safe even if path not present)
-                val pingUrl = if (backend.endsWith("/api/search")) backend.replace("/api/search", "/api/ping") else backend
+                val pingUrl = if (backend.endsWith("/api/search"))
+                    backend.replace("/api/search", "/api/ping")
+                else
+                    backend
+
                 val req = Request.Builder().url(pingUrl).build()
                 fastClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) return@withContext true
+                    if (resp.isSuccessful) {
+                        // CRITICAL FIX: remember the working base URL
+                        activeBackend = backend.removeSuffix("/api/search")
+                        Log.d("CheckIn", "Termux found at: $activeBackend")
+                        return@withContext true
+                    }
                 }
-            } catch (e: Exception) {
-                // ignore and try next
-            }
+            } catch (_: Exception) { }
         }
+        Log.d("CheckIn", "No Termux backend found on any interface")
         return@withContext false
     }
 
-    /**
-     * Calls Termux to upgrade a low-res thumbnail to high-res via gallery-dl/yt-dlp
-     */
     suspend fun extractHighResMedia(url: String): String? = withContext(Dispatchers.IO) {
         try {
-            val response = RetrofitClient.instance.extractMedia(mapOf("url" to url))
+            val backendBase = activeBackend ?: "http://127.0.0.1:3000"
+            val api = RetrofitClient.getInstance(backendBase)
+            val response = api.extractMedia(mapOf("url" to url))
             if (response.isSuccessful) {
                 val body = response.body()
                 if (body?.success == true) {
@@ -290,9 +321,6 @@ class FaceSearchRepository(private val context: Context) {
         null
     }
 
-    /**
-     * Performs robust dorking on Termux (Bypasses WebView blocks)
-     */
     suspend fun performTermuxDorkSearch(
         keyword: String,
         sites: List<String> = AdultSiteConfig.SITES,
@@ -304,7 +332,9 @@ class FaceSearchRepository(private val context: Context) {
                 keyword = keyword,
                 sites = sites
             )
-            val response = RetrofitClient.instance.dorkSearch(request)
+            val backendBase = activeBackend ?: "http://127.0.0.1:3000"
+            val api = RetrofitClient.getInstance(backendBase)
+            val response = api.dorkSearch(request)
             if (response.success) {
                 onLog("✓ Termux Dork found ${response.matches?.size ?: 0} hits")
                 return@withContext response.matches?.map {

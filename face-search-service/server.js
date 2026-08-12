@@ -372,7 +372,7 @@ async function scrapeGeneric(page, url, name) {
         });
 
         // Use a longer timeout and wait for load, but allow retries if timeouts happen
-        await page.goto(url, { waitUntil: 'load', timeout: 60000 }).catch((e) => {
+        await page.goto(url, { waitUntil: 'load', timeout: 35000 }).catch((e) => {
           console.log(` ⚠ [${name}] goto attempt ${attempts} failed: ${e.message.split('\n')[0]}`);
         });
 
@@ -387,7 +387,8 @@ async function scrapeGeneric(page, url, name) {
         if (isBlockedContent(content, title)) {
           blockedDetected = true;
           console.log(` ⚠ [${name}] Attempt ${attempts} detected challenge ("${title}")`);
-          if (attempts < 3) {
+          // Yandex almost never unblocks on retry from mobile IPs; abandon immediately
+          if (attempts < 3 && name !== 'Yandex') {
             console.log(`    → Retrying ${name} with different UA and delay...`);
             await delay(3000 + Math.random() * 3000);
             try { await page.reload({ waitUntil: 'load', timeout: 40000 }); } catch(_) {}
@@ -679,15 +680,12 @@ app.post('/api/search', async (req, res) => {
       });
     }
 
-    await runEngine('Yandex', yandexUrl);
-    await delay(4000 + Math.random() * 3000);
-
-    // 2. Bing - Using a slightly different URL format for better results
-    await runEngine('Bing', bingUrl);
-    await delay(4000 + Math.random() * 3000);
-
-    // 3. Baidu
-    await runEngine('Baidu', baiduUrl);
+    // Run engines in parallel — sequential is too slow on a phone
+    await Promise.all([
+      runEngine('Yandex', yandexUrl),
+      runEngine('Bing', bingUrl),
+      runEngine('Baidu', baiduUrl)
+    ]);
 
     if (isDeep && !browserDead) {
       await delay(6000 + Math.random() * 4000);

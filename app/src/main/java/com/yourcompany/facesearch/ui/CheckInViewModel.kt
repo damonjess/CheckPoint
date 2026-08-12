@@ -123,7 +123,11 @@ class CheckInViewModel(
             try {
                 // Increased timeout for human-like scraping on Termux
                 val highResUrl = withTimeoutOrNull(60000L) {
-                    faceSearchRepository.extractHighResMedia(match.profileUrl)
+                    val fromBackend = faceSearchRepository.extractHighResMedia(match.profileUrl)
+                    if (fromBackend != null) return@withTimeoutOrNull fromBackend
+                    
+                    // Fallback to metadata extraction (og:image) if backend extraction fails
+                    faceSearchRepository.extractMetadataThumbnail(match.profileUrl)
                 }
 
                 val finalState = uiState
@@ -408,41 +412,66 @@ class CheckInViewModel(
 
     private fun mapToDisplay(match: SerpVisualMatch): WebMatchDisplay {
         val socialDomains = listOf(
-            "facebook.com", "instagram.com", "linkedin.com", "twitter.com", "t.me", "vk.com",
-            "pinterest.com", "ok.ru"
+            "facebook.com", "instagram.com", "linkedin.com", "twitter.com", 
+            "t.me", "vk.com", "pinterest.com", "ok.ru", "reddit.com"
         ) + AdultSiteConfig.SITES
         val isSocial = socialDomains.any { domain -> match.link?.contains(domain) == true }
 
+        val urlUsername = match.link?.let { WebMatchDisplay.extractUsernameFromUrl(it) }
+        
         var cleanTitle = match.title ?: "Visual Match"
-        if (cleanTitle.contains(Regex("^[a-zA-Z0-9-]+\\.[a-z]{2,}$")) || cleanTitle == "Visual Match") {
+        
+        // Use URL username when title is generic garbage
+        if (urlUsername != null && (
+                cleanTitle.contains("match", ignoreCase = true) 
+                || cleanTitle.length < 4 
+                || cleanTitle.contains("facebook", ignoreCase = true)
+                || cleanTitle.contains("instagram", ignoreCase = true)
+                || cleanTitle.contains("reddit", ignoreCase = true)
+            )) {
+            cleanTitle = urlUsername.replaceFirstChar { it.titlecase(Locale.US) }
+        } else if (cleanTitle.contains(Regex("^[a-zA-Z0-9-]+\\.[a-z]{2,}$")) || cleanTitle == "Visual Match") {
             val uri = try { Uri.parse(match.link) } catch(e: Exception) { null }
             val pathSegments = uri?.pathSegments
             if (pathSegments?.isNotEmpty() == true) {
-                cleanTitle = pathSegments.last().replace("-", " ").replace("_", " ")
+                val fromUrl = pathSegments.last().replace("-", " ").replace("_", " ")
                     .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+                if (fromUrl.length > 2) cleanTitle = fromUrl
             }
         }
         
+        cleanTitle = cleanTitle.replace(Regex("#\\w+"), "").trim()
+
+        // Detect suspicious thumbnails (very small URLs often indicate bad crops)
+        val thumb = ThumbnailUtils.normalize(match.thumbnail)
+        val hasGoodThumbnail = thumb != null && 
+            !thumb.contains("thumbnail") && 
+            !thumb.contains("preview") && 
+            thumb.length > 20
+
         val isVerified = match.score > 5000
         val sourceLabel = if (isVerified) "✓ ${match.source}" else match.source
-        
-        val displayConfidence = when {
-            match.score >= 8000 -> 1.0f
-            match.score >= 5000 -> 0.85f + ((match.score - 5000) / 20000f) // Verified boost
-            match.score >= 1000 -> 0.60f + ((match.score - 1000) / 10000f)
-            match.score >= 300 -> 0.15f + ((match.score - 300) / 2000f)
-            else -> (match.score.toFloat() / 2000f).coerceIn(0.07f, 0.14f) // Floor at 7%
-        }
 
         return WebMatchDisplay(
             name = cleanTitle,
             source = sourceLabel ?: "Free Engine",
             profileUrl = match.link ?: "",
             score = match.score,
-            imageUrl = ThumbnailUtils.normalize(match.thumbnail),
+            imageUrl = thumb,
             isSocial = isSocial,
-            confidence = displayConfidence
+            confidence = calculateConfidence(match.score),
+            isHighResLoading = !hasGoodThumbnail && isSocial // flag to auto-fetch better image
         )
+    }
+
+    private fun calculateConfidence(score: Int): Float {
+        return when {
+            score >= 8000 -> 1.0f
+            score >= 5000 -> 0.85f + ((score - 5000) / 20000f)
+            score >= 1000 -> 0.60f + ((score - 1000) / 10000f)
+            score >= 300 -> 0.15f + ((score - 300) / 2000f)
+            else -> (score.toFloat() / 2000f).coerceIn(0.07f, 0.14f)
+        }
     }
 
     private suspend fun verifyResultsLive(

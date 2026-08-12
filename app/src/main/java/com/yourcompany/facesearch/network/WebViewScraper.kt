@@ -44,10 +44,10 @@ class WebViewScraper private constructor(
                 function pickUrl(v){
                     if(!v || v.length < 8) return '';
                     var low = v.toLowerCase();
-                    var isLogo = low.indexOf('logo') >= 0 || low.indexOf('icon') >= 0 || 
-                                 low.indexOf('favicon') >= 0 || low.indexOf('static/images') >= 0 ||
-                                 low.indexOf('fb_icon') >= 0 || low.indexOf('twitter_logo') >= 0;
-                    if(isLogo) return '';
+                    // Skip tiny preview/thumbnail paths
+                    if(low.indexOf('preview') >= 0 && low.indexOf('preview.redd.it') < 0) return '';
+                    if(low.indexOf('thumb') >= 0 && low.indexOf('thumbnail') >= 0) return '';
+                    if(low.indexOf('icon') >= 0 || low.indexOf('logo') >= 0 || low.indexOf('favicon') >= 0) return '';
                     
                     if(v.indexOf('data:image') === 0 && v.length > 200) return v;
                     if(v.indexOf('http')===0) return v;
@@ -159,6 +159,14 @@ class WebViewScraper private constructor(
                             if(blocked.some(d => href.indexOf(d)>=0))return;
                             
                             var imgSrc = findNearbyImg(a);
+
+                            // Prioritize Reddit direct images
+                            if(window.location.hostname.indexOf('reddit.com') >= 0 || window.location.hostname.indexOf('redd.it') >= 0){
+                                var redditImg = a.closest('._3Oa0THmZ3f5iZXAQ0hBJ0k, .STit0aL9CgXLNfU6nzuox, [data-click-id="image"]') || a;
+                                var postImg = redditImg.querySelector('img[src*="i.redd.it"], img[src*="i.imgur.com"], img[src*="preview.redd.it"]');
+                                if(postImg) imgSrc = getImgSrc(postImg);
+                            }
+
                             var title = cleanText(a).slice(0, 150);
                             
                             if(!imgSrc && title.length < 5) return;

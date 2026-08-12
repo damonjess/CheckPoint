@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,9 +32,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.yourcompany.facesearch.ui.Amber
 import com.yourcompany.facesearch.ui.models.SourceStyles
 import com.yourcompany.facesearch.ui.models.WebMatchDisplay
@@ -48,6 +52,13 @@ fun MatchCard(
 ) {
     val style = SourceStyles.getStyle(match.source)
     val handle = rememberHandle(match)
+    
+    // Auto-fetch high-res for suspicious social thumbnails
+    if (match.isHighResLoading) {
+        LaunchedEffect(match.profileUrl) {
+            onLoadHighRes()
+        }
+    }
     
     // Breathing/Pulse animation for top match
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -182,10 +193,13 @@ private fun PrimaryMatchContent(
             ) {
                 if (match.imageUrl != null) {
                     AsyncImage(
-                        model = match.imageUrl,
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(match.imageUrl)
+                            .crossfade(true)
+                            .build(),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        alignment = Alignment.TopCenter,
+                        alignment = Alignment.Center,
                         modifier = Modifier.fillMaxSize(),
                         placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFF5F5F5)),
                         error = androidx.compose.ui.graphics.vector.rememberVectorPainter(style.icon)
@@ -212,17 +226,22 @@ private fun PrimaryMatchContent(
         Surface(
             color = Color(0xFFF5F5F5),
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier
+                .padding(bottom = 8.dp)
+                .fillMaxWidth(0.85f)   // don't stretch full width
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
                 Text(
                     text = handle,
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
-                    color = Color.DarkGray
+                    color = Color.DarkGray,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis   // truncates with ... instead of overflow
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(Icons.AutoMirrored.Filled.Launch, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.Gray)
@@ -285,10 +304,13 @@ private fun SecondaryMatchContent(
             ) {
                 if (match.imageUrl != null) {
                     AsyncImage(
-                        model = match.imageUrl,
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(match.imageUrl)
+                            .crossfade(true)
+                            .build(),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        alignment = Alignment.TopCenter,
+                        alignment = Alignment.Center,
                         modifier = Modifier.fillMaxSize(),
                         placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFF5F5F5)),
                         error = androidx.compose.ui.graphics.vector.rememberVectorPainter(style.icon)
@@ -334,18 +356,29 @@ private fun SecondaryMatchContent(
             
             Spacer(modifier = Modifier.height(8.dp))
             
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
                     text = handle,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
-                    color = Color.DarkGray
+                    color = Color.DarkGray,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
                 Spacer(modifier = Modifier.width(2.dp))
-                Icon(Icons.AutoMirrored.Filled.Launch, contentDescription = null, modifier = Modifier.size(10.dp), tint = Color.Gray)
+                Icon(
+                    Icons.AutoMirrored.Filled.Launch,
+                    contentDescription = null,
+                    modifier = Modifier.size(10.dp),
+                    tint = Color.Gray
+                )
                 
                 if (match.imageUrl.toString().contains("yandex") || match.imageUrl.toString().contains("bing") || match.imageUrl.toString().contains("baidu")) {
-                    Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.weight(0.1f))
                     IconButton(onClick = onLoadHighRes, modifier = Modifier.size(24.dp), enabled = !match.isHighResLoading) {
                         Icon(Icons.Default.Hd, contentDescription = "HD", tint = Amber, modifier = Modifier.size(16.dp))
                     }
@@ -366,15 +399,16 @@ private fun SecondaryMatchContent(
 
 @Composable
 private fun rememberHandle(match: WebMatchDisplay): String {
-    return androidx.compose.runtime.remember(match.displayName, match.profileUrl) {
-        val name = match.displayName.lowercase().replace(" ", "")
-        if (name.length > 3 && !name.contains("match")) {
-            "@$name"
-        } else {
-            val url = match.profileUrl.lowercase()
-            val handleFromUrl = url.substringAfterLast("/").substringAfterLast("=").take(15)
-            if (handleFromUrl.length > 2) "@$handleFromUrl" else "@user_${match.score % 1000}"
-        }
+    return remember(match.username, match.displayName, match.profileUrl) {
+        // 1. Real username from URL path (best)
+        match.username?.let { "@$it" }
+        // 2. First 2 words of cleaned title
+            ?: match.displayName.split(" ").take(2).joinToString(" ").let { name ->
+                val compact = name.lowercase().replace(" ", "")
+                if (compact.length > 3 && !compact.contains("match")) "@$compact" else null
+            }
+        // 3. Generic fallback
+            ?: "@user_${match.score % 1000}"
     }
 }
 

@@ -1,6 +1,7 @@
 package com.yourcompany.facesearch.ui
 
 import android.graphics.Bitmap
+import com.yourcompany.facesearch.ui.models.WebMatchDisplay
 
 sealed class CheckInUiState {
     object Idle : CheckInUiState()
@@ -19,11 +20,3 @@ sealed class CheckInUiState {
     data class Error(val message: String, val logs: List<String> = emptyList()) : CheckInUiState()
 }
 
-data class WebMatchDisplay(
-    val name: String,
-    val source: String,
-    val profileUrl: String,
-    val score: Int,
-    val imageUrl: Any? = null,
-    val extraImages: List<String> = emptyList()
-)

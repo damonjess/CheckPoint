@@ -21,7 +21,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yourcompany.facesearch.R
@@ -37,8 +36,6 @@ data class OrbitIcon(
 @Composable
 fun SocialOrbitSearchScreen(
     faceBitmap: Bitmap?,
-    progress: Float,
-    statusText: String = "Scanning socials...",
     modifier: Modifier = Modifier
 ) {
     // Replace these with your actual brand drawables (R.drawable.ic_tiktok, etc.)
@@ -87,7 +84,7 @@ fun SocialOrbitSearchScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFF8F9FA)),
+            .background(Color(0xFFFBFBFB)),
         contentAlignment = Alignment.Center
     ) {
         // ---- ORBITING ICONS ----
@@ -166,31 +163,6 @@ fun SocialOrbitSearchScreen(
                             )
                         )
                     )
-            )
-        }
-
-        // ---- BOTTOM STATUS ----
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 80.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = statusText,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color.DarkGray
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .width(220.dp)
-                    .height(6.dp)
-                    .clip(CircleShape),
-                color = Color(0xFF00E5FF),
-                trackColor = Color(0xFFE0E0E0)
             )
         }
     }

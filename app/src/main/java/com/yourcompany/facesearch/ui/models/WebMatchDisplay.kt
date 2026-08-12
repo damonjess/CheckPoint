@@ -9,7 +9,9 @@ data class WebMatchDisplay(
     val score: Int,
     val imageUrl: Any? = null,
     val extraImages: List<String> = emptyList(),
-    val isSocial: Boolean = false
+    val isSocial: Boolean = false,
+    val confidence: Float = 0f, // 0.0 to 1.0
+    val isHighResLoading: Boolean = false
 ) {
     val displayName: String by lazy {
         var n = name

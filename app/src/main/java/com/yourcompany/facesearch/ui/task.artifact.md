@@ -1,14 +1,19 @@
-- [ ] Setting up Data Models and Constants
-    - [ ] Create `SourceStyle.kt`
-    - [ ] Update `WebMatchDisplay.kt`
-- [ ] Extracting UI Components
-    - [ ] Extract `MatchCard.kt`
-    - [ ] Extract `SearchModeSelector.kt`
-    - [ ] Extract `PhotoCaptureActions.kt`
-    - [ ] Extract `CheckInContent.kt`
-- [ ] Refactoring `CheckInScreen.kt`
-    - [ ] Simplify orchestrator
-    - [ ] Convert match list to `LazyColumn`
-    - [ ] Clean up imports and hardcoded values
+- [x] Setting up Data Models and Constants
+    - [x] Create `SourceStyle.kt`
+    - [x] Update `WebMatchDisplay.kt` (moved to models and added `displayName`)
+- [x] Extracting UI Components
+    - [x] Extract `MatchCard.kt`
+    - [x] Extract `SearchModeSelector.kt`
+    - [x] Extract `PhotoCaptureActions.kt`
+    - [x] Extract `SherlockConsole.kt`
+    - [x] Extract `ErrorState.kt`
+    - [x] Extract `OsintHintField.kt`
+    - [x] Extract `PhotoPreview.kt`
+    - [x] Extract `CheckInContent.kt`
+- [x] Refactoring `CheckInScreen.kt`
+    - [x] Simplify orchestrator
+    - [x] Convert layout to `LazyColumn`
+    - [x] Clean up imports and hardcoded values (used `Constants.kt` for `Amber`)
 - [ ] Verification
+    - [x] Analyze files for errors
     - [ ] Build and manual test

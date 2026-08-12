@@ -3,7 +3,6 @@ package com.yourcompany.facesearch.ui.components
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -100,9 +99,10 @@ private fun ModeChip(
         leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
         modifier = modifier,
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = Amber.copy(alpha = 0.2f),
+            selectedContainerColor = Amber.copy(alpha = 0.25f),
             selectedLabelColor = Amber,
-            selectedLeadingIconColor = Amber
+            selectedLeadingIconColor = Amber,
+            disabledSelectedContainerColor = Amber.copy(alpha = 0.1f)
         ),
         border = FilterChipDefaults.filterChipBorder(
             enabled = enabled,

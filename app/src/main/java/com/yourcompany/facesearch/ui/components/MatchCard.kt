@@ -43,6 +43,7 @@ fun MatchCard(
     match: WebMatchDisplay,
     isPrimary: Boolean = false,
     debugMode: Boolean = false,
+    onLoadHighRes: () -> Unit,
     onClick: () -> Unit
 ) {
     val style = SourceStyles.getStyle(match.source)
@@ -84,9 +85,9 @@ fun MatchCard(
             )
 
             if (isPrimary) {
-                PrimaryMatchContent(match, style, handle, debugMode, pulseScale)
+                PrimaryMatchContent(match, style, handle, debugMode, pulseScale, onLoadHighRes)
             } else {
-                SecondaryMatchContent(match, style, handle, debugMode)
+                SecondaryMatchContent(match, style, handle, debugMode, onLoadHighRes)
             }
         }
     }
@@ -98,7 +99,8 @@ private fun PrimaryMatchContent(
     style: com.yourcompany.facesearch.ui.models.SourceStyle,
     handle: String,
     debugMode: Boolean,
-    pulseScale: Float
+    pulseScale: Float,
+    onLoadHighRes: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -129,14 +131,32 @@ private fun PrimaryMatchContent(
             }
 
             // Match Percentage
-            val confidenceInt = (match.confidence * 100).toInt()
-            Text(
-                text = if (confidenceInt >= 99) "100% match" else "$confidenceInt% match",
-                color = if (confidenceInt >= 90) Color(0xFF2E7D32) else Color(0xFFF57F17),
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-0.5).sp
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                val confidenceInt = (match.confidence * 100).toInt()
+                Text(
+                    text = if (confidenceInt >= 99) "100% match" else "$confidenceInt% match",
+                    color = if (confidenceInt >= 90) Color(0xFF2E7D32) else Color(0xFFF57F17),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = (-0.5).sp
+                )
+                
+                if (match.imageUrl.toString().contains("yandex") || match.imageUrl.toString().contains("bing") || match.imageUrl.toString().contains("baidu")) {
+                    TextButton(
+                        onClick = onLoadHighRes,
+                        enabled = !match.isHighResLoading,
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        if (match.isHighResLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Amber)
+                        } else {
+                            Icon(Icons.Default.Hd, contentDescription = null, modifier = Modifier.size(16.dp), tint = Amber)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("HD Probe", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                        }
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -165,16 +185,22 @@ private fun PrimaryMatchContent(
                         model = match.imageUrl,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
+                        alignment = Alignment.TopCenter,
                         modifier = Modifier.fillMaxSize(),
-                        placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFE0E0E0)),
-                        error = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFBDBDBD))
+                        placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFF5F5F5)),
+                        error = androidx.compose.ui.graphics.vector.rememberVectorPainter(style.icon)
                     )
                 } else {
                     Box(
-                        modifier = Modifier.fillMaxSize().background(Color(0xFFE0E0E0)),
+                        modifier = Modifier.fillMaxSize().background(Color(0xFFF5F5F5)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Person, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(48.dp))
+                        Icon(
+                            imageVector = style.icon,
+                            contentDescription = null, 
+                            tint = style.color.copy(alpha = 0.3f), 
+                            modifier = Modifier.size(64.dp)
+                        )
                     }
                 }
             }
@@ -220,7 +246,8 @@ private fun SecondaryMatchContent(
     match: WebMatchDisplay,
     style: com.yourcompany.facesearch.ui.models.SourceStyle,
     handle: String,
-    debugMode: Boolean
+    debugMode: Boolean,
+    onLoadHighRes: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -261,16 +288,22 @@ private fun SecondaryMatchContent(
                         model = match.imageUrl,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
+                        alignment = Alignment.TopCenter,
                         modifier = Modifier.fillMaxSize(),
-                        placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFE0E0E0)),
-                        error = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFBDBDBD))
+                        placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFF5F5F5)),
+                        error = androidx.compose.ui.graphics.vector.rememberVectorPainter(style.icon)
                     )
                 } else {
                     Box(
-                        modifier = Modifier.fillMaxSize().background(Color(0xFFE0E0E0)),
+                        modifier = Modifier.fillMaxSize().background(Color(0xFFF5F5F5)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
+                        Icon(
+                            imageVector = style.icon, 
+                            contentDescription = null, 
+                            tint = style.color.copy(alpha = 0.2f), 
+                            modifier = Modifier.size(40.dp)
+                        )
                     }
                 }
                 
@@ -288,6 +321,15 @@ private fun SecondaryMatchContent(
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
+
+                if (match.isHighResLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                    }
+                }
             }
             
             Spacer(modifier = Modifier.height(8.dp))
@@ -301,6 +343,13 @@ private fun SecondaryMatchContent(
                 )
                 Spacer(modifier = Modifier.width(2.dp))
                 Icon(Icons.AutoMirrored.Filled.Launch, contentDescription = null, modifier = Modifier.size(10.dp), tint = Color.Gray)
+                
+                if (match.imageUrl.toString().contains("yandex") || match.imageUrl.toString().contains("bing") || match.imageUrl.toString().contains("baidu")) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(onClick = onLoadHighRes, modifier = Modifier.size(24.dp), enabled = !match.isHighResLoading) {
+                        Icon(Icons.Default.Hd, contentDescription = "HD", tint = Amber, modifier = Modifier.size(16.dp))
+                    }
+                }
             }
 
             if (debugMode) {

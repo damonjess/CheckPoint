@@ -18,10 +18,16 @@ object ThumbnailUtils {
 
     private fun isNoise(url: String): Boolean {
         val lower = url.lowercase()
-        return lower.contains("1x1.gif") ||
-            lower.contains("pixel.gif") ||
-            lower.contains("spacer.gif") ||
-            lower.contains("transparent.png") ||
-            (lower.startsWith("data:image") && url.length < 120)
+        val noise = listOf(
+            "1x1.gif", "pixel.gif", "spacer.gif", "transparent.png",
+            "facebook.com/images/fb_icon", "fb_logo", "facebook_logo",
+            "instagram.com/static/images", "twitter_logo", "x_logo",
+            "tiktok_logo", "linkedin_logo", "logo.png", "logo.jpg",
+            "favicon.ico", "apple-touch-icon", "default_avatar",
+            "no_profile", "blank_profile", "anonymous.png"
+        )
+        
+        return noise.any { lower.contains(it) } ||
+            (lower.startsWith("data:image") && url.length < 100)
     }
 }

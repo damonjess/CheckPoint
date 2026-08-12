@@ -24,7 +24,16 @@ class WebViewScraper private constructor(
                 @SuppressLint("SetJavaScriptEnabled")
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
-                settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                settings.databaseEnabled = true
+                settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                
+                // Use a more modern, common User-Agent
+                val uas = listOf(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+                )
+                settings.userAgentString = uas.random()
             }
             val handler = Handler(Looper.getMainLooper())
             WebViewScraper(webView, handler)
@@ -34,7 +43,13 @@ class WebViewScraper private constructor(
             (function(){
                 function pickUrl(v){
                     if(!v || v.length < 8) return '';
-                    if(v.indexOf('data:image') === 0 && v.length > 120) return v;
+                    var low = v.toLowerCase();
+                    var isLogo = low.indexOf('logo') >= 0 || low.indexOf('icon') >= 0 || 
+                                 low.indexOf('favicon') >= 0 || low.indexOf('static/images') >= 0 ||
+                                 low.indexOf('fb_icon') >= 0 || low.indexOf('twitter_logo') >= 0;
+                    if(isLogo) return '';
+                    
+                    if(v.indexOf('data:image') === 0 && v.length > 200) return v;
                     if(v.indexOf('http')===0) return v;
                     if(v.indexOf('//')===0) return 'https:' + v;
                     return '';
@@ -117,6 +132,12 @@ class WebViewScraper private constructor(
                     var items=[],seen=new Set();
                     var blocked=['yandex.','bing.com','google.com','microsoft.com','gstatic.com','apple.com','baidu.com'];
                     
+                    // If we are on a CAPTCHA page, Yandex often has 'checkbox-captcha' or 'smart-captcha'
+                    if(document.querySelector('.checkbox-captcha, .smart-captcha, #captcha-form')){
+                        console.log('Sherlock: Captcha detected');
+                        return items;
+                    }
+
                     // Target specific result containers for higher quality
                     var selectors = [
                         '.CbirItem-Title a', '.serp-item__link', '.iusc', 'a.mimg', 
@@ -171,7 +192,9 @@ class WebViewScraper private constructor(
             (function(){
                 function pickUrl(v){
                     if(!v || v.length < 8) return '';
-                    if(v.indexOf('data:image') === 0 && v.length > 120) return v;
+                    var low = v.toLowerCase();
+                    if(low.indexOf('logo') >= 0 || low.indexOf('icon') >= 0 || low.indexOf('favicon') >= 0) return '';
+                    if(v.indexOf('data:image') === 0 && v.length > 200) return v;
                     if(v.indexOf('http')===0) return v;
                     if(v.indexOf('//')===0) return 'https:' + v;
                     return '';
@@ -222,27 +245,27 @@ class WebViewScraper private constructor(
     }
 
     suspend fun scrapeYandex(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
-        url = "https://yandex.com/images/search?rpt=imageview&url=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
+        url = "https://yandex.ru/images/search?rpt=imageview&url=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Yandex",
-        delayMs = 4000
+        delayMs = 5000 // Increased delay for Yandex
     )
 
     suspend fun scrapeBing(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
-        url = "https://www.bing.com/images/search?view=detailv2&iss=sbi&imgurl=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
+        url = "https://www.bing.com/visualsearch/Microsoft/Result?imgurl=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Bing",
-        delayMs = 6000 // Bing needs more time for thumbnails to swap from base64 to URLs
+        delayMs = 7000 
     )
 
     suspend fun scrapeGoogle(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://lens.google.com/uploadbyurl?url=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Google",
-        delayMs = 5000
+        delayMs = 6000
     )
 
     suspend fun scrapeBaidu(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://graph.baidu.com/pcpage/index?tpl_from=pc&image=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Baidu",
-        delayMs = 6000
+        delayMs = 7000
     )
 
     suspend fun scrapeTinEye(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(

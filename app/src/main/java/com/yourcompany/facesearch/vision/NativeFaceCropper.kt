@@ -16,7 +16,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 class NativeFaceCropper {
     private val detector = FaceDetection.getClient(
         FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
             .build()
     )
@@ -63,7 +63,7 @@ class NativeFaceCropper {
 
     suspend fun prepareFaceForSearch(original: Bitmap): Bitmap {
         // Step 1: Use ALIGNED face with moderate padding (Best for search engines)
-        val faceCrop = cropAndAlignFace(original) 
+        val faceCrop = cropAndAlignFace(original) ?: original
 
         // Step 2: Constrain dimensions for API compatibility and memory safety
         // SerpApi optimal range: 400-800px, max 2MB file size
@@ -85,9 +85,6 @@ class NativeFaceCropper {
         }
         
         val scaled = Bitmap.createScaledBitmap(faceCrop, finalWidth, finalHeight, true)
-        
-        // FIX: DON'T recycle faceCrop - let GC handle it
-        // if (faceCrop != original) { faceCrop.recycle() } // REMOVED
         
         return scaled
     }
@@ -122,7 +119,7 @@ class NativeFaceCropper {
             }
     }
 
-    suspend fun cropAndAlignFace(bitmap: Bitmap): Bitmap = suspendCancellableCoroutine { continuation ->
+    suspend fun cropAndAlignFace(bitmap: Bitmap): Bitmap? = suspendCancellableCoroutine { continuation ->
         val image = InputImage.fromBitmap(bitmap, 0)
         
         detector.process(image)
@@ -147,16 +144,15 @@ class NativeFaceCropper {
                             rotationMatrix.postRotate(-face.headEulerAngleZ, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
                         }
 
-                        // 2. ADD OPTIMIZED PADDING (25-30% for balance between context and accuracy)
-                        // Too much padding reduces search accuracy; too little loses important context
-                        val paddingFactor = 0.25f
-                        val paddingX = (box.width() * paddingFactor).toInt()
-                        val paddingY = (box.height() * paddingFactor).toInt()
+                        // 2. AGGRESSIVE ASYMMETRICAL PADDING
+                        // Shift crop upwards: include hair, cut strictly at chin
+                        val paddingX = (box.width() * 0.25f).toInt()
+                        val paddingTop = (box.height() * 0.45f).toInt()
 
                         val left = (box.left - paddingX).coerceAtLeast(0)
-                        val top = (box.top - paddingY).coerceAtLeast(0)
+                        val top = (box.top - paddingTop).coerceAtLeast(0)
                         val width = (box.width() + (paddingX * 2)).coerceAtMost(bitmap.width - left).coerceAtLeast(1)
-                        val height = (box.height() + (paddingY * 2)).coerceAtMost(bitmap.height - top).coerceAtLeast(1)
+                        val height = (box.bottom - top).coerceAtMost(bitmap.height - top).coerceAtLeast(1)
 
                         // 3. CROP AND APPLY ALIGNMENT
                         val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
@@ -164,16 +160,16 @@ class NativeFaceCropper {
 
                         continuation.resume(aligned)
                     } else {
-                        continuation.resume(bitmap) 
+                        continuation.resume(null) 
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("NativeFaceCropper", "Error in cropAndAlignFace: ${e.message}")
-                    continuation.resume(bitmap)
+                    continuation.resume(null)
                 }
             }
             .addOnFailureListener {
                 android.util.Log.e("NativeFaceCropper", "Face detection failed in cropAndAlignFace")
-                continuation.resume(bitmap)
+                continuation.resume(null)
             }
     }
 
@@ -186,7 +182,7 @@ class NativeFaceCropper {
                         val face = faces[0]
                         val box = face.boundingBox
 
-                        // BYPASS STRATEGY: 350% wider crop, face off-center
+                        // BYPASS STRATEGY: 350% wider crop, face shifted UP (neck cut)
                         val widthScale = 3.5f
                         val heightScale = 4.0f
                         
@@ -194,10 +190,11 @@ class NativeFaceCropper {
                         val pHeight = (box.height() * heightScale).toInt().coerceAtLeast(1)
 
                         val left = (box.centerX() - (pWidth * 0.35f)).toInt().coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
-                        val top = (box.centerY() - (pHeight * 0.4f)).toInt().coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
+                        val top = (box.centerY() - (pHeight * 0.65f)).toInt().coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
                         
                         val width = pWidth.coerceAtMost(bitmap.width - left).coerceAtLeast(1)
-                        val height = pHeight.coerceAtMost(bitmap.height - top).coerceAtLeast(1)
+                        val rawHeight = pHeight.coerceAtMost(bitmap.height - top)
+                        val height = (box.bottom - top + (box.height() * 0.2f).toInt()).coerceIn(1, rawHeight)
 
                         val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
                         continuation.resume(cropped)
@@ -224,12 +221,12 @@ class NativeFaceCropper {
                         val face = faces[0]
                         val box = face.boundingBox
 
-                        // SOCIAL STRATEGY: Wider Contextual Crop (Natural look)
+                        // SOCIAL STRATEGY: Wider Contextual Crop (Natural look, shifted up)
                         val targetWidth = (box.width() * 3.0f).toInt().coerceAtLeast(1)
                         val targetHeight = (targetWidth * 1.1f).toInt().coerceAtLeast(1)
                         
                         val left = (box.centerX() - (targetWidth / 2)).toInt().coerceIn(0, (bitmap.width - targetWidth).coerceAtLeast(0))
-                        val top = (box.centerY() - (targetHeight * 0.40f).toInt()).coerceIn(0, (bitmap.height - targetHeight).coerceAtLeast(0))
+                        val top = (box.centerY() - (targetHeight * 0.55f).toInt()).coerceIn(0, (bitmap.height - targetHeight).coerceAtLeast(0))
                         
                         val finalWidth = targetWidth.coerceAtMost(bitmap.width - left).coerceAtLeast(1)
                         val finalHeight = targetHeight.coerceAtMost(bitmap.height - top).coerceAtLeast(1)
@@ -261,7 +258,7 @@ class NativeFaceCropper {
             .addOnSuccessListener { faces ->
                 val composite = Bitmap.createBitmap(1024, 1024, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(composite)
-                canvas.drawColor(Color.BLACK)
+                canvas.drawColor(Color.WHITE) // White background is better for search engine saliency
 
                 try {
                     if (faces.isNotEmpty()) {
@@ -269,39 +266,54 @@ class NativeFaceCropper {
                         val box = face.boundingBox
 
                         // 1. TOP HALF: Wide Context (Clothes/Background)
+                        // Centered HIGHER to prioritize forehead/hair and exclude neck
                         val contextWidth = (box.width() * 4.0f).toInt().coerceIn(1, bitmap.width)
                         val contextHeight = (contextWidth * 0.5f).toInt().coerceIn(1, bitmap.height)
-                        val cLeft = (box.centerX() - (contextWidth / 2)).coerceIn(0, (bitmap.width - contextWidth).coerceAtLeast(0))
-                        val cTop = (box.centerY() - (contextHeight / 2)).coerceIn(0, (bitmap.height - contextHeight).coerceAtLeast(0))
+                        val cLeft = (box.centerX() - (contextWidth / 2)).toInt().coerceIn(0, (bitmap.width - contextWidth).coerceAtLeast(0))
+                        val cTop = (box.centerY() - (contextHeight * 0.70f).toInt()).toInt().coerceIn(0, (bitmap.height - contextHeight).coerceAtLeast(0))
                         
                         val contextCrop = Bitmap.createBitmap(bitmap, cLeft, cTop, contextWidth, contextHeight)
                         val contextScaled = Bitmap.createScaledBitmap(contextCrop, 1024, 512, true)
                         canvas.drawBitmap(contextScaled, 0f, 0f, null)
 
-                        // 2. BOTTOM LEFT: High-Contrast Face
-                        val faceLeft = box.left.coerceIn(0, bitmap.width - 1)
-                        val faceTop = box.top.coerceIn(0, bitmap.height - 1)
-                        val faceWidth = box.width().coerceIn(1, bitmap.width - faceLeft)
-                        val faceHeight = box.height().coerceIn(1, bitmap.height - faceTop)
+                        // 2. BOTTOM HALF PREPARATION: Square Aligned Face (Shifted up to cut at chin)
+                        val side = (box.width().coerceAtLeast(box.height()) * 1.4f).toInt()
+                        val fLeft = (box.centerX() - (side / 2)).toInt().coerceIn(0, (bitmap.width - side).coerceAtLeast(0))
+                        val fTop = (box.centerY() - (side * 0.75f).toInt()).toInt().coerceIn(0, (bitmap.height - side).coerceAtLeast(0))
+                        val fWidth = side.coerceAtMost(bitmap.width - fLeft).coerceAtLeast(1)
+                        val fHeight = side.coerceAtMost(bitmap.height - fTop).coerceAtLeast(1)
                         
-                        val faceCrop = Bitmap.createBitmap(bitmap, faceLeft, faceTop, faceWidth, faceHeight)
-                        val enhancedFace = ImageEnhancer.enhance(faceCrop)
+                        val rawFaceCrop = Bitmap.createBitmap(bitmap, fLeft, fTop, fWidth, fHeight)
+                        
+                        // Align using landmarks to standardize facial features
+                        val leftEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.LEFT_EYE)
+                        val rightEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.RIGHT_EYE)
+                        val alignedFace = if (leftEye != null && rightEye != null) {
+                            val deltaX = (rightEye.position.x - leftEye.position.x).toDouble()
+                            val deltaY = (rightEye.position.y - leftEye.position.y).toDouble()
+                            val angle = Math.toDegrees(Math.atan2(deltaY, deltaX)).toFloat()
+                            val matrix = Matrix().apply { postRotate(-angle, (fWidth/2).toFloat(), (fHeight/2).toFloat()) }
+                            Bitmap.createBitmap(rawFaceCrop, 0, 0, fWidth, fHeight, matrix, true)
+                        } else {
+                            rawFaceCrop
+                        }
+                        
+                        // 2. BOTTOM LEFT: High-Contrast Aligned Face
+                        val enhancedFace = ImageEnhancer.enhance(alignedFace)
                         val faceScaled = Bitmap.createScaledBitmap(enhancedFace, 512, 512, true)
                         canvas.drawBitmap(faceScaled, 0f, 512f, null)
 
-                        // 3. BOTTOM RIGHT: Grayscale Bypass
-                        val matrix = Matrix().apply { postScale(-1f, 1f) }
-                        val mirroredFace = Bitmap.createBitmap(faceCrop, 0, 0, faceCrop.width, faceCrop.height, matrix, true)
+                        // 3. BOTTOM RIGHT: Grayscale Mirrored Bypass
+                        val mirrorMatrix = Matrix().apply { postScale(-1f, 1f, 256f, 256f) }
+                        val mirroredFace = Bitmap.createBitmap(faceScaled, 0, 0, 512, 512, mirrorMatrix, true)
                             
-                        // Convert to Grayscale (Bypasses color-based privacy filters)
                         val grayFace = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
                         val grayCanvas = Canvas(grayFace)
-                        val grayPaint = Paint()
-                        val cm = ColorMatrix()
-                        cm.setSaturation(0f)
-                        grayPaint.colorFilter = ColorMatrixColorFilter(cm)
-                        val mirroredScaled = Bitmap.createScaledBitmap(mirroredFace, 512, 512, true)
-                        grayCanvas.drawBitmap(mirroredScaled, 0f, 0f, grayPaint)
+                        val grayPaint = Paint().apply {
+                            val cm = ColorMatrix().apply { setSaturation(0f) }
+                            colorFilter = ColorMatrixColorFilter(cm)
+                        }
+                        grayCanvas.drawBitmap(mirroredFace, 0f, 0f, grayPaint)
                         
                         val camoFace = ImageEnhancer.applyCamouflage(grayFace)
                         canvas.drawBitmap(camoFace, 512f, 512f, null)
@@ -335,12 +347,12 @@ class NativeFaceCropper {
                         val box = face.boundingBox
 
                         // Social media platforms typically show profile pics at 1:1 aspect ratio (square)
-                        // Optimize for this: face centered in a square crop with light padding
+                        // Optimize for this: face centered HIGHER in a square crop with light padding
                         val faceSize = box.width().coerceAtLeast(box.height())
                         val targetSize = (faceSize * 1.4f).toInt().coerceIn(300, 800) // 40% padding, but constrained
                         
                         val centerX = box.centerX().toInt()
-                        val centerY = box.centerY().toInt()
+                        val centerY = (box.centerY() - (faceSize * 0.15f)).toInt() // Shift center up
                         
                         val left = (centerX - (targetSize / 2)).coerceIn(0, (bitmap.width - targetSize).coerceAtLeast(0))
                         val top = (centerY - (targetSize / 2)).coerceIn(0, (bitmap.height - targetSize).coerceAtLeast(0))
@@ -436,7 +448,7 @@ class NativeFaceCropper {
         val variants = mutableListOf<Bitmap>()
         
         // 1. Tight aligned face (best for FaceCheck)
-        variants.add(cropAndAlignFace(original))
+        cropAndAlignFace(original)?.let { variants.add(it) } ?: variants.add(original)
         
         // 2. Square social profile style
         variants.add(cropForSocialProfile(original))

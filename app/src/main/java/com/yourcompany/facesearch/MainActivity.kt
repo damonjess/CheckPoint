@@ -104,7 +104,8 @@ class MainActivity : ComponentActivity() {
                         },
                         onRetryClick = { checkInViewModel.onRetry() },
                         onConfirmFreeSearch = { checkInViewModel.onConfirmFreeSearch(it) },
-                        onGoogleLensOnlySearch = { checkInViewModel.onGoogleLensOnlySearch(it) }
+                        onGoogleLensOnlySearch = { checkInViewModel.onGoogleLensOnlySearch(it) },
+                        onLoadHighRes = { checkInViewModel.loadHighRes(it) }
                     )
 
                     Screen.CAMERA -> CameraCaptureScreen(

@@ -50,7 +50,8 @@ fun FaceSearchConfirmScreen(
             modifier = Modifier
                 .size(240.dp)
                 .clip(RoundedCornerShape(16.dp)),
-            contentScale = ContentScale.Crop
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.TopCenter
         )
         
         Spacer(modifier = Modifier.height(16.dp))

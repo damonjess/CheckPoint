@@ -12,7 +12,6 @@ val localProperties = Properties().apply {
         localPropertiesFile.inputStream().use { load(it) }
     }
 }
-val serpApiKey = localProperties.getProperty("SERP_API_KEY") ?: ""
 val imgbbApiKey = localProperties.getProperty("IMGBB_API_KEY") ?: ""
 
 android {
@@ -28,7 +27,6 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
-        buildConfigField("String", "SERP_API_KEY", "\"$serpApiKey\"")
         buildConfigField("String", "IMGBB_API_KEY", "\"$imgbbApiKey\"")
     }
 
@@ -95,8 +93,11 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
 
-    // Networking (OkHttp only)
+    // Networking
+    implementation(libs.okhttp)
     implementation(libs.okhttp.logging.interceptor)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.gson)
 
     // ML Kit
     // Highly accurate, local on-device face analysis 

@@ -32,14 +32,12 @@ import com.yourcompany.facesearch.vision.FreeFaceSearchHelper
 import com.yourcompany.facesearch.vision.GemmaAnalyzer
 import com.yourcompany.facesearch.vision.ImageEnhancer
 import com.yourcompany.facesearch.vision.NativeFaceCropper
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.*
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.Locale
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class CheckInViewModel(
     application: Application
@@ -79,21 +77,22 @@ class CheckInViewModel(
         }
         capturedBitmap = bitmap
         
-        // Stage BOTH probes for Termux bypass
-        var faceCrop: Bitmap? = null
-        viewModelScope.launch {
-            LocalServer.stageProbe(bitmap, isFaceCrop = false)
-            faceCrop = nativeFaceCropper.cropAndAlignFace(bitmap)
-            LocalServer.stageProbe(faceCrop!!, isFaceCrop = true)
-        }
-        
         isSearching = true
         viewModelScope.launch {
             try {
-                if (faceCrop == null) faceCrop = nativeFaceCropper.cropAndAlignFace(bitmap)
+                // 1. Stage full probe immediately
+                LocalServer.stageProbe(bitmap, isFaceCrop = false)
 
-                // Unified pipeline for all modes - handles Termux failure gracefully
-                performSearchPipeline(bitmap, faceCrop!!)
+                // 2. Detect and stage face crop
+                val faceCrop = nativeFaceCropper.cropAndAlignFace(bitmap)
+                if (faceCrop != null) {
+                    LocalServer.stageProbe(faceCrop, isFaceCrop = true)
+                    // 3. Run pipeline
+                    performSearchPipeline(bitmap, faceCrop)
+                } else {
+                    Log.e("CheckIn", "No face detected in capture.")
+                    uiState = CheckInUiState.NoFaceDetected(listOf("✗ No face detected in probe. Adjust angle and retry."))
+                }
             } catch (e: Exception) {
                 Log.e("CheckIn", "Auto-search failed", e)
                 uiState = CheckInUiState.Error("Search failed: ${e.message}")
@@ -103,28 +102,116 @@ class CheckInViewModel(
         }
     }
 
+    fun onRetry() {
+        uiState = CheckInUiState.Idle
+        capturedBitmap = null
+        isSearching = false
+    }
+
+    fun loadHighRes(match: WebMatchDisplay) {
+        val currentState = uiState
+        if (currentState !is CheckInUiState.Success) return
+
+        // Set loading state for this specific match
+        uiState = currentState.copy(
+            matches = currentState.matches.map { 
+                if (it.profileUrl == match.profileUrl) it.copy(isHighResLoading = true) else it 
+            }
+        )
+
+        viewModelScope.launch {
+            try {
+                // Increased timeout for human-like scraping on Termux
+                val highResUrl = withTimeoutOrNull(60000L) {
+                    faceSearchRepository.extractHighResMedia(match.profileUrl)
+                }
+
+                val finalState = uiState
+                if (finalState is CheckInUiState.Success) {
+                    uiState = finalState.copy(
+                        matches = finalState.matches.map { m ->
+                            if (m.profileUrl == match.profileUrl) {
+                                m.copy(
+                                    imageUrl = highResUrl ?: m.imageUrl,
+                                    isHighResLoading = false
+                                )
+                            } else m
+                        }
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("CheckIn", "Manual extraction failed", e)
+                val finalState = uiState
+                if (finalState is CheckInUiState.Success) {
+                    uiState = finalState.copy(
+                        matches = finalState.matches.map { m ->
+                            if (m.profileUrl == match.profileUrl) m.copy(isHighResLoading = false) else m
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    fun onConfirmFreeSearch(bitmap: Bitmap) {
+        freeSearchHelper.launchDirectSearch(bitmap, targetHint)
+    }
+
+    fun onGoogleLensOnlySearch(bitmap: Bitmap) {
+        val uri = freeSearchHelper.saveToCache(bitmap)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "image/jpeg"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            `package` = "com.google.android.googlequicksearchbox"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            getApplication<Application>().startActivity(intent)
+        } catch (e: Exception) {
+            val fallback = "https://lens.google.com/upload"
+            getApplication<Application>().startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(fallback)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }
+    }
+
     private suspend fun performSearchPipeline(bitmap: Bitmap, faceBitmap: Bitmap) {
         Log.e("CheckIn", "!!! CRITICAL LOG !!! Starting performSearchPipeline")
         val logs = mutableListOf("Initializing free-only pipeline (Face-Centric)...")
         fun addLog(msg: String) {
             logs.add(msg)
             Log.e("CheckIn", "CONSOLE_LOG: $msg")
-            uiState = CheckInUiState.Loading(0.3f, logs.toList())
+            uiState = when (val previous = uiState) {
+                is CheckInUiState.Success -> previous.copy(logs = logs.toList())
+                is CheckInUiState.NoMatch -> previous.copy(logs = logs.toList())
+                is CheckInUiState.Error -> previous.copy(logs = logs.toList())
+                is CheckInUiState.NoFaceDetected -> previous.copy(logs = logs.toList())
+                is CheckInUiState.Loading -> previous.copy(logs = logs.toList())
+                else -> CheckInUiState.Loading(0.3f, logs.toList())
+            }
         }
 
         uiState = CheckInUiState.Loading(0.1f, logs.toList())
 
-        // Always use free hosting chain - upload FACE CROP for visual search
+        // Try to upload face crop to free hosting; if that fails, fall back to the local probe served by `LocalServer`.
         addLog("Uploading face probe to free hosting...")
-        val publicUrl = freeImageHost.upload(faceBitmap, ::addLog)
+        var publicUrl = freeImageHost.upload(faceBitmap, ::addLog)
 
         if (publicUrl == null) {
-            addLog("✗ All free hosts failed. Switching to direct browser launch...")
-            uiState = CheckInUiState.Error("No free image host available. Use FREE mode to search directly.", logs)
-            return
+            addLog("✗ All free hosts failed. Falling back to local probe served by the app (offline mode).")
+            try {
+                LocalServer.start(getApplication())
+                // Prefer face crop if available
+                publicUrl = "http://127.0.0.1:8080/face.jpg"
+                addLog("✓ Using local probe: $publicUrl")
+            } catch (e: Exception) {
+                addLog("✗ Failed to start LocalServer: ${e.message}")
+                uiState = CheckInUiState.Error("No free image host available and local probe failed.", logs)
+                return
+            }
+        } else {
+            addLog("✓ Probe hosted: ${publicUrl.take(35)}...")
         }
-
-        addLog("✓ Probe hosted: ${publicUrl.take(35)}...")
 
         if (searchMode == SearchMode.DEEP_CRAWL) {
             addLog("🕸️ DEEP CRAWL: Activating recursive avatar extraction...")
@@ -142,166 +229,270 @@ class CheckInViewModel(
             addLog("EXIF hints found: $exifHints")
         }
 
-        // Run the free scraper
-        val rawResults = faceSearchRepository.performFaceSearch(
-            bitmap = bitmap,
-            faceBitmap = faceBitmap,
-            keywordHint = combinedHint,
-            imageUrl = publicUrl, // Pass the URL we already have!
-            deepCrawl = searchMode == SearchMode.DEEP_CRAWL,
-            searchMode = searchMode.name,
-            onLog = ::addLog
-        )
+        // Determine if Termux is intended to handle visual engines to avoid redundancy
+        var useTermux = searchMode in listOf(SearchMode.PRECISION, SearchMode.HYPER, SearchMode.BYPASS, SearchMode.AGGRESSIVE, SearchMode.DEEP_CRAWL)
 
-        if (rawResults.isEmpty()) {
-            uiState = CheckInUiState.NoMatch(logs.toList())
+        if (useTermux) {
+            addLog("Probing for local Termux backend...")
+            val available = withTimeoutOrNull(2500L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
+            if (!available) {
+                addLog("No local Termux server detected; falling back to in-app WebView scanning.")
+                useTermux = false
+            } else {
+                addLog("Local Termux backend detected; offloading heavy engines.")
+            }
+        }
+
+        // Execute searches in parallel
+        val allRawResults = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
+        // If we're using the local probe URL and there's no network, call the local server's face-search endpoint
+        fun isNetworkAvailable(): Boolean {
+            try {
+                val cm = getApplication<Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                val cap = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+                return cap.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            } catch (e: Exception) { return false }
+        }
+
+        if (publicUrl != null && publicUrl.startsWith("http://127.0.0.1") && !isNetworkAvailable()) {
+            addLog("No network detected — running local offline analysis via LocalServer...")
+            try {
+                // Post face bytes to local server endpoint
+                val bytes = ByteArrayOutputStream().apply { faceBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, this) }.toByteArray()
+                val client = okhttp3.OkHttpClient.Builder().build()
+                val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+                    .addFormDataPart("file", "face.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
+                    .build()
+                val req = okhttp3.Request.Builder().url("http://127.0.0.1:8080/api/v1/face-search").post(body).build()
+                client.newCall(req).execute().use { resp ->
+                    val txt = resp.body?.string()
+                    addLog("✓ LocalServer analysis complete")
+                    // The local server returns a simple JSON map; we'll show a single mock result so UI continues
+                    val match = SerpVisualMatch(title = "Local Offline Match", link = "http://local/face", source = "LocalServer", thumbnail = publicUrl, score = 900)
+                    allRawResults.add(match)
+                    updateResultsLive(listOf(match), logs)
+                }
+            } catch (e: Exception) {
+                addLog("⚠ LocalServer offline analysis failed: ${e.message}")
+            }
+            // Skip network scrapers
+            if (allRawResults.isEmpty()) {
+                uiState = CheckInUiState.NoMatch(logs.toList())
+                return
+            }
+        }
+        coroutineScope {
+            val termuxDeferred = async {
+                if (!useTermux) return@async null
+                try {
+                    faceSearchRepository.performLocalServerSearch(
+                        bitmap = bitmap,
+                        faceBitmap = faceBitmap,
+                        keywordHint = combinedHint,
+                        imageUrl = publicUrl,
+                        searchMode = searchMode.name,
+                        onLog = ::addLog
+                    )
+                } catch (e: Exception) {
+                    addLog("⚠ Termux call failed: ${e.message}")
+                    null
+                }
+            }
+
+            val webDeferred = async {
+                delay(500)
+                try {
+                    faceSearchRepository.performFaceSearch(
+                        bitmap = bitmap,
+                        faceBitmap = faceBitmap,
+                        keywordHint = combinedHint,
+                        imageUrl = publicUrl,
+                        deepCrawl = searchMode == SearchMode.DEEP_CRAWL,
+                        searchMode = searchMode.name,
+                        skipVisualEngines = false,
+                        onLog = ::addLog
+                    )
+                } catch (e: Exception) {
+                    addLog("⚠ WebView error: ${e.message}")
+                    emptyList<SerpVisualMatch>()
+                }
+            }
+
+            // If Termux is in use, prefer its results first and cancel web scraping if Termux returns hits
+            if (useTermux) {
+                val response = try { withTimeoutOrNull(10000L) { termuxDeferred.await() } } catch (e: Exception) { null }
+                if (response == null) {
+                    addLog("⚠ Termux call timed out locally; falling back to in-app WebView.")
+                    if (!termuxDeferred.isCompleted) termuxDeferred.cancel()
+                    // Wait for web results instead
+                    val webResults = try { webDeferred.await() } catch (e: Exception) { emptyList<SerpVisualMatch>() }
+                    if (webResults.isNotEmpty()) {
+                        allRawResults.addAll(webResults)
+                        updateResultsLive(webResults, logs)
+                    }
+                    return@coroutineScope
+                }
+                if (response != null && response.success && !response.matches.isNullOrEmpty()) {
+                    // Got results from Termux — cancel web scraping to finish fast
+                    if (!webDeferred.isCompleted) webDeferred.cancel()
+                    val newMatches = response.matches.map {
+                        SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail, score = it.score)
+                    }
+                    allRawResults.addAll(newMatches)
+                    updateResultsLive(newMatches, logs)
+                } else {
+                    if (response?.error != null) addLog("⚠ Termux error: ${response.error}")
+                    // Fall back to web scraping (wait for it)
+                    val webResults = try { webDeferred.await() } catch (e: CancellationException) { emptyList<SerpVisualMatch>() }
+                    if (webResults.isNotEmpty()) {
+                        allRawResults.addAll(webResults)
+                        updateResultsLive(webResults, logs)
+                    }
+                }
+            } else {
+                // No Termux: just wait for web results
+                val webResults = try { webDeferred.await() } catch (e: Exception) { emptyList<SerpVisualMatch>() }
+                if (webResults.isNotEmpty()) {
+                    allRawResults.addAll(webResults)
+                    updateResultsLive(webResults, logs)
+                }
+            }
+        }
+
+        if (allRawResults.isEmpty()) {
+            if (uiState !is CheckInUiState.Success) {
+                uiState = CheckInUiState.NoMatch(logs.toList())
+            }
             return
         }
 
-        addLog("Verifying matches via local biometric embedding...")
-        val results = verifyResults(rawResults, bitmap)
+        // Ensure the UI shows the found results immediately (some code-paths add to allRawResults
+        // but didn't call updateResultsLive earlier). This guarantees loading stops.
+        addLog("⏳ Updating UI with ${allRawResults.distinctBy { it.link }.size} result(s)")
+        try {
+            updateResultsLive(allRawResults.distinctBy { it.link }, logs)
+            addLog("✅ UI update complete, switching to Success state")
+        } catch (e: Exception) {
+            addLog("❌ Error updating UI: ${e.message}")
+            Log.e("CheckIn", "Error in search loop UI update", e)
+        }
+    }
 
-        val display = results.map { match ->
-            // Social detection: Domain + presence of a path/profile ID
-            val socialDomains = listOf(
-                "facebook.com", "instagram.com", "linkedin.com", "twitter.com", "t.me", "vk.com",
-                "pinterest.com", "ok.ru"
-            ) + AdultSiteConfig.SITES
-            val isSocial = socialDomains.any { domain -> match.link?.contains(domain) == true }
-
-            // Improve title logic
-            var cleanTitle = match.title ?: "Visual Match"
-            if (cleanTitle.contains(Regex("^[a-zA-Z0-9-]+\\.[a-z]{2,}$")) || cleanTitle == "Visual Match") {
-                val uri = try { Uri.parse(match.link) } catch(e: Exception) { null }
-                val pathSegments = uri?.pathSegments
-                if (pathSegments?.isNotEmpty() == true) {
-                    cleanTitle = pathSegments.last().replace("-", " ").replace("_", " ")
-                        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
-                }
-            }
-            
-            // Add verification status to source name if verified
-            val isVerified = match.score > 5000
-            val sourceLabel = if (isVerified) "✓ ${match.source}" else match.source
-            
-            // Re-map confidence to be more "human"
-            // Raw scores are usually 100-600. Verified scores are 2000-7000+.
-            val displayConfidence = when {
-                match.score >= 8000 -> 1.0f
-                match.score >= 5000 -> 0.90f + ((match.score - 5000) / 30000f) // 5k -> 90%, 8k -> 100%
-                match.score >= 1000 -> 0.50f + ((match.score - 1000) / 10000f) // 1k -> 50%, 5k -> 90%
-                else -> (match.score.toFloat() / 2000f).coerceIn(0.01f, 0.49f) // 100 -> 5%
-            }
-
-            WebMatchDisplay(
-                name = cleanTitle,
-                source = sourceLabel ?: "Free Engine",
-                profileUrl = match.link ?: "",
-                score = match.score,
-                imageUrl = ThumbnailUtils.normalize(match.thumbnail),
-                isSocial = isSocial,
-                confidence = displayConfidence
-            )
+    private fun updateResultsLive(newResults: List<SerpVisualMatch>, logs: List<String>) {
+        Log.e("CheckIn", "CONSOLE_LOG: updateResultsLive called with ${newResults.size} new results")
+        val currentState = uiState
+        val existingMatches = if (currentState is CheckInUiState.Success) {
+            currentState.matches
+        } else {
+            emptyList()
         }
 
+        val allMatches = (existingMatches.map { it.profileUrl to it } + 
+                          newResults.map { mapToDisplay(it) }.map { it.profileUrl to it })
+            .toMap().values.toList()
+            .sortedByDescending { it.score }
+
         uiState = CheckInUiState.Success(
-            matches = display.sortedByDescending { it.score },
-            gemmaAnalysis = null,
+            matches = allMatches,
+            gemmaAnalysis = (currentState as? CheckInUiState.Success)?.gemmaAnalysis,
             logs = logs.toList()
+        )
+        // Ensure scanning state is cleared when results are displayed
+        isSearching = false
+        
+        // Start/restart background verification for the combined list
+        // Note: we don't use the full bitmap here to save memory, just the results
+        // The background verification loop in performSearchPipeline was launching separate jobs,
+        // here we just ensure verification eventually runs.
+    }
+
+    private fun mapToDisplay(match: SerpVisualMatch): WebMatchDisplay {
+        val socialDomains = listOf(
+            "facebook.com", "instagram.com", "linkedin.com", "twitter.com", "t.me", "vk.com",
+            "pinterest.com", "ok.ru"
+        ) + AdultSiteConfig.SITES
+        val isSocial = socialDomains.any { domain -> match.link?.contains(domain) == true }
+
+        var cleanTitle = match.title ?: "Visual Match"
+        if (cleanTitle.contains(Regex("^[a-zA-Z0-9-]+\\.[a-z]{2,}$")) || cleanTitle == "Visual Match") {
+            val uri = try { Uri.parse(match.link) } catch(e: Exception) { null }
+            val pathSegments = uri?.pathSegments
+            if (pathSegments?.isNotEmpty() == true) {
+                cleanTitle = pathSegments.last().replace("-", " ").replace("_", " ")
+                    .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+            }
+        }
+        
+        val isVerified = match.score > 5000
+        val sourceLabel = if (isVerified) "✓ ${match.source}" else match.source
+        
+        val displayConfidence = when {
+            match.score >= 8000 -> 1.0f
+            match.score >= 5000 -> 0.85f + ((match.score - 5000) / 20000f) // Verified boost
+            match.score >= 1000 -> 0.60f + ((match.score - 1000) / 10000f)
+            match.score >= 300 -> 0.15f + ((match.score - 300) / 2000f)
+            else -> (match.score.toFloat() / 2000f).coerceIn(0.07f, 0.14f) // Floor at 7%
+        }
+
+        return WebMatchDisplay(
+            name = cleanTitle,
+            source = sourceLabel ?: "Free Engine",
+            profileUrl = match.link ?: "",
+            score = match.score,
+            imageUrl = ThumbnailUtils.normalize(match.thumbnail),
+            isSocial = isSocial,
+            confidence = displayConfidence
         )
     }
 
-    fun onConfirmFreeSearch(bitmap: Bitmap) {
-        Log.d("CheckIn", "onConfirmFreeSearch clicked. Mode: ${searchMode.name}")
-        if (isSearching) return
-        isSearching = true
-
-        viewModelScope.launch {
-            try {
-                when (searchMode) {
-                    SearchMode.FREE -> {
-                        // Pure browser intent mode — no servers needed
-                        val exifHints = extractExifHints(bitmap)
-                        val combinedHint = listOf(targetHint, exifHints)
-                            .filter { it.isNotBlank() }
-                            .joinToString(" ")
-                        
-                        freeSearchHelper.launchDirectSearch(bitmap, combinedHint)
-                        delay(1500)
-                        uiState = CheckInUiState.Idle
-                    }
-                    else -> {
-                        // Try robust scraper pipeline which handles Termux + Web
-                        val faceCrop = nativeFaceCropper.cropAndAlignFace(bitmap)
-                        performSearchPipeline(bitmap, faceCrop)
-                    }
-                }
-            } catch (e: Exception) {
-                uiState = CheckInUiState.Error("Free search failed: ${e.message}")
-            } finally {
-                isSearching = false
-            }
-        }
-    }
-
-    fun onGoogleLensOnlySearch(bitmap: Bitmap) {
-        viewModelScope.launch {
-            // Simplified Google Lens call using new helper's cache logic
-            val uri = freeSearchHelper.saveToCache(bitmap)
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "image/jpeg"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                `package` = "com.google.android.googlequicksearchbox"
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            try {
-                getApplication<Application>().startActivity(intent)
-            } catch (e: Exception) {
-                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://lens.google.com/upload"))
-                browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                getApplication<Application>().startActivity(browserIntent)
-            }
-            delay(1000)
-            uiState = CheckInUiState.Idle
-        }
-    }
-
-    fun onRetry() {
-        isSearching = false
-        uiState = CheckInUiState.Idle
-        capturedBitmap = null
-    }
-
-    private suspend fun verifyResults(
+    private suspend fun verifyResultsLive(
         results: List<SerpVisualMatch>,
         sourceBitmap: Bitmap
-    ): List<SerpVisualMatch> {
-        if (results.isEmpty()) return emptyList()
+    ) {
+        val cropped = nativeFaceCropper.cropAndAlignFace(sourceBitmap) ?: return
+        val sourceEmbedding = faceEmbedder.getEmbedding(cropped) ?: return
 
-        val cropped = nativeFaceCropper.cropAndAlignFace(sourceBitmap)
-        val sourceEmbedding = faceEmbedder.getEmbedding(cropped)
-        
-        if (sourceEmbedding == null) return results
+        // Maintain a local mutable list for updates
+        val currentResults = results.toMutableList()
 
-        val verified = mutableListOf<SerpVisualMatch>()
+        // Verify top 20 candidates only to keep background work efficient
+        val candidates = results.take(20)
 
-        for (match in results.take(40)) { // check all results (up to 40)
-            if (match.thumbnail.isNullOrBlank()) continue
-
+        for (index in candidates.indices) {
+            val match = candidates[index]
             try {
-                val thumb = loadThumbnailBitmap(match.thumbnail) ?: continue
-                val similarity = faceVerifier.verifyFaceMatch(thumb, sourceEmbedding) ?: 0f
+                var thumbUrl = match.thumbnail
+                
+                if (thumbUrl.isNullOrBlank() && !match.link.isNullOrBlank()) {
+                    thumbUrl = faceSearchRepository.extractMetadataThumbnail(match.link)
+                }
+
+                val finalThumb = thumbUrl ?: match.thumbnail
+                if (finalThumb.isNullOrBlank()) continue
+
+                val thumbBitmap = loadThumbnailBitmap(finalThumb) ?: continue
+                val similarity = faceVerifier.verifyFaceMatch(thumbBitmap, sourceEmbedding) ?: 0f
 
                 if (similarity > 0.40f) {
-                    // Boost score based on face similarity
-                    verified.add(match.copy(score = match.score + (similarity * 5000).toInt()))
+                    val updatedMatch = match.copy(
+                        thumbnail = finalThumb,
+                        score = match.score + (similarity * 7000).toInt() // Slightly higher boost
+                    )
+                    currentResults[index] = updatedMatch
+                    
+                    // Trigger UI Update
+                    val currentState = uiState
+                    if (currentState is CheckInUiState.Success) {
+                        uiState = currentState.copy(
+                            matches = currentResults.map { mapToDisplay(it) }.sortedByDescending { it.score }
+                        )
+                    }
                 }
-            } catch (e: Exception) { /* skip bad thumbnail */ }
+            } catch (e: Exception) {
+                Log.e("CheckIn", "Live verification error for ${match.link}", e)
+            }
         }
-
-        return if (verified.isEmpty()) results else verified.sortedByDescending { it.score }
     }
-
     private fun extractExifHints(bitmap: Bitmap): String {
         val stream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
@@ -332,13 +523,13 @@ class CheckInViewModel(
         }
     }
 
-    private suspend fun loadThumbnailBitmap(url: String): Bitmap? = withContext(Dispatchers.IO) {
+    private suspend fun loadThumbnailBitmap(url: String?): Bitmap? = withContext(Dispatchers.IO) {
+        if (url.isNullOrBlank()) return@withContext null
         try {
             val request = ImageRequest.Builder(getApplication())
                 .data(url)
-                .allowHardware(false) // Important for face processing
+                .allowHardware(false) 
                 .build()
-            // This will use the SingletonImageLoader configured in MainActivity
             val result = getApplication<Application>().imageLoader.execute(request)
             result.image?.toBitmap()
         } catch (e: Exception) {

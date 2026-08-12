@@ -26,9 +26,9 @@ class FaceSearchRepository(private val context: Context) {
     )
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS) // Reduced from 30s
-        .readTimeout(120, TimeUnit.SECONDS)   // Reduced from 300s
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(300, TimeUnit.SECONDS)   // Increased to 5 mins for stealth scans
+        .writeTimeout(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .addInterceptor { chain ->
             val request = chain.request().newBuilder()
@@ -61,6 +61,12 @@ class FaceSearchRepository(private val context: Context) {
 
     private var activeBackend: String? = null
 
+    private fun mapModeForBackend(mode: String): String = when (mode) {
+        "DEEP_CRAWL" -> "DEEP"
+        "SOCIAL_OPTIMIZED" -> "SOCIAL"
+        else -> mode
+    }
+
     // Prevent concurrent searches
     private val searchMutex = Mutex()
 
@@ -68,9 +74,10 @@ class FaceSearchRepository(private val context: Context) {
         bitmap: android.graphics.Bitmap,
         faceBitmap: android.graphics.Bitmap? = null,
         keywordHint: String? = null,
-        imageUrl: String? = null, // Accept pre-uploaded URL
+        imageUrl: String? = null,
         deepCrawl: Boolean = false,
         searchMode: String = "PRECISION",
+        skipVisualEngines: Boolean = false,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = searchMutex.withLock {
         withContext(Dispatchers.IO) {
@@ -78,7 +85,7 @@ class FaceSearchRepository(private val context: Context) {
 
             // STEP 1: HOST IMAGE (if not already hosted)
             val visualProbe = faceBitmap ?: bitmap
-            val publicUrl = if (imageUrl != null) {
+            val publicUrl = if (imageUrl != null && imageUrl.startsWith("http") && !imageUrl.contains("127.0.0.1") && !imageUrl.contains("localhost")) {
                 imageUrl
             } else {
                 onLog("Uploading face probe to free hosting...")
@@ -89,51 +96,73 @@ class FaceSearchRepository(private val context: Context) {
                 onLog("✗ All hosts failed.")
                 return@withContext emptyList()
             }
-            if (imageUrl == null) {
+            if (imageUrl == null || imageUrl != publicUrl) {
                 onLog("✓ Probe live: ${publicUrl.take(45)}...")
             }
 
-            // WebView-only pipeline — no Termux required
+            // Parallelized OSINT Pipeline
             coroutineScope {
-                val webViewJob = async {
-                    onLog("Starting internal WebView engines...")
-                    try {
-                        val scraper = WebViewScraper.create(context)
-                        
-                        val y = scraper.scrapeYandex(publicUrl)
-                        val b = scraper.scrapeBing(publicUrl)
-                        val g = scraper.scrapeGoogle(publicUrl)
-                        val ba = scraper.scrapeBaidu(publicUrl)
-                        
-                        allResults.addAll(y + b + g + ba)
-                        onLog("✓ Visual engines: ${y.size + b.size + g.size + ba.size} hits")
-                        
-                        if (!keywordHint.isNullOrBlank()) {
-                            onLog("Scanning 10 adult platforms (WebView)...")
-                            val adultHits = scraper.scrapeAdultSites(keywordHint)
-                            allResults.addAll(adultHits)
-                            onLog("✓ Adult scan: ${adultHits.size} hits")
-
-                            onLog("Running social dorks...")
-                            allResults.addAll(scraper.scrapeSocialDork("instagram.com", keywordHint))
-                            allResults.addAll(scraper.scrapeSocialDork("facebook.com", keywordHint))
-                            
-                            if (searchMode == "AGGRESSIVE" || searchMode == "DEEP_CRAWL") {
-                                onLog("Deep social scan...")
-                                allResults.addAll(scraper.scrapeSocialDork("twitter.com", keywordHint))
-                                allResults.addAll(scraper.scrapeSocialDork("tiktok.com", keywordHint))
-                                allResults.addAll(scraper.scrapeSocialDork("reddit.com", keywordHint))
-                            }
+                // Visual Engines (Parallel with Dedicated Scrapers)
+                val visualJobs = if (!skipVisualEngines) {
+                    listOf(
+                        async { 
+                            val s = WebViewScraper.create(context)
+                            try { s.scrapeYandex(publicUrl).also { allResults.addAll(it) } } 
+                            finally { s.destroy() }
+                        },
+                        async { 
+                            val s = WebViewScraper.create(context)
+                            try { s.scrapeBing(publicUrl).also { allResults.addAll(it) } } 
+                            finally { s.destroy() }
+                        },
+                        async { 
+                            val s = WebViewScraper.create(context)
+                            try { s.scrapeGoogle(publicUrl).also { allResults.addAll(it) } } 
+                            finally { s.destroy() }
+                        },
+                        async { 
+                            val s = WebViewScraper.create(context)
+                            try { s.scrapeBaidu(publicUrl).also { allResults.addAll(it) } } 
+                            finally { s.destroy() }
                         }
-                        
-                        onLog("✓ WebView engines complete")
-                        scraper.destroy()
-                    } catch (e: Exception) {
-                        onLog("⚠ WebView failed: ${e.message}")
+                    )
+                } else {
+                    onLog("Termux handling visual engines, skipping local WebView...")
+                    emptyList()
+                }
+
+                // Dorking & Social Scan (Parallel)
+                val dorkJobs = mutableListOf<Deferred<*>>()
+                if (!keywordHint.isNullOrBlank()) {
+                    dorkJobs.add(async { 
+                        onLog("Launching Termux Adult Scan...")
+                        allResults.addAll(performTermuxDorkSearch(keywordHint, AdultSiteConfig.SITES, onLog))
+                    })
+                    
+                    dorkJobs.add(async { 
+                        onLog("Running social dorks...")
+                        val s = WebViewScraper.create(context)
+                        try {
+                            allResults.addAll(s.scrapeSocialDork("instagram.com", keywordHint))
+                            allResults.addAll(s.scrapeSocialDork("facebook.com", keywordHint))
+                        } finally { s.destroy() }
+                    })
+                    
+                    if (searchMode == "AGGRESSIVE" || searchMode == "DEEP_CRAWL") {
+                        dorkJobs.add(async { 
+                            val s = WebViewScraper.create(context)
+                            try {
+                                allResults.addAll(s.scrapeSocialDork("twitter.com", keywordHint))
+                                allResults.addAll(s.scrapeSocialDork("tiktok.com", keywordHint))
+                                allResults.addAll(s.scrapeSocialDork("reddit.com", keywordHint))
+                            } finally { s.destroy() }
+                        })
                     }
                 }
 
-                webViewJob.await()
+                // Wait for everything
+                (visualJobs + dorkJobs).awaitAll()
+                onLog("✓ Global pipeline complete")
             }
 
             // Deduplicate & sort
@@ -145,15 +174,22 @@ class FaceSearchRepository(private val context: Context) {
         bitmap: android.graphics.Bitmap,
         faceBitmap: android.graphics.Bitmap? = null,
         keywordHint: String? = null,
+        imageUrl: String? = null, // Accept pre-uploaded URL
         searchMode: String = "HYPER",
         onLog: (String) -> Unit = {}
     ): ServerSearchResponse {
         Log.e("CheckIn", "!!! REPO LOG !!! performLocalServerSearch started. Mode: $searchMode")
-        // 1. Upload the FACE image if possible, otherwise full
-        val probe = faceBitmap ?: bitmap
-        val publicUrl = freeHost.upload(probe) { log -> 
-            onLog(log)
-            Log.e("CheckIn", "REPO_UPLOAD_LOG: $log")
+        
+        // 1. Use existing URL or upload the FACE image if possible, otherwise full
+        val publicUrl = if (imageUrl != null && imageUrl.startsWith("http") && !imageUrl.contains("127.0.0.1") && !imageUrl.contains("localhost")) {
+            imageUrl
+        } else {
+            val probe = faceBitmap ?: bitmap
+            onLog("Uploading face probe to Termux host...")
+            freeHost.upload(probe) { log -> 
+                onLog(log)
+                Log.e("CheckIn", "REPO_UPLOAD_LOG: $log")
+            }
         }
 
         if (publicUrl == null) {
@@ -165,40 +201,149 @@ class FaceSearchRepository(private val context: Context) {
             )
         }
 
-        onLog("✓ Hosted: ${publicUrl.take(30)}...")
-        Log.e("CheckIn", "REPO LOG: Image uploaded: $publicUrl. Calling Termux...")
+        if (imageUrl == null || imageUrl != publicUrl) {
+            onLog("✓ Hosted: ${publicUrl.take(30)}...")
+        }
+        Log.e("CheckIn", "REPO LOG: Image ready: $publicUrl. Calling Termux...")
 
         // 2. Call your Termux server
-        onLog("Connecting to Termux ($searchMode)...")
+        val backendMode = mapModeForBackend(searchMode)
+        onLog("Initializing Termux Stealth Scan ($backendMode)...")
+        onLog("Sequential engine probe started (Yandex -> Bing -> Baidu)...")
+        
         val request = ServerSearchRequest(
             imageUrl = publicUrl,
             keywordHint = keywordHint,
-            searchMode = searchMode,
+            searchMode = backendMode,
             localBypassUrl = "http://127.0.0.1:8080/probe.jpg",
             localFaceUrl = "http://127.0.0.1:8080/face.jpg",
             searchTarget = "FACE"
         )
+        
         return try {
             val response = RetrofitClient.instance.searchByImage(request)
-            Log.e("CheckIn", "REPO LOG: Termux response received. Success: ${response.success}")
+
+            // If Termux reports success but all engines returned zero results, treat as a blocked failure
+            val total = response.matches?.size ?: 0
+            val allZeroEngines = response.meta?.engines?.values?.all { it.count == 0 } ?: false
+            if (response.success && total == 0 && allZeroEngines) {
+                onLog("⚠ Termux returned 0 results for all engines (likely blocked by challenges)")
+                return ServerSearchResponse(success = false, error = "Termux blocked or returned no results")
+            }
+
             if (response.success) {
-                onLog("✓ Termux returned ${response.matches?.size ?: 0} matches")
+                val engines = response.meta?.engines?.keys?.joinToString(", ") ?: "Multiple"
+                onLog("✓ Termux SUCCESS: $total matches via $engines")
             } else {
-                onLog("⚠ Termux: ${response.error}")
+                onLog("⚠ Termux error: ${response.error}")
             }
             response
         } catch (e: Exception) {
             val errorMsg = when {
-                e.message?.contains("ECONNREFUSED") == true -> "Termux Server not responding on port 3000"
-                e.message?.contains("timeout") == true -> "Termux timed out (Scraping limit reached)"
-                else -> e.message ?: "Network error"
+                e.message?.contains("ECONNREFUSED") == true -> "Termux Server disconnected"
+                e.message?.contains("timeout") == true -> "Termux Timed Out (Bypassing blocks...)"
+                else -> "Termux Error: ${e.message ?: "Unknown network failure"}"
             }
             onLog("✗ $errorMsg")
-            Log.e("CheckIn", "REPO LOG: Termux call failed: $errorMsg", e)
             ServerSearchResponse(
                 success = false,
                 error = errorMsg
             )
+        }
+    }
+
+    /**
+     * Quick probe to see if any configured local backend is reachable (ping).
+     * Uses a very short timeout client so UI remains responsive.
+     */
+    suspend fun isLocalBackendAvailable(): Boolean = withContext(Dispatchers.IO) {
+        for (backend in potentialBackends) {
+            try {
+                // map /api/search -> /api/ping (safe even if path not present)
+                val pingUrl = if (backend.endsWith("/api/search")) backend.replace("/api/search", "/api/ping") else backend
+                val req = Request.Builder().url(pingUrl).build()
+                fastClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) return@withContext true
+                }
+            } catch (e: Exception) {
+                // ignore and try next
+            }
+        }
+        return@withContext false
+    }
+
+    /**
+     * Calls Termux to upgrade a low-res thumbnail to high-res via gallery-dl/yt-dlp
+     */
+    suspend fun extractHighResMedia(url: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val response = RetrofitClient.instance.extractMedia(mapOf("url" to url))
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body?.success == true) {
+                    return@withContext body.highResUrl
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CheckIn", "Extraction error: ${e.message}")
+        }
+        null
+    }
+
+    /**
+     * Performs robust dorking on Termux (Bypasses WebView blocks)
+     */
+    suspend fun performTermuxDorkSearch(
+        keyword: String,
+        sites: List<String> = AdultSiteConfig.SITES,
+        onLog: (String) -> Unit = {}
+    ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
+        onLog("Requesting Termux Dork Scan...")
+        try {
+            val request = com.yourcompany.facesearch.network.model.DorkSearchRequest(
+                keyword = keyword,
+                sites = sites
+            )
+            val response = RetrofitClient.instance.dorkSearch(request)
+            if (response.success) {
+                onLog("✓ Termux Dork found ${response.matches?.size ?: 0} hits")
+                return@withContext response.matches?.map {
+                    SerpVisualMatch(
+                        title = it.title,
+                        link = it.link,
+                        source = it.source,
+                        thumbnail = it.thumbnail,
+                        score = it.score
+                    )
+                } ?: emptyList()
+            }
+        } catch (e: Exception) {
+            onLog("⚠ Termux Dork failed: ${e.message}")
+        }
+        emptyList()
+    }
+
+    suspend fun extractMetadataThumbnail(url: String): String? = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext null
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", userAgents.first()) // Use a stable one for generic sites
+                .build()
+            
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val html = response.body?.string() ?: return@withContext null
+                
+                // Fast regex for og:image
+                val ogMatch = Regex("<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']").find(html)
+                    ?: Regex("<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:image[\"']").find(html)
+                
+                val rawUrl = ogMatch?.groupValues?.get(1)
+                ThumbnailUtils.normalize(rawUrl)
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 

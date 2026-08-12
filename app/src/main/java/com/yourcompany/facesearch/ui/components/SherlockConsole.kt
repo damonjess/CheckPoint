@@ -2,6 +2,7 @@ package com.yourcompany.facesearch.ui.components
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape

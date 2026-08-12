@@ -27,6 +27,20 @@ object LocalServer {
 
     // Memory-mapped probe storage
     var currentProbeImage: ByteArray? = null
+    var currentFaceProbe: ByteArray? = null
+
+    fun stageProbe(bitmap: android.graphics.Bitmap, isFaceCrop: Boolean = false) {
+        val stream = java.io.ByteArrayOutputStream()
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, stream)
+        val bytes = stream.toByteArray()
+        if (isFaceCrop) {
+            currentFaceProbe = bytes
+            Log.e("LocalServer", "✓ Staged FACE probe: ${bytes.size} bytes")
+        } else {
+            currentProbeImage = bytes
+            Log.e("LocalServer", "✓ Staged FULL probe: ${bytes.size} bytes")
+        }
+    }
 
     fun start(context: Context) {
         if (server != null) return
@@ -35,18 +49,28 @@ object LocalServer {
         faceDetector = FaceDetectorHelper(appContext)
         faceEmbedder = FaceEmbedder(appContext)
 
-        server = embeddedServer(Netty, port = 8080) {
+        server = embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
             install(ContentNegotiation) { gson() }
             install(CORS) { anyHost() }
 
             routing {
-                // Termux hosting bypass: serve the current probe directly from RAM
+                // Full image probe
                 get("/probe.jpg") {
                     val img = currentProbeImage
                     if (img != null) {
                         call.respondBytes(img, ContentType.Image.JPEG)
                     } else {
                         call.respond(HttpStatusCode.NotFound, "No probe staged")
+                    }
+                }
+
+                // Dedicated face probe (No clothes/background noise)
+                get("/face.jpg") {
+                    val img = currentFaceProbe
+                    if (img != null) {
+                        call.respondBytes(img, ContentType.Image.JPEG)
+                    } else {
+                        call.respond(HttpStatusCode.NotFound, "No face probe staged")
                     }
                 }
 

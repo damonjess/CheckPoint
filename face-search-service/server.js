@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 const dns = require('dns').promises;
 const { URL } = require('url');
 const { exec } = require('child_process');
@@ -16,12 +17,47 @@ app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 3000;
 const RESTART_THRESHOLD = 40;
+
+// ---------- Proxy Parsing ----------
+let proxy = null;
+if (process.env.PROXY_URL) {
+  try {
+    const u = new URL(process.env.PROXY_URL);
+    proxy = {
+      server: `${u.protocol}//${u.host}`,
+      username: decodeURIComponent(u.username),
+      password: decodeURIComponent(u.password)
+    };
+    console.log(` 🌐 Proxy configured: ${u.protocol}//${u.host}`);
+  } catch (e) {
+    console.log(' ⚠ Invalid PROXY_URL in .env');
+  }
+}
+
+// ---------- Persistent Profile ----------
+const userDataDir = path.join(__dirname, 'chromium_profile');
+if (!fs.existsSync(userDataDir)) {
+  fs.mkdirSync(userDataDir, { recursive: true });
+}
+
+// ---------- Engine Cooldowns ----------
+const engineCooldowns = new Map();
+const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
+function isEngineBlocked(name) {
+  const until = engineCooldowns.get(name);
+  return until && Date.now() < until;
+}
+function markEngineBlocked(name) {
+  engineCooldowns.set(name, Date.now() + COOLDOWN_MS);
+  console.log(` 🚫 [${name}] cooling down for 10 minutes`);
+}
+
 const USER_AGENTS = [
-  'Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UD1A.230805.019) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36',
-  'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'
 ];
 
 const getRandomUA = () => USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
@@ -175,14 +211,14 @@ let browserInstance = null;
 let launchPromise = null;
 let pageCount = 0;
 
-async function getBrowser(proxy = null) {
+async function getBrowser() {
   if (browserInstance) {
     if (pageCount < RESTART_THRESHOLD) {
       try {
         await browserInstance.version();
         return browserInstance;
       } catch {
-        console.log(' ⚠ Existing browser instance is dead, recreating...');
+        console.log(' ⚠ Existing browser dead, recreating...');
         browserInstance = null;
       }
     } else {
@@ -193,14 +229,11 @@ async function getBrowser(proxy = null) {
     }
   }
 
-  if (launchPromise) {
-    console.log(' ⏳ Browser launch already in progress, waiting...');
-    return launchPromise;
-  }
+  if (launchPromise) return launchPromise;
 
   launchPromise = (async () => {
     const execPath = getChromiumPath();
-    console.log(`🚀 Launching browser via Puppeteer... (Path: ${execPath || 'bundled'})`);
+    console.log(`🚀 Launching browser (Path: ${execPath || 'bundled'}, Profile: ${userDataDir})`);
 
     const args = [
       '--no-sandbox',
@@ -208,11 +241,11 @@ async function getBrowser(proxy = null) {
       '--disable-dev-shm-usage',
       '--disable-gpu',
       '--disable-blink-features=AutomationControlled',
-      '--window-size=1920,1080',
+      '--window-size=1366,768',
       '--no-zygote',
       '--disable-infobars',
       '--lang=en-US,en;q=0.9',
-      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-features=IsolateOrigins,site-per-process,AutomationControlled',
       '--disable-web-security',
       '--allow-running-insecure-content',
       '--disable-background-networking',
@@ -232,14 +265,13 @@ async function getBrowser(proxy = null) {
       '--metrics-recording-only',
       '--safebrowsing-disable-auto-update',
       '--password-store=basic',
-      '--use-mock-keychain'
+      '--use-mock-keychain',
+      '--no-first-run',
+      '--memory-model=low',
+      '--max_old_space_size=512'
     ];
 
-    if (isTermux()) {
-      console.log(' 📱 Termux environment detected, applying optimizations...');
-      args.push('--single-process');
-    }
-
+    if (isTermux()) args.push('--single-process');
     if (proxy?.server) args.push(`--proxy-server=${proxy.server}`);
 
     try {
@@ -248,10 +280,11 @@ async function getBrowser(proxy = null) {
         executablePath: execPath,
         args,
         ignoreHTTPSErrors: true,
-        timeout: 90000 // High timeout for slow phone hardware
+        timeout: 90000,
+        userDataDir: userDataDir // CRITICAL: cookies/cache persist across scans
       });
 
-      console.log(' ✅ Puppeteer Initialized Successfully');
+      console.log(' ✅ Puppeteer Initialized');
       browserInstance = browser;
       browser.on('disconnected', () => {
         console.log('🛑 Browser disconnected');
@@ -286,55 +319,28 @@ async function withPage(fn) {
     await page.setViewport({
       width: 1280 + Math.floor(Math.random() * 200),
       height: 720 + Math.floor(Math.random() * 150),
-      deviceScaleFactor: 1
+      deviceScaleFactor: 1,
+      hasTouch: false,
+      isMobile: false,
+      isLandscape: true
     });
 
-    // Advanced Evasions
-    await page.evaluateOnNewDocument((userAgent) => {
-      // 1. Mask WebDriver
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    // Proxy auth
+    if (proxy?.username) {
+      await page.authenticate({ username: proxy.username, password: proxy.password });
+    }
 
-      // 2. Fix Chrome properties
-      window.chrome = {
-        runtime: {},
-        loadTimes: function() {},
-        csi: function() {},
-        app: {}
-      };
-
-    // 3. Mask Languages
-      Object.defineProperty(navigator, 'languages', { get: () => userAgent.includes('Android') ? ['en-US', 'en'] : ['en-US', 'en', 'en-GB'] });
-
-      // 4. Mask Plugins
-      Object.defineProperty(navigator, 'plugins', { get: () => userAgent.includes('Android') ? [] : [1, 2, 3, 4, 5] });
-
-      // 5. Canvas Masking (Return slightly randomized data to defeat fingerprinting)
-      const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+    // Only add evasions NOT covered by stealth plugin
+    await page.evaluateOnNewDocument(() => {
+      // Canvas noise (stealth doesn't do this by default)
+      const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
       CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
-        const imageData = originalGetImageData.apply(this, arguments);
+        const imageData = origGetImageData.apply(this, arguments);
         for (let i = 0; i < imageData.data.length; i += 4) {
           imageData.data[i] = imageData.data[i] + (Math.random() > 0.5 ? 1 : -1);
         }
         return imageData;
       };
-
-      // 6. Permissions Masking
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-          Promise.resolve({ state: Notification.permission }) :
-          originalQuery(parameters)
-      );
-    }, ua);
-
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-      'Sec-CH-UA': ua.includes('Android') ?
-        '"Chromium";v="128", "Not;A=Brand";v="24", "Android Chrome";v="128"' :
-        '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
-      'Sec-CH-UA-Mobile': ua.includes('Mobile') ? '?1' : '?0',
-      'Sec-CH-UA-Platform': ua.includes('Android') ? '"Android"' : '"Windows"'
     });
 
     return await fn(page);
@@ -342,9 +348,25 @@ async function withPage(fn) {
     console.error(` ❌ [withPage] error: ${err.message}`);
     throw err;
   } finally {
-    if (page) {
-      await page.close().catch(() => {});
+    if (page) await page.close().catch(() => {});
+  }
+}
+
+// ---------- Fast block detection ----------
+async function isEngineReachable(page, url, name) {
+  // Quick probe: just navigate and check title instantly
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 8000 });
+    const title = await page.title();
+    const content = await page.content();
+
+    if (isBlockedContent(content, title) ||
+        /(Robot|CAPTCHA|验证|проверка|Unusual|Before you continue|challenge)/i.test(title)) {
+      return { blocked: true, title };
     }
+    return { blocked: false, title };
+  } catch (e) {
+    return { blocked: true, error: e.message };
   }
 }
 
@@ -353,84 +375,94 @@ async function scrapeGeneric(page, url, name) {
   const domain = new URL(url).hostname;
   console.log(` 🌐 [${name}] → ${domain}`);
 
+  // Proxy auth per page
+  if (proxy?.username) {
+    await page.authenticate({ username: proxy.username, password: proxy.password });
+  }
+
   try {
-    // Try multiple attempts with UA rotation and small evasions to reduce challenge blocks
-    let attempts = 0;
-    let content = null;
-    let title = '';
-    let blockedDetected = false;
+    const attemptUA = getRandomUA();
+    await page.setUserAgent(attemptUA);
 
-    while (attempts < 3) {
-      attempts++;
-      const attemptUA = getRandomUA();
-      try {
-        await page.setUserAgent(attemptUA);
-        await page.setExtraHTTPHeaders({
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Referer': `https://${domain}/`,
-          'Sec-CH-UA': attemptUA.includes('Android') ? '"Chromium";v="128", "Not;A=Brand";v="24", "Android Chrome";v="128"' : '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"'
-        });
+    const headers = {
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Sec-CH-UA': '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+      'Sec-CH-UA-Mobile': '?0',
+      'Sec-CH-UA-Platform': '"Windows"',
+      'Upgrade-Insecure-Requests': '1'
+    };
 
-        // Use a longer timeout and wait for load, but allow retries if timeouts happen
-        await page.goto(url, { waitUntil: 'load', timeout: 35000 }).catch((e) => {
-          console.log(` ⚠ [${name}] goto attempt ${attempts} failed: ${e.message.split('\n')[0]}`);
-        });
-
-        // small human-like waits and interactions before reading content
-        await delay(2000 + Math.random() * 2000);
-        await humanMouse(page);
-        await delay(500 + Math.random() * 800);
-
-        content = await page.content();
-        title = await page.title();
-
-        if (isBlockedContent(content, title)) {
-          blockedDetected = true;
-          console.log(` ⚠ [${name}] Attempt ${attempts} detected challenge ("${title}")`);
-          // Yandex almost never unblocks on retry from mobile IPs; abandon immediately
-          if (attempts < 3 && name !== 'Yandex') {
-            console.log(`    → Retrying ${name} with different UA and delay...`);
-            await delay(3000 + Math.random() * 3000);
-            try { await page.reload({ waitUntil: 'load', timeout: 40000 }); } catch(_) {}
-            continue;
-          } else {
-            console.log(` ⚠️ ${name} blocked by challenge after ${attempts} attempts`);
-            return { items: [], blocked: true };
-          }
-        }
-
-        // If we reached here without block, break attempts
-        break;
-      } catch (e) {
-        console.log(` ⚠ [${name}] Attempt ${attempts} error: ${e.message.split('\n')[0]}`);
-        if (attempts >= 3) {
-          return { items: [], blocked: blockedDetected, error: e.message };
-        }
-        await delay(1500 + Math.random() * 1500);
-      }
+    // Engine-specific referrer and locale
+    if (name === 'Yandex') {
+      headers['Referer'] = 'https://yandex.com/images/';
+      headers['Accept-Language'] = 'ru-RU,ru;q=0.9,en-US;q=0.8';
+    } else if (name === 'Baidu') {
+      headers['Referer'] = 'https://graph.baidu.com/';
+      headers['Accept-Language'] = 'zh-CN,zh;q=0.9,en;q=0.8';
+    } else if (name === 'Google Master') {
+      headers['Referer'] = 'https://www.google.com/';
+    } else if (name === 'Bing') {
+      headers['Referer'] = 'https://www.bing.com/images/';
     }
 
-    // Engine-specific waits
-    const selectorTimeout = 25000;
+    await page.setExtraHTTPHeaders(headers);
+
+    // Use domcontentloaded — faster and less time for bot scripts to fingerprint
+    const resp = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(e => {
+      console.log(` ⚠ [${name}] goto timeout/abort: ${e.message.split('\n')[0]}`);
+      return null;
+    });
+
+    if (!resp) return { items: [], blocked: false, error: 'Navigation timeout' };
+
+    // INSTANT block detection — before waiting, scrolling, or extracting
+    const [title, content, finalUrl] = await Promise.all([
+      page.title().catch(() => ''),
+      page.content().catch(() => ''),
+      page.url()
+    ]);
+
+    if (isBlockedContent(content, title) ||
+        finalUrl.includes('captcha') ||
+        finalUrl.includes('challenge') ||
+        /(Robot|CAPTCHA|验证|проверка|Unusual|Before you continue)/i.test(title)) {
+      console.log(` ⚠️ [${name}] INSTANT BLOCK: "${title}"`);
+      return { items: [], blocked: true };
+    }
+
+    // Attempt to dismiss cookie/consent dialogs
+    if (/(Before you continue|consent|cookies)/i.test(title)) {
+      await page.evaluate(() => {
+        document.querySelector('button[aria-label*="Accept"]')?.click();
+        document.querySelector('form[action*="consent"] button')?.click();
+        document.querySelector('[id*="accept"] button')?.click();
+      }).catch(() => {});
+      await delay(1500);
+    }
+
+    // Minimal human behavior
+    await delay(2000 + Math.random() * 1500);
+    await humanMouse(page);
+
+    // Engine-specific wait for results container
+    const selectorTimeout = 15000;
     if (name === 'Yandex') {
-      await page.waitForSelector('.cbir-item, .CbirItem, .serp-item, .cbir-section, .cbir-page', { timeout: selectorTimeout }).catch(() => {});
+      await page.waitForSelector('.cbir-item, .CbirItem, .serp-item, .cbir-section', { timeout: selectorTimeout }).catch(() => {});
     } else if (name === 'Google Master') {
       await page.waitForSelector('.Luz2Q, .V6bBh, [data-is-search-result], a[href^="http"]', { timeout: selectorTimeout }).catch(() => {});
     } else if (name === 'Bing') {
-      await page.waitForSelector('.imgpt, .iusc, .mimg, a[href^="http"]', { timeout: selectorTimeout }).catch(() => {});
+      await page.waitForSelector('.imgpt, .iusc, .mimg', { timeout: selectorTimeout }).catch(() => {});
     } else if (name === 'Baidu') {
-      await page.waitForSelector('.graph-samilar-list-item, .graph-similar-list-item, a[href^="http"]', { timeout: selectorTimeout }).catch(() => {});
+      await page.waitForSelector('.graph-samilar-list-item, .graph-similar-list-item', { timeout: selectorTimeout }).catch(() => {});
     }
 
-    // Additional human behavior emulation
     await humanMouse(page);
-    await delay(500 + Math.random() * 500);
+    await delay(800 + Math.random() * 600);
 
-    // Perform multiple small scrolls
-    for(let i=0; i<4; i++) {
-      await page.evaluate(() => window.scrollBy(0, 350 + Math.random() * 300));
-      await delay(600 + Math.random() * 900);
-    }
+    // Small scroll
+    await page.evaluate(() => window.scrollBy(0, 400 + Math.random() * 300));
+    await delay(600 + Math.random() * 400);
 
     const items = await page.evaluate((engineName) => {
       const out = [];
@@ -440,13 +472,13 @@ async function scrapeGeneric(page, url, name) {
       const getImg = (el) => {
         if (!el) return null;
         const search = (node) => {
-            if (!node) return null;
-            if (node.tagName === 'IMG') return node.src || node.getAttribute('data-src') || node.getAttribute('data-original') || node.getAttribute('data-lazy-src');
-            const img = node.querySelector('img');
-            if (img) return img.src || img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
-            return null;
+          if (!node) return null;
+          if (node.tagName === 'IMG') return node.src || node.getAttribute('data-src') || node.getAttribute('data-original');
+          const img = node.querySelector('img');
+          if (img) return img.src || img.getAttribute('data-src') || img.getAttribute('data-original');
+          return null;
         };
-        return search(el) || search(el.parentElement) || search(el.closest('div')) || search(el.closest('li'));
+        return search(el) || search(el.parentElement) || search(el.closest('div,li'));
       };
 
       const selectors = [
@@ -460,41 +492,31 @@ async function scrapeGeneric(page, url, name) {
 
       document.querySelectorAll(selectors.join(',')).forEach((el) => {
         try {
-            const a = el.tagName === 'A' ? el : el.closest('a');
-            if (!a || !a.href) return;
+          const a = el.tagName === 'A' ? el : el.closest('a');
+          if (!a || !a.href) return;
 
-            let link = a.href.split('#')[0];
-            if (link.startsWith('/')) link = window.location.origin + link;
+          let link = a.href.split('#')[0];
+          if (link.startsWith('/')) link = window.location.origin + link;
+          if (seen.has(link)) return;
+          if (blockedHosts.some(h => link.includes(h))) return;
 
-            if (seen.has(link)) return;
-            if (blockedHosts.some(h => link.includes(h))) return;
+          let imgSrc = getImg(el) || getImg(a);
 
-            let imgSrc = getImg(el) || getImg(a);
-
-            // Special handling for data-m or data-bem
-            if (!imgSrc) {
-              const m = a.getAttribute('m') || el.getAttribute('m') || el.getAttribute('data-bem') || a.getAttribute('data-bem');
-              if (m) {
-                const turl = m.match(/turl":"([^"]+)"/) || m.match(/img_href":"([^"]+)"/) || m.match(/thumbUrl":"([^"]+)"/);
-                if (turl) imgSrc = turl[1].replace(/\\u0026/g, '&');
-              }
+          if (!imgSrc) {
+            const m = a.getAttribute('m') || el.getAttribute('m') || el.getAttribute('data-bem');
+            if (m) {
+              const turl = m.match(/turl":"([^"]+)"/) || m.match(/img_href":"([^"]+)"/) || m.match(/thumbUrl":"([^"]+)"/);
+              if (turl) imgSrc = turl[1].replace(/\\u0026/g, '&');
             }
+          }
 
-            const title = (a.innerText || a.textContent || a.title || a.getAttribute('aria-label') || '')
-              .replace(/\s+/g, ' ')
-              .trim()
-              .slice(0, 180);
+          const title = (a.innerText || a.textContent || a.title || a.getAttribute('aria-label') || '')
+            .replace(/\s+/g, ' ').trim().slice(0, 180);
 
-            if (title.length > 5 || imgSrc) {
-              seen.add(link);
-              out.push({
-                title: title || 'Visual Match',
-                link,
-                thumbnail: imgSrc,
-                source: engineName,
-                score: 50
-              });
-            }
+          if (title.length > 5 || imgSrc) {
+            seen.add(link);
+            out.push({ title: title || 'Visual Match', link, thumbnail: imgSrc, source: engineName, score: 50 });
+          }
         } catch(err) {}
       });
 
@@ -593,37 +615,21 @@ async function scrapeSocialDorks(keyword, sites) {
 // ---------- Main search route ----------
 app.post('/api/search', async (req, res) => {
   const { imageUrl, localBypassUrl, localFaceUrl, searchMode, deepCrawl, keywordHint } = req.body;
-
-  // Map internal app modes to server-side deep crawl logic
   const isDeep = deepCrawl === true ||
                  ['PRECISION', 'HYPER', 'AGGRESSIVE', 'DEEP', 'SOCIAL', 'DEEP_CRAWL'].includes(searchMode);
-
-  // CRITICAL: Visual search engines (Yandex, Bing, Google) REQUIRE a public URL.
-  // Local bypass URLs (127.0.0.1) will ONLY work for local WebView scraping,
-  // not for server-side scraping where the engine must fetch the image.
   const visualProbeUrl = imageUrl || localFaceUrl || localBypassUrl;
 
   if (!visualProbeUrl || (!visualProbeUrl.startsWith('http') && !visualProbeUrl.startsWith('https'))) {
     return res.status(400).json({ success: false, error: 'No valid public image URL provided' });
   }
 
-  // Pre-check browser health
+  // Browser health check
   try {
     const browser = await getBrowser();
     await browser.version();
   } catch (err) {
-    console.log(' ❌ Browser health check failed, forcing restart...');
     browserInstance = null;
     launchPromise = null;
-  }
-
-  if (isTermux()) {
-    const connectivity = await checkTermuxConnectivity();
-    if (!connectivity.ok) {
-      console.log(` ⚠️ Termux network issue detected: ${connectivity.error}`);
-      return res.status(503).json({ success: false, error: `Termux network failure: ${connectivity.error}` });
-    }
-    console.log(` ✅ Termux DNS check passed via ${connectivity.host}`);
   }
 
   console.log(`\n📸 Search: ${visualProbeUrl.slice(0, 55)}... | Deep: ${isDeep}`);
@@ -631,6 +637,7 @@ app.post('/api/search', async (req, res) => {
   const matches = [];
   const meta = { engines: {}, started: Date.now() };
   let browserDead = false;
+  const blockedEngines = [];
 
   const runEngine = async (name, url) => {
     if (browserDead) return;
@@ -640,13 +647,13 @@ app.post('/api/search', async (req, res) => {
       const { items, blocked, error } = await withPage((page) => scrapeGeneric(page, url, name));
 
       if (blocked) {
-        console.log(` ⚠️ ${name} BLOCKED (Challenge)`);
+        console.log(` 🚫 [${name}] BLOCKED — will suggest browser fallback`);
+        blockedEngines.push(name);
         meta.engines[name] = { count: 0, blocked: true, ms: Date.now() - start };
         return;
       }
 
       if (error) {
-        console.log(` ❌ ${name} ERROR: ${error}`);
         meta.engines[name] = { count: 0, error, ms: Date.now() - start };
         return;
       }
@@ -665,57 +672,48 @@ app.post('/api/search', async (req, res) => {
   };
 
   try {
-    // Switch to .ru for Yandex, it's generally more stable for visual search
-    const yandexUrl = `https://yandex.ru/images/search?rpt=imageview&url=${encodeURIComponent(visualProbeUrl)}`;
+    const yandexUrl = `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(visualProbeUrl)}`;
     const bingUrl = `https://www.bing.com/visualsearch/Microsoft/Result?imgurl=${encodeURIComponent(visualProbeUrl)}`;
     const baiduUrl = `https://graph.baidu.com/pcpage/index?tpl_from=pc&image=${encodeURIComponent(visualProbeUrl)}`;
+    const googleUrl = `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(visualProbeUrl)}`;
 
-    // 1. Pre-warm Yandex (The hardest to bypass)
-    if (!browserDead) {
-      await withPage(async (page) => {
-        try {
-          await page.goto('https://yandex.ru/images', { waitUntil: 'domcontentloaded', timeout: 20000 });
-          await delay(1500);
-        } catch (e) { console.log(' ⚠ Yandex pre-warm failed'); }
-      });
+    // Run Bing + quick probes for others in parallel
+    // Bing is reliable — give it full scrape time
+    // Others get fast-fail detection
+    await runEngine('Bing', bingUrl);
+
+    // For deep mode, try Yandex/Google/Baidu but with fast timeout
+    if (isDeep && !browserDead) {
+      const fastEngines = [
+        ['Yandex', yandexUrl],
+        ['Google Master', googleUrl],
+        ['Baidu', baiduUrl]
+      ];
+
+      for (const [name, url] of fastEngines) {
+        if (browserDead) break;
+        // Each gets 12s max — if blocked, move on instantly
+        await Promise.race([
+          runEngine(name, url),
+          new Promise(r => setTimeout(r, 12000))
+        ]);
+      }
     }
 
-    // Run engines in parallel — sequential is too slow on a phone
-    await Promise.all([
-      runEngine('Yandex', yandexUrl),
-      runEngine('Bing', bingUrl),
-      runEngine('Baidu', baiduUrl)
-    ]);
-
-    if (isDeep && !browserDead) {
-      await delay(6000 + Math.random() * 4000);
-      const googleUrl = `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(visualProbeUrl)}`;
-
-      // Pre-warm Google
-      await withPage(async (page) => {
-        try {
-          await page.goto('https://www.google.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
-          await delay(1000);
-        } catch (e) {}
-      });
-
-      await runEngine('Google Master', googleUrl);
-
-      if (keywordHint) {
-        console.log(` 🕵️ Deep dorking for "${keywordHint}"`);
-        const deepSites = [
-          'instagram.com', 'facebook.com', 'twitter.com', 'x.com',
-          'linkedin.com', 'vk.com', 'tiktok.com'
-        ];
-        const start = Date.now();
-        try {
-          const dorkResults = await scrapeSocialDorks(keywordHint, deepSites);
-          matches.push(...dorkResults);
-          meta.engines['Deep Dork'] = { count: dorkResults.length, ms: Date.now() - start };
-          console.log(` ✅ Deep Dork: ${dorkResults.length}`);
-        } catch (e) {
-          console.log(` ❌ Deep Dork: ${e.message}`);
-        }
+    if (isDeep && !browserDead && keywordHint) {
+      console.log(` 🕵️ Deep dorking for "${keywordHint}"`);
+      const deepSites = [
+        'instagram.com', 'facebook.com', 'twitter.com', 'x.com',
+        'linkedin.com', 'vk.com', 'tiktok.com'
+      ];
+      const start = Date.now();
+      try {
+        const dorkResults = await scrapeSocialDorks(keywordHint, deepSites);
+        matches.push(...dorkResults);
+        meta.engines['Deep Dork'] = { count: dorkResults.length, ms: Date.now() - start };
+        console.log(` ✅ Deep Dork: ${dorkResults.length}`);
+      } catch (e) {
+        console.log(` ❌ Deep Dork: ${e.message}`);
       }
     }
 
@@ -733,7 +731,15 @@ app.post('/api/search', async (req, res) => {
     console.log(`🎯 Done → ${finalUnique.length} unique results (${meta.totalMs}ms)`);
 
     if (!res.headersSent) {
-      res.json({ success: true, matches: finalUnique.slice(0, 50), meta });
+      res.json({
+        success: true,
+        matches: finalUnique.slice(0, 50),
+        meta: {
+          ...meta,
+          blockedEngines,
+          totalMs: meta.totalMs
+        }
+      });
     }
   } catch (err) {
     console.error(' ❌ FATAL ERROR IN SEARCH ROUTE:');

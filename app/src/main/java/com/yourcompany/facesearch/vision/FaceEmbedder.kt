@@ -2,16 +2,13 @@ package com.yourcompany.facesearch.vision
 
 import android.content.Context
 import android.graphics.Bitmap
-import org.tensorflow.lite.InterpreterApi
-import java.io.FileInputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.channels.FileChannel
+import com.google.ai.edge.litert.CompiledModel
+import com.google.ai.edge.litert.TensorBuffer
 
 /**
- * Wraps the bundled MobileFaceNet TFLite model.
+ * Wraps the bundled MobileFaceNet model using the modern LiteRT CompiledModel API.
  */
-class FaceEmbedder(context: Context) {
+class FaceEmbedder(private val context: Context) {
 
     companion object {
         private const val MODEL_FILE = "mobilefacenet.tflite"
@@ -19,26 +16,40 @@ class FaceEmbedder(context: Context) {
         const val EMBEDDING_SIZE = 192
     }
 
-    private val interpreter: InterpreterApi by lazy {
-        val options = InterpreterApi.Options()
-            .setRuntime(InterpreterApi.Options.TfLiteRuntime.FROM_SYSTEM_ONLY)
-        InterpreterApi.create(loadModelFile(context), options)
+    private val compiledModel: CompiledModel by lazy {
+        // CompiledModel.create automatically handles hardware acceleration (GPU/NPU)
+        // and uses the LiteRT runtime from Google Play Services if initialized.
+        CompiledModel.create(context.assets, MODEL_FILE)
     }
+
+    // Reuse buffers to avoid allocations during inference
+    private val inputBuffers: List<TensorBuffer> by lazy { compiledModel.createInputBuffers(0) }
+    private val outputBuffers: List<TensorBuffer> by lazy { compiledModel.createOutputBuffers(0) }
 
     fun getEmbedding(faceBitmap: Bitmap): FloatArray? {
         if (!isGoodQuality(faceBitmap)) return null
 
-        val resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true)
-        val inputBuffer = bitmapToByteBuffer(resized)
-        val output = Array(1) { FloatArray(EMBEDDING_SIZE) }
+        try {
+            val resized = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true)
+            val floatArray = bitmapToFloatArray(resized)
+            
+            // Load data into the pre-allocated native input buffer
+            inputBuffers[0].writeFloat(floatArray)
 
-        interpreter.run(inputBuffer, output)
+            // Run inference
+            compiledModel.run(inputBuffers, outputBuffers, 0)
 
-        return l2Normalize(output[0])
+            // Read results from the output buffer
+            val rawOutput = outputBuffers[0].readFloat()
+            
+            return l2Normalize(rawOutput)
+        } catch (e: Exception) {
+            android.util.Log.e("FaceEmbedder", "Inference failed: ${e.message}")
+            return null
+        }
     }
 
     private fun isGoodQuality(bitmap: Bitmap): Boolean {
-        // Simple brightness/contrast check
         val pixels = IntArray(bitmap.width * bitmap.height)
         bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
         
@@ -50,24 +61,21 @@ class FaceEmbedder(context: Context) {
             brightnessSum += (0.299f * r + 0.587f * g + 0.114f * b)
         }
         val avgBrightness = brightnessSum / pixels.size
-        return avgBrightness in 40f..220f // avoid too dark/bright
+        return avgBrightness in 40f..220f
     }
 
-    private fun bitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
-        val buffer = ByteBuffer.allocateDirect(4 * INPUT_SIZE * INPUT_SIZE * 3)
-        buffer.order(ByteOrder.nativeOrder())
-
+    private fun bitmapToFloatArray(bitmap: Bitmap): FloatArray {
+        val floatArray = FloatArray(INPUT_SIZE * INPUT_SIZE * 3)
         val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
         bitmap.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
 
+        var index = 0
         for (pixel in pixels) {
-            buffer.putFloat(((pixel shr 16 and 0xFF) - 127.5f) / 128f) // R
-            buffer.putFloat(((pixel shr 8 and 0xFF) - 127.5f) / 128f)  // G
-            buffer.putFloat(((pixel and 0xFF) - 127.5f) / 128f)        // B
+            floatArray[index++] = ((pixel shr 16 and 0xFF) - 127.5f) / 128f
+            floatArray[index++] = ((pixel shr 8 and 0xFF) - 127.5f) / 128f
+            floatArray[index++] = ((pixel and 0xFF) - 127.5f) / 128f
         }
-
-        buffer.rewind()
-        return buffer
+        return floatArray
     }
 
     private fun l2Normalize(vector: FloatArray): FloatArray {
@@ -77,16 +85,7 @@ class FaceEmbedder(context: Context) {
         return FloatArray(vector.size) { vector[it] / norm }
     }
 
-    private fun loadModelFile(context: Context): ByteBuffer {
-        val assetFileDescriptor = context.assets.openFd(MODEL_FILE)
-        val inputStream = FileInputStream(assetFileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        val startOffset = assetFileDescriptor.startOffset
-        val declaredLength = assetFileDescriptor.declaredLength
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
-    }
-
     fun close() {
-        interpreter.close()
+        compiledModel.close()
     }
 }

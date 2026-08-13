@@ -21,7 +21,7 @@ android {
     defaultConfig {
         applicationId = "com.yourcompany.facesearch"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -56,6 +56,9 @@ android {
     }
 
     packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/INDEX.LIST"
@@ -104,19 +107,13 @@ dependencies {
     implementation(libs.mlkit.face.detection)
 
     // MediaPipe GenAI (for Gemma)
-    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    implementation("com.google.mediapipe:tasks-genai:0.10.35")
 
-    // 1. Google Play Services LiteRT (GMS version)
-    implementation("com.google.android.gms:play-services-tflite-java:16.5.0") {
-        // We MUST exclude the transitive legacy api dependency it drags in!
-        exclude(group = "org.tensorflow", module = "tensorflow-lite-api")
-    }
-
-    // 2. The local LiteRT runtime
-    implementation("com.google.ai.edge.litert:litert:1.4.1")
-    implementation("com.google.ai.edge.litert:litert-api:1.4.1")
-    implementation("com.google.ai.edge.litert:litert-gpu:1.4.1")
-    implementation("com.google.ai.edge.litert:litert-support:1.4.1")
+    // LiteRT (formerly TFLite)
+    // We use the standalone litert libraries to avoid issues with Play Services dynamic delivery
+    implementation("com.google.ai.edge.litert:litert:2.1.6")
+    implementation("com.google.ai.edge.litert:litert-api:2.1.6")
+    implementation("com.google.ai.edge.litert:litert-support:1.4.2")
 
     // Coroutines (for async calls)
     implementation(libs.kotlinx.coroutines.android)

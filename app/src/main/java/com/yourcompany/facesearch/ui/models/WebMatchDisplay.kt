@@ -59,10 +59,7 @@ data class WebMatchDisplay(
                 lower.contains("youtube.com/@") || lower.contains("youtube.com/c/") || lower.contains("youtube.com/channel/") -> {
                     clean.substringAfterLast("/").takeIf { it.isNotBlank() && it.length < 40 }
                 }
-                else -> {
-                    val last = clean.substringAfterLast("/").take(25)
-                    last.takeIf { it.isNotBlank() && it.length > 2 && !it.contains(".") && !it.contains("=") }
-                }
+                else -> null // REMOVE the generic fallback that produced @fat-uncle, @havant, etc.
             }
         }
     }

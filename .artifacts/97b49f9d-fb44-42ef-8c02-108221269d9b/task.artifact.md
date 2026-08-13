@@ -1,0 +1,5 @@
+- [x] Update `server.js` in Termux backend with fast block detection and staggered engine execution
+- [x] Update `ServerSearchResponse.kt` to include `blockedEngines` in `SearchMeta`
+- [x] Update `CheckInViewModel.kt` with `openBlockedEnginesInBrowser` and improved search logic
+- [x] Update `WebViewScraper.kt` with increased delays for better success
+- [x] Verify changes manually

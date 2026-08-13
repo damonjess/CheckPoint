@@ -198,7 +198,7 @@ private fun PrimaryMatchContent(
                             .crossfade(true)
                             .build(),
                         contentDescription = null,
-                        contentScale = ContentScale.Crop,
+                        contentScale = ContentScale.Fit,  // WAS Crop
                         alignment = Alignment.Center,
                         modifier = Modifier.fillMaxSize(),
                         placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFF5F5F5)),
@@ -309,7 +309,7 @@ private fun SecondaryMatchContent(
                             .crossfade(true)
                             .build(),
                         contentDescription = null,
-                        contentScale = ContentScale.Crop,
+                        contentScale = ContentScale.Fit,  // WAS Crop
                         alignment = Alignment.Center,
                         modifier = Modifier.fillMaxSize(),
                         placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFF5F5F5)),

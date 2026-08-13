@@ -54,6 +54,16 @@ class CheckInViewModel(
     private val freeSearchHelper = FreeFaceSearchHelper(getApplication())
     private val gemmaAnalyzer = GemmaAnalyzer(application)
 
+    val gemmaReady = gemmaAnalyzer.isReady
+    val gemmaError = gemmaAnalyzer.initializationError
+
+    init {
+        // Pre-initialize Gemma if possible
+        viewModelScope.launch(Dispatchers.IO) {
+            gemmaAnalyzer.setupInference()
+        }
+    }
+
     var uiState by mutableStateOf<CheckInUiState>(CheckInUiState.Idle)
         private set
 
@@ -61,6 +71,21 @@ class CheckInViewModel(
         private set
 
     var targetHint by mutableStateOf("")
+
+    private val currentLogs = mutableListOf<String>()
+
+    private fun addLog(msg: String) {
+        currentLogs.add(msg)
+        Log.e("CheckIn", "CONSOLE_LOG: $msg")
+        uiState = when (val previous = uiState) {
+            is CheckInUiState.Success -> previous.copy(logs = currentLogs.toList())
+            is CheckInUiState.NoMatch -> previous.copy(logs = currentLogs.toList())
+            is CheckInUiState.Error -> previous.copy(logs = currentLogs.toList())
+            is CheckInUiState.NoFaceDetected -> previous.copy(logs = currentLogs.toList())
+            is CheckInUiState.Loading -> previous.copy(logs = currentLogs.toList())
+            else -> CheckInUiState.Loading(0.3f, currentLogs.toList())
+        }
+    }
 
     fun onTargetHintChange(newHint: String) {
         targetHint = newHint
@@ -179,23 +204,46 @@ class CheckInViewModel(
         }
     }
 
-    private suspend fun performSearchPipeline(bitmap: Bitmap, faceBitmap: Bitmap) {
-        Log.e("CheckIn", "!!! CRITICAL LOG !!! Starting performSearchPipeline")
-        val logs = mutableListOf("Initializing free-only pipeline (Face-Centric)...")
-        fun addLog(msg: String) {
-            logs.add(msg)
-            Log.e("CheckIn", "CONSOLE_LOG: $msg")
-            uiState = when (val previous = uiState) {
-                is CheckInUiState.Success -> previous.copy(logs = logs.toList())
-                is CheckInUiState.NoMatch -> previous.copy(logs = logs.toList())
-                is CheckInUiState.Error -> previous.copy(logs = logs.toList())
-                is CheckInUiState.NoFaceDetected -> previous.copy(logs = logs.toList())
-                is CheckInUiState.Loading -> previous.copy(logs = logs.toList())
-                else -> CheckInUiState.Loading(0.3f, logs.toList())
+    private fun openBlockedEnginesInBrowser(imageUrl: String, blocked: List<String>) {
+        val app = getApplication<Application>()
+        
+        blocked.forEachIndexed { index, engine ->
+            val url = when (engine) {
+                "Google Master" -> "https://lens.google.com/uploadbyurl?url=${Uri.encode(imageUrl)}"
+                "Yandex" -> "https://yandex.com/images/search?rpt=imageview&url=${Uri.encode(imageUrl)}"
+                "Baidu" -> "https://graph.baidu.com/pcpage/index?tpl_from=pc&image=${Uri.encode(imageUrl)}"
+                else -> null
+            }
+            
+            if (url != null) {
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        // Try Chrome specifically first
+                        val chromeIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            `package` = "com.android.chrome"
+                        }
+                        app.startActivity(chromeIntent)
+                        addLog("🌐 Opened $engine in Chrome")
+                    } catch (e: Exception) {
+                        // Fallback to any browser
+                        val fallback = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        app.startActivity(fallback)
+                        addLog("🌐 Opened $engine in browser")
+                    }
+                }, index * 2500L) // Stagger by 2.5s so tabs don't overwhelm
             }
         }
+    }
 
-        uiState = CheckInUiState.Loading(0.1f, logs.toList())
+    private suspend fun performSearchPipeline(bitmap: Bitmap, faceBitmap: Bitmap) {
+        Log.e("CheckIn", "!!! CRITICAL LOG !!! Starting performSearchPipeline")
+        currentLogs.clear()
+        addLog("Initializing free-only pipeline (Face-Centric)...")
+
+        uiState = CheckInUiState.Loading(0.1f, currentLogs.toList())
 
         // Try to upload face crop to free hosting; if that fails, fall back to the local probe served by `LocalServer`.
         addLog("Uploading face probe to free hosting...")
@@ -210,7 +258,7 @@ class CheckInViewModel(
                 addLog("✓ Using local probe: $publicUrl")
             } catch (e: Exception) {
                 addLog("✗ Failed to start LocalServer: ${e.message}")
-                uiState = CheckInUiState.Error("No free image host available and local probe failed.", logs)
+                uiState = CheckInUiState.Error("No free image host available and local probe failed.", currentLogs.toList())
                 return
             }
         } else {
@@ -274,14 +322,14 @@ class CheckInViewModel(
                     // The local server returns a simple JSON map; we'll show a single mock result so UI continues
                     val match = SerpVisualMatch(title = "Local Offline Match", link = "http://local/face", source = "LocalServer", thumbnail = publicUrl, score = 900)
                     allRawResults.add(match)
-                    updateResultsLive(listOf(match), logs)
+                    updateResultsLive(listOf(match))
                 }
             } catch (e: Exception) {
                 addLog("⚠ LocalServer offline analysis failed: ${e.message}")
             }
             // Skip network scrapers
             if (allRawResults.isEmpty()) {
-                uiState = CheckInUiState.NoMatch(logs.toList())
+                uiState = CheckInUiState.NoMatch(currentLogs.toList())
                 return
             }
         }
@@ -325,9 +373,8 @@ class CheckInViewModel(
             }
 
             if (useTermux) {
-                // Puppeteer on a phone needs 30-90s. Don't kill it at 10s.
                 val response = try { 
-                    withTimeoutOrNull(90000L) { termuxDeferred.await() } 
+                    withTimeoutOrNull(120000L) { termuxDeferred.await() } 
                 } catch (e: kotlinx.coroutines.CancellationException) { 
                     throw e 
                 } catch (e: Exception) { 
@@ -336,51 +383,78 @@ class CheckInViewModel(
                 }
                 
                 if (response == null) {
-                    addLog("⚠ Termux call timed out after 90s; falling back to in-app WebView.")
+                    addLog("⚠ Termux call timed out; falling back to in-app WebView.")
+                    termuxDeferred.cancel()
                     val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
                     if (webResults.isNotEmpty()) {
                         allRawResults.addAll(webResults)
-                        updateResultsLive(webResults, logs)
+                        updateResultsLive(webResults)
                     }
                     return@coroutineScope
                 }
                 
-                if (response.success && !response.matches.isNullOrEmpty()) {
-                    if (!webDeferred.isCompleted) webDeferred.cancel()
-                    val newMatches = response.matches.map {
-                        SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail, score = it.score)
+                if (response.success) {
+                    val total = response.matches?.size ?: 0
+                    val blocked = response.meta?.blockedEngines ?: emptyList()
+                    val engines = response.meta?.engines?.keys?.joinToString(", ") ?: "Multiple"
+                    
+                    addLog("✓ Termux SUCCESS: $total matches via $engines")
+                    
+                    // FREE FIX: Open blocked engines in real browser
+                    if (blocked.isNotEmpty()) {
+                        addLog("🚀 Opening ${blocked.joinToString()} in Chrome (real browser bypass)...")
+                        openBlockedEnginesInBrowser(publicUrl ?: "", blocked)
                     }
-                    allRawResults.addAll(newMatches)
-                    updateResultsLive(newMatches, logs)
+                    
+                    if (response.matches != null) {
+                        val newMatches = response.matches.map {
+                            SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail, score = it.score)
+                        }
+                        allRawResults.addAll(newMatches)
+                        updateResultsLive(newMatches)
+                    }
                 } else {
                     if (response.error != null) addLog("⚠ Termux error: ${response.error}")
                     val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
                     if (webResults.isNotEmpty()) {
                         allRawResults.addAll(webResults)
-                        updateResultsLive(webResults, logs)
+                        updateResultsLive(webResults)
                     }
                 }
             } else {
                 val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
                 if (webResults.isNotEmpty()) {
                     allRawResults.addAll(webResults)
-                    updateResultsLive(webResults, logs)
+                    updateResultsLive(webResults)
                 }
             }
         }
 
         if (allRawResults.isEmpty()) {
             if (uiState !is CheckInUiState.Success) {
-                uiState = CheckInUiState.NoMatch(logs.toList())
+                uiState = CheckInUiState.NoMatch(currentLogs.toList())
             }
             return
+        }
+
+        // Parallelize Gemma analysis with results processing
+        viewModelScope.launch {
+            if (allRawResults.isNotEmpty()) {
+                val leads = allRawResults.take(8).map { "${it.title} (${it.source})" }
+                val analysis = gemmaAnalyzer.analyzeSearchLeads(combinedHint, leads)
+                
+                val finalState = uiState
+                if (finalState is CheckInUiState.Success) {
+                    uiState = finalState.copy(gemmaAnalysis = analysis)
+                }
+            }
         }
 
         // Ensure the UI shows the found results immediately (some code-paths add to allRawResults
         // but didn't call updateResultsLive earlier). This guarantees loading stops.
         addLog("⏳ Updating UI with ${allRawResults.distinctBy { it.link }.size} result(s)")
         try {
-            updateResultsLive(allRawResults.distinctBy { it.link }, logs)
+            updateResultsLive(allRawResults.distinctBy { it.link })
             addLog("✅ UI update complete, switching to Success state")
         } catch (e: Exception) {
             addLog("❌ Error updating UI: ${e.message}")
@@ -388,7 +462,7 @@ class CheckInViewModel(
         }
     }
 
-    private fun updateResultsLive(newResults: List<SerpVisualMatch>, logs: List<String>) {
+    private fun updateResultsLive(newResults: List<SerpVisualMatch>) {
         Log.e("CheckIn", "CONSOLE_LOG: updateResultsLive called with ${newResults.size} new results")
         val currentState = uiState
         val existingMatches = if (currentState is CheckInUiState.Success) {
@@ -405,7 +479,7 @@ class CheckInViewModel(
         uiState = CheckInUiState.Success(
             matches = allMatches,
             gemmaAnalysis = (currentState as? CheckInUiState.Success)?.gemmaAnalysis,
-            logs = logs.toList()
+            logs = currentLogs.toList()
         )
         // Ensure scanning state is cleared when results are displayed
         isSearching = false
@@ -427,8 +501,18 @@ class CheckInViewModel(
         
         var cleanTitle = match.title ?: "Visual Match"
         
-        // Use URL username when title is generic garbage
-        if (urlUsername != null && (
+        // Only trust URL username if the link actually points to a profile page
+        val isLikelyProfileUrl = match.link?.let { link ->
+            val lower = link.lowercase()
+            lower.contains("/user/") || lower.contains("/in/") || lower.contains("/@") ||
+            (lower.contains("instagram.com/") && !lower.contains("/p/")) ||
+            (lower.contains("facebook.com/") && !lower.contains("/pages/") && !lower.contains("/groups/")) ||
+            lower.contains("twitter.com/") || lower.contains("x.com/") ||
+            lower.contains("tiktok.com/@") || lower.contains("youtube.com/@") ||
+            lower.contains("reddit.com/user/") || lower.contains("reddit.com/u/")
+        } ?: false
+
+        if (urlUsername != null && isLikelyProfileUrl && (
                 cleanTitle.contains("match", ignoreCase = true) 
                 || cleanTitle.length < 4 
                 || cleanTitle.contains("facebook", ignoreCase = true)

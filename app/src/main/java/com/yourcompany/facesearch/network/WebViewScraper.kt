@@ -253,21 +253,21 @@ class WebViewScraper private constructor(
     }
 
     suspend fun scrapeYandex(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
-        url = "https://yandex.ru/images/search?rpt=imageview&url=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
+        url = "https://yandex.com/images/search?rpt=imageview&url=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Yandex",
-        delayMs = 5000 // Increased delay for Yandex
+        delayMs = 6000 
     )
 
     suspend fun scrapeBing(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://www.bing.com/visualsearch/Microsoft/Result?imgurl=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Bing",
-        delayMs = 7000 
+        delayMs = 5000 
     )
 
     suspend fun scrapeGoogle(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://lens.google.com/uploadbyurl?url=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Google",
-        delayMs = 6000
+        delayMs = 7000
     )
 
     suspend fun scrapeBaidu(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(

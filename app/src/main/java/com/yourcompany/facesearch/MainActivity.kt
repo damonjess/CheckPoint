@@ -5,14 +5,12 @@ import android.graphics.ImageDecoder
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import com.google.android.gms.tflite.java.TfLite
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -32,9 +30,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
-        // Initialize LiteRT (TensorFlow Lite) from Google Play Services
-        TfLite.initialize(this)
 
         // Configure Global Image Loader for OSINT thumbnails
         SingletonImageLoader.setSafe { context ->
@@ -85,6 +80,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val gemmaReady by checkInViewModel.gemmaReady.collectAsState()
+                val gemmaError by checkInViewModel.gemmaError.collectAsState()
+
                 when (screen) {
                     Screen.SEARCH -> CheckInScreen(
                         capturedBitmap = checkInViewModel.capturedBitmap,
@@ -105,7 +103,9 @@ class MainActivity : ComponentActivity() {
                         onRetryClick = { checkInViewModel.onRetry() },
                         onConfirmFreeSearch = { checkInViewModel.onConfirmFreeSearch(it) },
                         onGoogleLensOnlySearch = { checkInViewModel.onGoogleLensOnlySearch(it) },
-                        onLoadHighRes = { checkInViewModel.loadHighRes(it) }
+                        onLoadHighRes = { checkInViewModel.loadHighRes(it) },
+                        gemmaReady = gemmaReady,
+                        gemmaError = gemmaError
                     )
 
                     Screen.CAMERA -> CameraCaptureScreen(

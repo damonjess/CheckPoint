@@ -9,6 +9,7 @@ data class ServerSearchResponse(
 
 data class SearchMeta(
     val engines: Map<String, EngineMeta>? = null,
+    val blockedEngines: List<String>? = null,
     val totalMs: Long? = null
 )
 

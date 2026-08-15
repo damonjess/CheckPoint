@@ -24,11 +24,11 @@ import com.yourcompany.facesearch.network.SocialMediaDetector
 import com.yourcompany.facesearch.network.ThumbnailUtils
 import com.yourcompany.facesearch.network.model.Match
 import com.yourcompany.facesearch.ui.models.WebMatchDisplay
+import com.yourcompany.facesearch.vision.FaceDetectionResult
+import com.yourcompany.facesearch.vision.FaceDetectorHelper
 import com.yourcompany.facesearch.vision.FaceEmbedder
 import com.yourcompany.facesearch.vision.FaceVerifier
 import com.yourcompany.facesearch.vision.FreeFaceSearchHelper
-import com.yourcompany.facesearch.vision.GemmaAnalyzer
-import com.yourcompany.facesearch.vision.ImageEnhancer
 import com.yourcompany.facesearch.vision.NativeFaceCropper
 import kotlinx.coroutines.*
 import java.io.ByteArrayInputStream
@@ -45,23 +45,12 @@ class CheckInViewModel(
         private set
 
     private val nativeFaceCropper = NativeFaceCropper()
+    private val captureDetector = FaceDetectorHelper(application)
     private val faceSearchRepository = FaceSearchRepository(getApplication())
     private val faceEmbedder = FaceEmbedder(application)
     private val faceVerifier = FaceVerifier(application)
     private val freeImageHost = FreeImageHost()
     private val freeSearchHelper = FreeFaceSearchHelper(getApplication())
-    private val gemmaAnalyzer = GemmaAnalyzer(application)
-
-    val gemmaReady = gemmaAnalyzer.isReady
-    val gemmaError = gemmaAnalyzer.initializationError
-
-    init {
-        // Pre-initialize Gemma if possible
-        viewModelScope.launch(Dispatchers.IO) {
-            gemmaAnalyzer.setupInference()
-        }
-    }
-
     var uiState by mutableStateOf<CheckInUiState>(CheckInUiState.Idle)
         private set
 
@@ -106,26 +95,41 @@ class CheckInViewModel(
         isSearching = true
         viewModelScope.launch {
             try {
-                // 1. Stage full probe immediately
-                LocalServer.stageProbe(bitmap, isFaceCrop = false)
+                // Keep an unmodified, size-normalized copy for reverse-image search.
+                // The aligned face crop is used only for local verification.
+                val searchPhoto = normalizeReverseImageProbe(bitmap)
+                LocalServer.stageProbe(searchPhoto, isFaceCrop = false)
 
-                // 2. Detect and stage face crop
-                val faceCrop = nativeFaceCropper.cropAndAlignFace(bitmap, fullFaceMode)
-                if (faceCrop != null) {
-                    // 3. Generate Probe (Hyper composite if in HYPER mode)
-                    val probeBitmap = if (searchMode == SearchMode.HYPER) {
-                        nativeFaceCropper.createHyperProbe(bitmap)
-                    } else {
-                        faceCrop
+                when (val detection = captureDetector.detectAndCropFace(searchPhoto)) {
+                    is FaceDetectionResult.Success -> {
+                        val quality = detection.quality
+                        addLog(
+                            "Capture accepted: ${quality.faceWidthPx}px face, " +
+                                "brightness ${quality.meanLuminance.toInt()}, " +
+                                "sharpness ${quality.sharpness.toInt()}."
+                        )
+                        LocalServer.stageProbe(searchPhoto, isFaceCrop = true)
+                        performSearchPipeline(searchPhoto, detection.croppedFace, searchPhoto)
                     }
-
-                    LocalServer.stageProbe(probeBitmap, isFaceCrop = true)
-                    
-                    // 4. Run pipeline
-                    performSearchPipeline(bitmap, faceCrop, probeBitmap)
-                } else {
-                    Log.e("CheckIn", "No face detected in capture.")
-                    uiState = CheckInUiState.NoFaceDetected(listOf("✗ No face detected in probe. Adjust angle and retry."))
+                    is FaceDetectionResult.MultipleFacesFound -> {
+                        uiState = CheckInUiState.NoFaceDetected(
+                            listOf("Use a photo with only one visible face before searching.")
+                        )
+                    }
+                    is FaceDetectionResult.PoorQuality -> {
+                        uiState = CheckInUiState.NoFaceDetected(listOf(detection.reason))
+                    }
+                    FaceDetectionResult.NoFaceFound -> {
+                        Log.e("CheckIn", "No face detected in capture.")
+                        uiState = CheckInUiState.NoFaceDetected(
+                            listOf("No face detected. Use even lighting, face the camera, and try again.")
+                        )
+                    }
+                    is FaceDetectionResult.Error -> {
+                        uiState = CheckInUiState.Error(
+                            "Face detection could not complete. Please take another photo."
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("CheckIn", "Auto-search failed", e)
@@ -250,7 +254,8 @@ class CheckInViewModel(
     private suspend fun performSearchPipeline(bitmap: Bitmap, faceBitmap: Bitmap, probeBitmap: Bitmap) {
         Log.e("CheckIn", "!!! CRITICAL LOG !!! Starting performSearchPipeline")
         currentLogs.clear()
-        addLog("Initializing free-only pipeline (Face-Centric)...")
+        addLog("Initializing consent-based reverse-image search...")
+        val effectiveSearchMode = SearchMode.PRECISION
 
         uiState = CheckInUiState.Loading(0.1f, currentLogs.toList())
 
@@ -273,11 +278,6 @@ class CheckInViewModel(
             addLog("✓ Probe hosted: ${publicUrl.take(35)}...")
         }
 
-        if (searchMode == SearchMode.DEEP_CRAWL) {
-            addLog("🕸️ DEEP CRAWL: Activating recursive avatar extraction...")
-            addLog("This will extract og:image tags from private profiles...")
-        }
-
         // Upgrade 5: EXIF Metadata Extraction
         val exifHints = extractExifHints(bitmap)
         val combinedHint = listOf(targetHint, exifHints)
@@ -289,8 +289,8 @@ class CheckInViewModel(
             addLog("EXIF hints found: $exifHints")
         }
 
-        // Determine if Termux is intended to handle visual engines to avoid redundancy
-        var useTermux = searchMode in listOf(SearchMode.PRECISION, SearchMode.HYPER, SearchMode.BYPASS, SearchMode.AGGRESSIVE, SearchMode.DEEP_CRAWL)
+        // Use the optional local helper for the same supported precision flow on every runtime.
+        var useTermux = true
 
         if (useTermux) {
             addLog("Probing for local Termux backend...")
@@ -351,7 +351,7 @@ class CheckInViewModel(
                         faceBitmap = faceBitmap,
                         keywordHint = combinedHint,
                         imageUrl = publicUrl,
-                        searchMode = searchMode.name,
+                        searchMode = effectiveSearchMode.name,
                         onLog = ::addLog
                     )
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -370,8 +370,8 @@ class CheckInViewModel(
                         faceBitmap = faceBitmap,
                         keywordHint = combinedHint,
                         imageUrl = publicUrl,
-                        deepCrawl = searchMode == SearchMode.DEEP_CRAWL,
-                        searchMode = searchMode.name,
+                        deepCrawl = false,
+                        searchMode = effectiveSearchMode.name,
                         skipVisualEngines = false,
                         onLog = ::addLog
                     )
@@ -446,19 +446,6 @@ class CheckInViewModel(
             return
         }
 
-        // Parallelize Gemma analysis with results processing
-        viewModelScope.launch {
-            if (allRawResults.isNotEmpty()) {
-                val leads = allRawResults.take(8).map { "${it.title} (${it.source})" }
-                val analysis = gemmaAnalyzer.analyzeSearchLeads(combinedHint, leads)
-                
-                val finalState = uiState
-                if (finalState is CheckInUiState.Success) {
-                    uiState = finalState.copy(gemmaAnalysis = analysis)
-                }
-            }
-        }
-
         // Ensure the UI shows the found results immediately
         addLog("⏳ Updating UI with ${allRawResults.distinctBy { it.link }.size} result(s)")
         try {
@@ -490,7 +477,6 @@ class CheckInViewModel(
 
         uiState = CheckInUiState.Success(
             matches = allMatches,
-            gemmaAnalysis = (currentState as? CheckInUiState.Success)?.gemmaAnalysis,
             logs = currentLogs.toList()
         )
         // Ensure scanning state is cleared when results are displayed
@@ -654,6 +640,27 @@ class CheckInViewModel(
         }
     }
 
+    /**
+     * Creates a software bitmap capped at a practical upload size. It preserves
+     * the captured photograph and does not synthesize, mirror, or distort it.
+     */
+    private fun normalizeReverseImageProbe(source: Bitmap): Bitmap {
+        val safeSource = if (source.config == Bitmap.Config.HARDWARE || source.config == null) {
+            source.copy(Bitmap.Config.ARGB_8888, false)
+        } else {
+            source
+        }
+        val longestEdge = maxOf(safeSource.width, safeSource.height)
+        if (longestEdge <= 1600) return safeSource
+        val scale = 1600f / longestEdge.toFloat()
+        return Bitmap.createScaledBitmap(
+            safeSource,
+            (safeSource.width * scale).toInt().coerceAtLeast(1),
+            (safeSource.height * scale).toInt().coerceAtLeast(1),
+            true
+        )
+    }
+
     private suspend fun loadThumbnailBitmap(url: String?): Bitmap? = withContext(Dispatchers.IO) {
         if (url.isNullOrBlank()) return@withContext null
         try {
@@ -671,8 +678,8 @@ class CheckInViewModel(
     override fun onCleared() {
         super.onCleared()
         faceVerifier.close()
-        gemmaAnalyzer.close()
         faceEmbedder.close()
+        captureDetector.release()
         nativeFaceCropper.release()
     }
 }

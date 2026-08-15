@@ -27,7 +27,7 @@ class FaceSearchRepository(private val context: Context) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(300, TimeUnit.SECONDS)   // Increased to 5 mins for stealth scans
+        .readTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .addInterceptor { chain ->
@@ -52,35 +52,13 @@ class FaceSearchRepository(private val context: Context) {
 
     private val freeHost = FreeImageHost()
 
-    // Also probe the device's actual LAN IPs (Termux might not bridge to 127.0.0.1 on some ROMs)
-    private fun getDeviceIpAddresses(): List<String> {
-        val ips = mutableListOf<String>()
-        try {
-            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
-            while (interfaces.hasMoreElements()) {
-                val intf = interfaces.nextElement()
-                if (intf.isLoopback) continue
-                val addrs = intf.inetAddresses
-                while (addrs.hasMoreElements()) {
-                    val addr = addrs.nextElement()
-                    if (addr is java.net.Inet4Address && !addr.isLoopbackAddress) {
-                        addr.hostAddress?.let { ips.add(it) }
-                    }
-                }
-            }
-        } catch (_: Exception) { }
-        return ips
-    }
-
-    private val potentialBackends: List<String> by lazy {
-        val base = listOf(
-            "http://localhost:3000/api/search",
-            "http://127.0.0.1:3000/api/search",
-            "http://10.0.2.2:3000/api/search" // Emulator bridge
-        )
-        val deviceIps = getDeviceIpAddresses().map { "http://$it:3000/api/search" }
-        base + deviceIps
-    }
+    // The helper binds to loopback only. The emulator bridge is retained for
+    // Android-emulator development; physical devices use localhost/127.0.0.1.
+    private val potentialBackends: List<String> = listOf(
+        "http://127.0.0.1:3000/api/search",
+        "http://localhost:3000/api/search",
+        "http://10.0.2.2:3000/api/search"
+    )
 
     private var activeBackend: String? = null
 
@@ -167,11 +145,6 @@ class FaceSearchRepository(private val context: Context) {
                 val dorkJobs = mutableListOf<Deferred<*>>()
                 if (!keywordHint.isNullOrBlank()) {
                     dorkJobs.add(async { 
-                        onLog("Launching Termux Adult Scan...")
-                        allResults.addAll(performTermuxDorkSearch(keywordHint, AdultSiteConfig.SITES, onLog))
-                    })
-                    
-                    dorkJobs.add(async { 
                         onLog("Running social dorks...")
                         val s = WebViewScraper.create(context)
                         try {
@@ -207,7 +180,7 @@ class FaceSearchRepository(private val context: Context) {
         faceBitmap: android.graphics.Bitmap? = null,
         keywordHint: String? = null,
         imageUrl: String? = null,
-        searchMode: String = "HYPER",
+        searchMode: String = "PRECISION",
         onLog: (String) -> Unit = {}
     ): ServerSearchResponse {
         Log.e("CheckIn", "!!! REPO LOG !!! performLocalServerSearch started. Mode: $searchMode")
@@ -244,7 +217,7 @@ class FaceSearchRepository(private val context: Context) {
         Log.e("CheckIn", "Using Termux backend: $backendBase")
 
         val backendMode = mapModeForBackend(searchMode)
-        onLog("Initializing Termux Stealth Scan ($backendMode)...")
+        onLog("Starting local helper search ($backendMode)...")
 
         val request = ServerSearchRequest(
             imageUrl = publicUrl,
@@ -277,7 +250,7 @@ class FaceSearchRepository(private val context: Context) {
         } catch (e: Exception) {
             val errorMsg = when {
                 e.message?.contains("ECONNREFUSED") == true -> "Termux Server disconnected"
-                e.message?.contains("timeout") == true -> "Termux Timed Out (Bypassing blocks...)"
+                e.message?.contains("timeout") == true -> "Termux helper timed out"
                 e.message?.contains("CLEARTEXT") == true -> "HTTP blocked by Android (fix: usesCleartextTraffic)"
                 else -> "Termux Error: ${e.message ?: "Unknown network failure"}"
             }

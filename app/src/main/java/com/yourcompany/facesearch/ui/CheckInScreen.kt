@@ -40,9 +40,7 @@ fun CheckInScreen(
     onRetryClick: () -> Unit,
     onConfirmFreeSearch: (Bitmap) -> Unit,
     onGoogleLensOnlySearch: (Bitmap) -> Unit,
-    onLoadHighRes: (WebMatchDisplay) -> Unit,
-    gemmaReady: Boolean = true,
-    gemmaError: String? = null
+    onLoadHighRes: (WebMatchDisplay) -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
     val isLoading = uiState is CheckInUiState.Loading || isSearching
@@ -107,22 +105,6 @@ fun CheckInScreen(
                             onValueChange = onTargetHintChange,
                             isEnabled = true
                         )
-
-                        if (gemmaError != null) {
-                            Text(
-                                text = "⚠ $gemmaError",
-                                color = Color.Red,
-                                fontSize = 10.sp,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        } else if (!gemmaReady) {
-                            Text(
-                                text = "⏳ Gemma LLM initializing...",
-                                color = Color.Gray,
-                                fontSize = 10.sp,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))

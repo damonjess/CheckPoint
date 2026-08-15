@@ -109,32 +109,6 @@ fun SuccessContent(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        if (uiState.gemmaAnalysis != null) {
-            Text(
-                text = "GEMMA-3 DEEP ANALYSIS",
-                fontWeight = FontWeight.Black,
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-                color = Amber
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Amber.copy(alpha = 0.05f)),
-                border = BorderStroke(1.dp, Amber.copy(alpha = 0.3f)),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(
-                    text = uiState.gemmaAnalysis,
-                    modifier = Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,

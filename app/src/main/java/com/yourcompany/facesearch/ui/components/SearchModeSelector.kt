@@ -132,7 +132,7 @@ fun SearchModeSelector(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            SearchMode.entries.forEach { mode ->
+            listOf(SearchMode.PRECISION).forEach { mode ->
                 ModeChip(
                     label = mode.getLabel(),
                     icon = mode.getIcon(),

@@ -63,6 +63,12 @@ class EnrollViewModel(application: Application) : AndroidViewModel(application) 
                 is FaceDetectionResult.NoFaceFound -> {
                     errorMessage = "No face detected in that photo. Try again with better lighting."
                 }
+                is FaceDetectionResult.MultipleFacesFound -> {
+                    errorMessage = "Use a photo with only one face visible."
+                }
+                is FaceDetectionResult.PoorQuality -> {
+                    errorMessage = detection.reason
+                }
                 is FaceDetectionResult.Error -> {
                     errorMessage = "Something went wrong. Try again."
                 }

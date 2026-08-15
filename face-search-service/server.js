@@ -5,13 +5,7 @@ const path = require('path');
 const dns = require('dns').promises;
 const { URL } = require('url');
 const { exec } = require('child_process');
-const puppeteerExtra = require('puppeteer-extra');
-const puppeteerBase = require('puppeteer');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const AdblockerPlugin = require('puppeteer-extra-plugin-adblocker');
-
-puppeteerExtra.use(AdblockerPlugin({ blockTrackers: true }));
-const stealth = StealthPlugin();
+const puppeteer = require('puppeteer');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -72,33 +66,6 @@ const delay = (ms, jitter = 0.3) => {
   return new Promise(r => setTimeout(r, Math.max(200, Math.floor(actual))));
 };
 
-async function humanMouse(page) {
-  try {
-    const viewport = page.viewport() || { width: 1280, height: 720 };
-    const x = 100 + Math.random() * (viewport.width - 200);
-    const y = 100 + Math.random() * (viewport.height - 200);
-    await page.mouse.move(x, y, { steps: 12 + Math.floor(Math.random() * 18) });
-    if (Math.random() > 0.6) {
-      await page.mouse.click(x, y, { delay: 40 + Math.random() * 80 });
-    }
-  } catch (e) {}
-}
-
-async function humanScroll(page) {
-  try {
-    await page.evaluate(async () => {
-      const distance = 80 + Math.random() * 120;
-      const maxScroll = Math.min(document.body.scrollHeight, 1200 + Math.random() * 800);
-      let scrolled = 0;
-      while (scrolled < maxScroll) {
-        window.scrollBy(0, distance);
-        scrolled += distance;
-        await new Promise(r => setTimeout(r, 100 + Math.random() * 150));
-      }
-    });
-  } catch (e) {}
-}
-
 async function withTimeout(promise, ms, message = 'Timeout') {
   return Promise.race([
     promise,
@@ -123,12 +90,10 @@ async function checkTermuxConnectivity() {
 }
 
 const isTermux = () => {
-  try {
-    return fs.existsSync('/data/data/com.termux/files/usr/bin/chromium-browser') ||
-           fs.existsSync('/usr/bin/chromium-browser');
-  } catch (e) {
-    return false;
-  }
+  const prefix = process.env.PREFIX || '';
+  return process.platform === 'android' ||
+    prefix.includes('/data/data/com.termux/') ||
+    fs.existsSync('/data/data/com.termux/files/usr/bin/pkg');
 };
 
 const getChromiumPath = () => {
@@ -223,16 +188,12 @@ async function getBrowser() {
       let browser;
       if (token && token !== 'your_token_here') {
         console.log(' ☁️ Connecting to Browserless.io...');
-        browser = await puppeteerBase.connect({
-          browserWSEndpoint: `wss://chrome.browserless.io?token=${token}&--disable-notifications&--stealth&timeout=60000`
+        browser = await puppeteer.connect({
+          browserWSEndpoint: `wss://chrome.browserless.io?token=${token}&timeout=60000`
         });
       } else {
         const execPath = getChromiumPath();
         console.log(`🚀 Launching local browser${proxy ? ' (with proxy)' : ''}`);
-
-        if (!puppeteerExtra.plugins.find(p => p.name === 'stealth')) {
-          puppeteerExtra.use(stealth);
-        }
 
         const args = [
           '--no-sandbox',
@@ -242,8 +203,6 @@ async function getBrowser() {
           '--single-process',
           '--no-zygote',
           '--disable-namespace-sandbox',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-infobars',
           '--window-position=0,0',
           '--ignore-certifcate-errors',
           '--ignore-certifcate-errors-spki-list',
@@ -260,7 +219,7 @@ async function getBrowser() {
           args.push(`--proxy-server=${proxy.server}`);
         }
 
-        browser = await puppeteerExtra.launch({
+        browser = await puppeteer.launch({
           headless: "new",
           executablePath: execPath,
           args: args,
@@ -303,16 +262,6 @@ async function withPage(fn) {
     if (!isBrowserless) {
       await page.setUserAgent(getRandomUA());
       await page.setViewport({ width: 1280, height: 800 });
-      await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        const getParameter = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-          if (parameter === 37445) return 'Intel Open Source Technology Center';
-          if (parameter === 37446) return 'Mesa DRI Intel(R) HD Graphics 520 (Skylake GT2)';
-          return getParameter.apply(this, arguments);
-        };
-      });
     }
     return await fn(page);
   } catch (err) {
@@ -354,35 +303,13 @@ async function scrapeGeneric(page, url, name) {
       let finalUrl = page.url();
 
       if (isBlockedContent(content, title) || finalUrl.includes('sorry/index') || finalUrl.includes('checkcaptcha') || finalUrl.includes('verification') || finalUrl.includes('showcaptcha')) {
-        console.log(` ⚠️ [${name}] block/challenge detected. Retrying with alternate strategy...`);
-
-        let retryUrl = url;
-        if (name === 'Google Master') {
-          const imgUrl = new URL(url).searchParams.get('url');
-          retryUrl = `https://www.google.com/searchbyimage?image_url=${encodeURIComponent(imgUrl)}&encoded_image=&image_content=&filename=&hl=en&authuser=0`;
-        } else if (name === 'Yandex') {
-          retryUrl = url.replace('yandex.com', 'yandex.ru').replace('rpt=imageview', 'rpt=imageview&lr=213');
-        } else if (name === 'Bing') {
-          retryUrl = url + '&cc=US';
-        }
-
-        if (page.isClosed()) throw new Error('Target closed');
-        await page.setUserAgent(getRandomUA());
-        await page.goto(retryUrl, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
-        await delay(8000);
-
-        content = await page.content().catch(() => '');
-        finalUrl = await page.url();
-        if (isBlockedContent(content) || finalUrl.includes('sorry/index')) {
-          console.log(` ❌ [${name}] hard block detected. Switching to passive scan.`);
-          return { items: [], blocked: true };
-        }
+        console.log(` ⚠️ [${name}] access challenge detected; no automated retry will be attempted.`);
+        markEngineBlocked(name);
+        return { items: [], blocked: true };
       }
 
       await handleConsents(page);
-      await humanScroll(page);
-      if (Math.random() > 0.3) await humanMouse(page);
-      await delay(4000);
+      await delay(1500);
 
       const selectorTimeout = 20000;
       try {
@@ -518,7 +445,7 @@ app.post('/api/search', async (req, res) => {
     }
   } else {
     // Run all engines in parallel for maximum speed on desktop/server
-    await Promise.allSettled(engines.map(e => runEngine(e.name, e.url)));
+    await Promise.allSettled(engines.map(e => runEngine(engine.name, engine.url)));
   }
 
   if (keywordHint) {
@@ -534,8 +461,13 @@ app.post('/api/search', async (req, res) => {
   res.json({ success: true, matches: matches.slice(0, 50) });
 });
 
-app.get('/api/ping', (req, res) => res.json({ status: 'pong' }));
+app.get('/api/ping', (req, res) => res.json({
+  status: 'pong',
+  runtime: isTermux() ? 'termux' : 'desktop',
+  chromiumPath: getChromiumPath() || null,
+  sequentialEngines: isTermux()
+}));
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`⚡ BACKEND running on port ${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`⚡ Local helper running on http://127.0.0.1:${PORT}`);
 });

@@ -53,10 +53,6 @@ android {
         buildConfig = true // Ensure BuildConfig generation is enabled
     }
 
-    androidResources {
-        noCompress += "task"
-    }
-
     packaging {
         jniLibs {
             useLegacyPackaging = false
@@ -107,9 +103,6 @@ dependencies {
     // ML Kit
     // Highly accurate, local on-device face analysis 
     implementation(libs.mlkit.face.detection)
-
-    // MediaPipe GenAI (for Gemma)
-    implementation("com.google.mediapipe:tasks-genai:0.10.35")
 
     // LiteRT (formerly TFLite)
     // We use the standalone litert libraries to avoid issues with Play Services dynamic delivery

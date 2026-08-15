@@ -80,9 +80,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val gemmaReady by checkInViewModel.gemmaReady.collectAsState()
-                val gemmaError by checkInViewModel.gemmaError.collectAsState()
-
                 when (screen) {
                     Screen.SEARCH -> CheckInScreen(
                         capturedBitmap = checkInViewModel.capturedBitmap,
@@ -107,9 +104,7 @@ class MainActivity : ComponentActivity() {
                         onRetryClick = { checkInViewModel.onRetry() },
                         onConfirmFreeSearch = { checkInViewModel.onConfirmFreeSearch(it) },
                         onGoogleLensOnlySearch = { checkInViewModel.onGoogleLensOnlySearch(it) },
-                        onLoadHighRes = { checkInViewModel.loadHighRes(it) },
-                        gemmaReady = gemmaReady,
-                        gemmaError = gemmaError
+                        onLoadHighRes = { checkInViewModel.loadHighRes(it) }
                     )
 
                     Screen.CAMERA -> CameraCaptureScreen(

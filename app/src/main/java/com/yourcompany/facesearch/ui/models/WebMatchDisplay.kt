@@ -11,6 +11,7 @@ data class WebMatchDisplay(
     val extraImages: List<String> = emptyList(),
     val isSocial: Boolean = false,
     val confidence: Float = 0f,
+    val isFaceVerified: Boolean = false,
     val isHighResLoading: Boolean = false
 ) {
     val displayName: String by lazy {

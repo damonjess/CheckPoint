@@ -96,6 +96,32 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
         }
     }
 
+    /**
+     * A lightweight eligibility check for reverse-image candidates. Unlike capture
+     * enrollment, this intentionally does not apply lighting, pose, or sharpness
+     * rules; it only rejects product shots, silhouettes, group images, and other
+     * thumbnails without one sufficiently visible face.
+     */
+    suspend fun hasSingleCandidateFace(sourceBitmap: Bitmap): Boolean {
+        if (sourceBitmap.width < MIN_CANDIDATE_IMAGE_EDGE || sourceBitmap.height < MIN_CANDIDATE_IMAGE_EDGE) {
+            return false
+        }
+        return try {
+            val bitmap = sourceBitmap.asSoftwareBitmap()
+            val faces = detector.process(InputImage.fromBitmap(bitmap, 0)).await()
+            if (faces.size != 1) return false
+
+            val box = faces.single().boundingBox.clampTo(bitmap.width, bitmap.height)
+            val coverage = (box.width().toFloat() * box.height().toFloat()) /
+                (bitmap.width.toFloat() * bitmap.height.toFloat())
+            box.width() >= MIN_CANDIDATE_FACE_PIXELS &&
+                box.height() >= MIN_CANDIDATE_FACE_PIXELS &&
+                coverage >= MIN_CANDIDATE_FACE_COVERAGE
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun assessQuality(bitmap: Bitmap, face: Face): FaceQuality {
         val box = face.boundingBox.clampTo(bitmap.width, bitmap.height)
         val faceRegion = Bitmap.createBitmap(bitmap, box.left, box.top, box.width(), box.height())
@@ -199,11 +225,7 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
         }
         if (values.isEmpty()) return 0f
         val mean = values.average().toFloat()
-        var varianceSum = 0f
-        for (v in values) {
-            varianceSum += (v - mean) * (v - mean)
-        }
-        return varianceSum / values.size
+        return values.fold(0f) { acc, it -> acc + (it - mean) * (it - mean) } / values.size
     }
 
     private fun luminance(pixel: Int): Float =
@@ -231,6 +253,9 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
         const val MIN_IMAGE_HEIGHT = 360
         const val MIN_FACE_PIXELS = 100
         const val MIN_FACE_COVERAGE = 0.07f
+        const val MIN_CANDIDATE_IMAGE_EDGE = 96
+        const val MIN_CANDIDATE_FACE_PIXELS = 36
+        const val MIN_CANDIDATE_FACE_COVERAGE = 0.025f
         const val MAX_YAW_DEGREES = 28f
         const val MAX_PITCH_DEGREES = 20f
         const val MAX_ROLL_DEGREES = 18f

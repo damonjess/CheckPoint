@@ -41,7 +41,7 @@ class CheckInViewModel(
 ) : AndroidViewModel(application) {
 
     private companion object {
-        const val MAX_CANDIDATES_TO_VERIFY = 12
+        const val MAX_CANDIDATES_TO_VERIFY = 24
         const val VERIFIED_MATCH_BASE_SCORE = 5_000
         const val VERIFIED_MATCH_SIMILARITY_WEIGHT = 1_000
     }
@@ -311,6 +311,7 @@ class CheckInViewModel(
 
         // Execute searches in parallel
         val allRawResults = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
+        val blockedEngines = linkedSetOf<String>()
         // If we're using the local probe URL and there's no network, call the local server's face-search endpoint
         fun isNetworkAvailable(): Boolean {
             try {
@@ -336,7 +337,11 @@ class CheckInViewModel(
             } catch (e: Exception) {
                 addLog("⚠ LocalServer offline analysis failed: ${e.message}")
             }
-            uiState = CheckInUiState.NoMatch(currentLogs.toList())
+            uiState = CheckInUiState.NoMatch(
+                logs = currentLogs.toList(),
+                message = "Your photo was checked locally, but reverse-image search needs an internet connection.",
+                hasAccessChallenge = false
+            )
             return
         }
         coroutineScope {
@@ -406,11 +411,8 @@ class CheckInViewModel(
                     addLog("✓ Termux SUCCESS: $total matches via $engines")
                     
                     if (blocked.isNotEmpty()) {
-                        addLog("${blocked.joinToString()} requested an access challenge. Opening manual search...")
-                        val probeUrl = publicUrl ?: ""
-                        if (probeUrl.isNotBlank()) {
-                            openBlockedEnginesInBrowser(probeUrl, blocked)
-                        }
+                        blockedEngines.addAll(blocked)
+                        addLog("${blocked.joinToString()} requested an access challenge. Use the in-app 'Open in Lens' action if you choose to continue manually.")
                     }
                     
                     if (response.matches != null) {
@@ -435,23 +437,47 @@ class CheckInViewModel(
         }
 
         if (allRawResults.isEmpty()) {
-            if (uiState !is CheckInUiState.Success) {
-                uiState = CheckInUiState.NoMatch(currentLogs.toList())
+            val message = if (blockedEngines.isNotEmpty()) {
+                "${blockedEngines.joinToString()} requested an access check and returned no candidates. Open your photo in Lens to continue manually."
+            } else {
+                "No visual candidates were returned by the available search providers."
             }
+            uiState = CheckInUiState.NoMatch(
+                logs = currentLogs.toList(),
+                message = message,
+                hasAccessChallenge = blockedEngines.isNotEmpty()
+            )
             return
         }
 
-        val candidates = allRawResults.distinctBy { it.link }.take(MAX_CANDIDATES_TO_VERIFY)
-        addLog("Verifying ${candidates.size} visual candidate(s) locally…")
-        val verifiedMatches = verifyResults(candidates, faceBitmap)
+        val candidates = prioritizeCandidates(allRawResults)
+        addLog("Checking ${candidates.size} best visual candidate(s) for a visible face…")
+        val review = reviewCandidates(candidates, faceBitmap)
+        val verifiedMatches = review.verifiedMatches
+        val unverifiedLeads = review.faceBearingLeads
+
+        if (review.excludedNoFace > 0) {
+            addLog("Excluded ${review.excludedNoFace} product, body-only, group, or no-face thumbnail(s).")
+        }
+
+        if (verifiedMatches.isEmpty() && unverifiedLeads.isEmpty()) {
+            addLog("No candidate with one visible face remained after local filtering.")
+            uiState = CheckInUiState.NoMatch(
+                logs = currentLogs.toList(),
+                message = "Visual search returned images, but they were products, body-only images, groups, or thumbnails without a clear face. They were not shown as face-search leads.",
+                hasAccessChallenge = blockedEngines.isNotEmpty()
+            )
+            return
+        }
+
         if (verifiedMatches.isEmpty()) {
-            addLog("No locally verified face match was found. Raw engine leads were not shown.")
-            uiState = CheckInUiState.NoMatch(currentLogs.toList())
+            addLog("No locally verified face match was found. Showing ${unverifiedLeads.size} face-bearing visual lead(s).")
+            updateResultsLive(unverifiedLeads)
             return
         }
 
-        updateResultsLive(verifiedMatches)
-        addLog("Showing ${verifiedMatches.size} locally verified match(es).")
+        updateResultsLive(verifiedMatches + unverifiedLeads)
+        addLog("Showing ${verifiedMatches.size} locally verified match(es) and ${unverifiedLeads.size} face-bearing visual lead(s).")
     }
 
     private fun updateResultsLive(newResults: List<SerpVisualMatch>) {
@@ -479,6 +505,44 @@ class CheckInViewModel(
         // Note: we don't use the full bitmap here to save memory, just the results
         // The background verification loop in performSearchPipeline was launching separate jobs,
         // here we just ensure verification eventually runs.
+    }
+
+    private fun prioritizeCandidates(results: List<SerpVisualMatch>): List<SerpVisualMatch> {
+        val socialHosts = listOf(
+            "instagram.com", "facebook.com", "linkedin.com", "x.com", "twitter.com",
+            "tiktok.com", "youtube.com", "reddit.com"
+        )
+        return results.asSequence()
+            .filter { !it.link.isNullOrBlank() }
+            .filterNot(::isLikelyProductResult)
+            .distinctBy { it.link }
+            .sortedByDescending { match ->
+                val thumbnail = ThumbnailUtils.normalize(match.thumbnail)
+                val hasUsableThumbnail = thumbnail != null &&
+                    !thumbnail.contains("placeholder", ignoreCase = true) &&
+                    !thumbnail.contains("default", ignoreCase = true)
+                val isSocialProfile = socialHosts.any { host -> match.link?.contains(host, ignoreCase = true) == true }
+                (if (hasUsableThumbnail) 1_000 else 0) +
+                    (if (isSocialProfile) 300 else 0) +
+                    match.score.coerceAtMost(999)
+            }
+            .take(MAX_CANDIDATES_TO_VERIFY)
+            .toList()
+    }
+
+    private fun isLikelyProductResult(match: SerpVisualMatch): Boolean {
+        val productTerms = listOf(
+            "shirt", "t-shirt", "tshirt", "tee", "clothing", "apparel", "menswear",
+            "womenswear", "outfit", "size", "fabric", "shop", "store", "product", "buy",
+            "sale", "amazon", "ebay", "etsy", "walmart", "shopify"
+        )
+        val metadata = listOfNotNull(match.title, match.link, match.source)
+            .joinToString(" ")
+            .lowercase(Locale.US)
+        return productTerms.any { term ->
+            Regex("(?<![a-z0-9])${Regex.escape(term)}(?![a-z0-9])")
+                .containsMatchIn(metadata)
+        }
     }
 
     private fun mapToDisplay(match: SerpVisualMatch): WebMatchDisplay {
@@ -540,8 +604,9 @@ class CheckInViewModel(
             score = match.score,
             imageUrl = thumb,
             isSocial = isSocial,
-            confidence = calculateConfidence(match.score),
-            isHighResLoading = !hasGoodThumbnail && isSocial // flag to auto-fetch better image
+            confidence = if (isVerified) calculateConfidence(match.score) else 0f,
+            isFaceVerified = isVerified,
+            isHighResLoading = isVerified && !hasGoodThumbnail && isSocial
         )
     }
 
@@ -555,35 +620,63 @@ class CheckInViewModel(
         }
     }
 
+    private data class CandidateReview(
+        val verifiedMatches: List<SerpVisualMatch>,
+        val faceBearingLeads: List<SerpVisualMatch>,
+        val excludedNoFace: Int
+    )
+
     /**
-     * Only returns candidates whose visible thumbnail contains a face that passes
-     * the local embedding comparison. Search-engine ranking is never displayed as
-     * a confidence score by itself.
+     * Reviews each visual candidate once. A candidate can only reach the lead
+     * screen when ML Kit detects exactly one sufficiently visible face. Product
+     * shots, torso images, groups, icons, and thumbnails without a face are
+     * discarded before display. A face-bearing lead is upgraded only when the
+     * embedding comparison also passes the local verification threshold.
      */
-    private suspend fun verifyResults(
+    private suspend fun reviewCandidates(
         results: List<SerpVisualMatch>,
         sourceFaceBitmap: Bitmap
-    ): List<SerpVisualMatch> {
-        val sourceEmbedding = faceEmbedder.getEmbedding(sourceFaceBitmap) ?: return emptyList()
+    ): CandidateReview {
+        val sourceEmbedding = faceEmbedder.getEmbedding(sourceFaceBitmap)
+            ?: return CandidateReview(emptyList(), emptyList(), results.size)
         val verified = mutableListOf<SerpVisualMatch>()
+        val faceBearingLeads = mutableListOf<SerpVisualMatch>()
+        var excludedNoFace = 0
 
         for (match in results) {
             try {
                 val thumbnailUrl = match.thumbnail
                     ?: match.link?.let { faceSearchRepository.extractMetadataThumbnail(it) }
-                    ?: continue
-                val thumbnail = loadThumbnailBitmap(thumbnailUrl) ?: continue
-                val similarity = faceVerifier.verifyFaceMatch(thumbnail, sourceEmbedding) ?: continue
+                if (thumbnailUrl == null) {
+                    excludedNoFace++
+                    continue
+                }
+                val thumbnail = loadThumbnailBitmap(thumbnailUrl)
+                if (thumbnail == null || !captureDetector.hasSingleCandidateFace(thumbnail)) {
+                    excludedNoFace++
+                    continue
+                }
 
-                verified += match.copy(
-                    thumbnail = thumbnailUrl,
-                    score = VERIFIED_MATCH_BASE_SCORE + (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt()
-                )
+                val faceBearingMatch = match.copy(thumbnail = thumbnailUrl)
+                val similarity = faceVerifier.verifyFaceMatch(thumbnail, sourceEmbedding)
+                if (similarity != null) {
+                    verified += faceBearingMatch.copy(
+                        score = VERIFIED_MATCH_BASE_SCORE +
+                            (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt()
+                    )
+                } else {
+                    faceBearingLeads += faceBearingMatch
+                }
             } catch (error: Exception) {
-                Log.w("CheckIn", "Candidate verification failed for ${match.link}", error)
+                excludedNoFace++
+                Log.w("CheckIn", "Candidate review failed for ${match.link}", error)
             }
         }
-        return verified.sortedByDescending { it.score }
+        return CandidateReview(
+            verifiedMatches = verified.sortedByDescending { it.score },
+            faceBearingLeads = faceBearingLeads.sortedByDescending { it.score },
+            excludedNoFace = excludedNoFace
+        )
     }
     private fun extractExifHints(bitmap: Bitmap): String {
         val stream = ByteArrayOutputStream()
@@ -658,6 +751,3 @@ class CheckInViewModel(
         nativeFaceCropper.release()
     }
 }
-
-
-

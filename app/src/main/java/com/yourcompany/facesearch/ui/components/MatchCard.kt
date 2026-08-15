@@ -331,12 +331,12 @@ private fun SecondaryMatchContent(
                 
                 // Score Badge
                 Surface(
-                    color = Color(0xFF4CAF50),
+                    color = if (match.isFaceVerified) Color(0xFF4CAF50) else Amber,
                     shape = RoundedCornerShape(bottomStart = 8.dp),
                     modifier = Modifier.align(Alignment.TopEnd)
                 ) {
                     Text(
-                        text = "${(match.confidence * 100).toInt()}%",
+                        text = if (match.isFaceVerified) "${(match.confidence * 100).toInt()}%" else "LEAD",
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Black,
@@ -385,6 +385,15 @@ private fun SecondaryMatchContent(
                 }
             }
 
+            if (!match.isFaceVerified) {
+                Text(
+                    text = "Visual-search lead — not locally face verified",
+                    fontSize = 10.sp,
+                    color = Amber,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
             if (debugMode) {
                 Text(
                     text = "ID: ${match.score}",
@@ -411,4 +420,3 @@ private fun rememberHandle(match: WebMatchDisplay): String {
             ?: "@user_${match.score % 1000}"
     }
 }
-

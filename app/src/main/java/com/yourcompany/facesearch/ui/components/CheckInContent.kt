@@ -101,11 +101,13 @@ fun SuccessContent(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val sortedMatches = remember(uiState.matches) {
-        uiState.matches.sortedWith(
-            compareByDescending<WebMatchDisplay> { it.isSocial }
-                .thenByDescending { it.score }
-        )
+    val verifiedMatches = remember(uiState.matches) {
+        uiState.matches.filter { it.isFaceVerified }
+            .sortedByDescending { it.score }
+    }
+    val visualLeads = remember(uiState.matches) {
+        uiState.matches.filterNot { it.isFaceVerified }
+            .sortedWith(compareByDescending<WebMatchDisplay> { it.isSocial }.thenByDescending { it.score })
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -115,19 +117,19 @@ fun SuccessContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "results",
+                text = if (verifiedMatches.isNotEmpty()) "face-verified matches" else "visual leads",
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
                 color = Color.Black
             )
-            
+
             IconButton(onClick = {
-                val summary = uiState.matches.take(5).joinToString("\n\n") { 
-                    "${it.displayName} (${it.source})\n${it.profileUrl}"
+                val summary = uiState.matches.take(10).joinToString("\n\n") {
+                    "${if (it.isFaceVerified) "Verified face match" else "Unverified visual lead"}: ${it.displayName} (${it.source})\n${it.profileUrl}"
                 }
                 val sendIntent = Intent().apply {
                     action = Intent.ACTION_SEND
-                    putExtra(Intent.EXTRA_TEXT, "Sherlock Deep Search Results:\n\n$summary")
+                    putExtra(Intent.EXTRA_TEXT, "Sherlock visual-search results:\n\n$summary")
                     type = "text/plain"
                 }
                 context.startActivity(Intent.createChooser(sendIntent, null))
@@ -135,19 +137,45 @@ fun SuccessContent(
                 Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.Gray, modifier = Modifier.size(20.dp))
             }
         }
-        
-        Spacer(modifier = Modifier.height(12.dp))
-        
-        // Match list
-        sortedMatches.forEachIndexed { index, match ->
-            MatchCard(
-                match = match,
-                isPrimary = index == 0,
-                debugMode = debugMode,
-                onLoadHighRes = { onLoadHighRes(match) },
-                onClick = { onMatchClick(match) }
-            )
+
+        if (verifiedMatches.isNotEmpty()) {
             Spacer(modifier = Modifier.height(12.dp))
+            verifiedMatches.forEachIndexed { index, match ->
+                MatchCard(
+                    match = match,
+                    isPrimary = index == 0,
+                    debugMode = debugMode,
+                    onLoadHighRes = { onLoadHighRes(match) },
+                    onClick = { onMatchClick(match) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+
+        if (visualLeads.isNotEmpty()) {
+            if (verifiedMatches.isNotEmpty()) Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "UNVERIFIED VISUAL LEADS",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = Amber
+            )
+            Text(
+                text = "These links were returned by visual search but did not pass local face verification. They are leads only, not confirmed matches.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.DarkGray
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            visualLeads.forEach { match ->
+                MatchCard(
+                    match = match,
+                    isPrimary = false,
+                    debugMode = debugMode,
+                    onLoadHighRes = { onLoadHighRes(match) },
+                    onClick = { onMatchClick(match) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
         }
 
         // --- SCAN DIAGNOSTICS SECTION ---
@@ -197,8 +225,11 @@ fun NoFaceContent(
 @Composable
 fun NoMatchContent(
     targetHint: String,
+    message: String,
+    hasAccessChallenge: Boolean,
     logs: List<String>,
     onRetryClick: () -> Unit,
+    onGoogleLensOnly: () -> Unit,
     onConfirmFreeSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -208,10 +239,20 @@ fun NoMatchContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         ErrorState(
-            title = "No Results Found", 
-            message = "The search engines returned no visual matches for \"$targetHint\".", 
+            title = if (hasAccessChallenge) "Search Needs Your Action" else "No Confirmed Face Match",
+            message = message.ifBlank {
+                "No locally verified face match was found for \"$targetHint\"."
+            },
             onRetry = onRetryClick
         )
+
+        if (hasAccessChallenge) {
+            Text(
+                text = "A search provider requested an access check. Open the photo in Lens and complete any prompt yourself; this app will not automate that step.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.DarkGray
+            )
+        }
 
         Text(
             "SHERLOCK OSINT CONSOLE",
@@ -226,14 +267,25 @@ fun NoMatchContent(
         )
         
         Button(
-            onClick = onConfirmFreeSearch,
+            onClick = onGoogleLensOnly,
             modifier = Modifier.fillMaxWidth().height(56.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
             shape = RoundedCornerShape(12.dp)
         ) {
             Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = Color.White)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Switch to Browser Search (Free)", color = Color.White, fontWeight = FontWeight.Bold)
+            Text("Open Photo in Google Lens", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+
+        OutlinedButton(
+            onClick = onConfirmFreeSearch,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            border = BorderStroke(1.dp, Color(0xFF4CAF50)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF2E7D32))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Share Photo to Another Search App", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
         }
     }
 }

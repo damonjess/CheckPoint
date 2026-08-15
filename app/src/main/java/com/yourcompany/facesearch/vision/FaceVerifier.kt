@@ -16,8 +16,8 @@ class FaceVerifier(context: Context) {
     private val faceCropper = NativeFaceCropper()
     
     companion object {
-        const val VERIFICATION_THRESHOLD = 0.62f
-        const val SOFT_FILTER_THRESHOLD = 0.50f
+        // This is intentionally conservative: engine ranking is not identity evidence.
+        const val VERIFICATION_THRESHOLD = 0.68f
     }
 
     /**
@@ -53,7 +53,7 @@ class FaceVerifier(context: Context) {
                 // FIX 2: DON'T recycle manually - let GC handle it
                 // if (resultFace != safeBitmap) { resultFace.recycle() } // REMOVED
                 
-                similarity?.takeIf { it > SOFT_FILTER_THRESHOLD }
+                similarity?.takeIf { it >= VERIFICATION_THRESHOLD }
             } catch (e: Exception) {
                 android.util.Log.e("FaceVerifier", "Error verifying face: ${e.message}")
                 null
@@ -104,3 +104,6 @@ object FaceMatcherExt {
         return dot / denom
     }
 }
+
+
+

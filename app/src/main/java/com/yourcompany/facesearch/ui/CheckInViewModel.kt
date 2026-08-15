@@ -14,7 +14,6 @@ import coil3.request.ImageRequest
 import coil3.imageLoader
 import coil3.toBitmap
 import coil3.request.allowHardware
-import com.yourcompany.facesearch.network.AdultSiteConfig
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.FreeImageHost
 import com.yourcompany.facesearch.network.LocalServer
@@ -40,6 +39,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class CheckInViewModel(
     application: Application
 ) : AndroidViewModel(application) {
+
+    private companion object {
+        const val MAX_CANDIDATES_TO_VERIFY = 12
+        const val VERIFIED_MATCH_BASE_SCORE = 5_000
+        const val VERIFIED_MATCH_SIMILARITY_WEIGHT = 1_000
+    }
 
     var isSearching by mutableStateOf(false)
         private set
@@ -325,22 +330,14 @@ class CheckInViewModel(
                     .addFormDataPart("file", "face.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
                     .build()
                 val req = okhttp3.Request.Builder().url("http://127.0.0.1:8080/api/v1/face-search").post(body).build()
-                client.newCall(req).execute().use { resp ->
-                    val txt = resp.body?.string()
-                    addLog("✓ LocalServer analysis complete")
-                    // The local server returns a simple JSON map; we'll show a single mock result so UI continues
-                    val match = SerpVisualMatch(title = "Local Offline Match", link = "http://local/face", source = "LocalServer", thumbnail = publicUrl, score = 900)
-                    allRawResults.add(match)
-                    updateResultsLive(listOf(match))
+                client.newCall(req).execute().use {
+                    addLog("Local image quality analysis completed. Online reverse-image results require an internet connection.")
                 }
             } catch (e: Exception) {
                 addLog("⚠ LocalServer offline analysis failed: ${e.message}")
             }
-            // Skip network scrapers
-            if (allRawResults.isEmpty()) {
-                uiState = CheckInUiState.NoMatch(currentLogs.toList())
-                return
-            }
+            uiState = CheckInUiState.NoMatch(currentLogs.toList())
+            return
         }
         coroutineScope {
             val termuxDeferred = async {
@@ -397,7 +394,6 @@ class CheckInViewModel(
                     val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
                     if (webResults.isNotEmpty()) {
                         allRawResults.addAll(webResults)
-                        updateResultsLive(webResults)
                     }
                     return@coroutineScope
                 }
@@ -409,10 +405,12 @@ class CheckInViewModel(
                     
                     addLog("✓ Termux SUCCESS: $total matches via $engines")
                     
-                    // FREE FIX: Open blocked engines in real browser
                     if (blocked.isNotEmpty()) {
-                        addLog("🚀 Opening ${blocked.joinToString()} in Chrome (real browser bypass)...")
-                        openBlockedEnginesInBrowser(publicUrl ?: "", blocked)
+                        addLog("${blocked.joinToString()} requested an access challenge. Opening manual search...")
+                        val probeUrl = publicUrl ?: ""
+                        if (probeUrl.isNotBlank()) {
+                            openBlockedEnginesInBrowser(probeUrl, blocked)
+                        }
                     }
                     
                     if (response.matches != null) {
@@ -420,21 +418,18 @@ class CheckInViewModel(
                             SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail, score = it.score)
                         }
                         allRawResults.addAll(newMatches)
-                        updateResultsLive(newMatches)
                     }
                 } else {
                     if (response.error != null) addLog("⚠ Termux error: ${response.error}")
                     val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
                     if (webResults.isNotEmpty()) {
                         allRawResults.addAll(webResults)
-                        updateResultsLive(webResults)
                     }
                 }
             } else {
                 val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
                 if (webResults.isNotEmpty()) {
                     allRawResults.addAll(webResults)
-                    updateResultsLive(webResults)
                 }
             }
         }
@@ -446,19 +441,17 @@ class CheckInViewModel(
             return
         }
 
-        // Ensure the UI shows the found results immediately
-        addLog("⏳ Updating UI with ${allRawResults.distinctBy { it.link }.size} result(s)")
-        try {
-            updateResultsLive(allRawResults.distinctBy { it.link })
-            addLog("✅ UI update complete")
-            
-            // Call verifyResultsLive for background precision boost
-            verifyResultsLive(allRawResults.distinctBy { it.link }, faceBitmap)
-            
-        } catch (e: Exception) {
-            addLog("❌ Error updating UI: ${e.message}")
-            Log.e("CheckIn", "Error in search loop UI update", e)
+        val candidates = allRawResults.distinctBy { it.link }.take(MAX_CANDIDATES_TO_VERIFY)
+        addLog("Verifying ${candidates.size} visual candidate(s) locally…")
+        val verifiedMatches = verifyResults(candidates, faceBitmap)
+        if (verifiedMatches.isEmpty()) {
+            addLog("No locally verified face match was found. Raw engine leads were not shown.")
+            uiState = CheckInUiState.NoMatch(currentLogs.toList())
+            return
         }
+
+        updateResultsLive(verifiedMatches)
+        addLog("Showing ${verifiedMatches.size} locally verified match(es).")
     }
 
     private fun updateResultsLive(newResults: List<SerpVisualMatch>) {
@@ -490,9 +483,9 @@ class CheckInViewModel(
 
     private fun mapToDisplay(match: SerpVisualMatch): WebMatchDisplay {
         val socialDomains = listOf(
-            "facebook.com", "instagram.com", "linkedin.com", "twitter.com", 
-            "t.me", "vk.com", "pinterest.com", "ok.ru", "reddit.com"
-        ) + AdultSiteConfig.SITES
+            "facebook.com", "instagram.com", "linkedin.com", "twitter.com",
+            "x.com", "tiktok.com", "youtube.com", "reddit.com"
+        )
         val isSocial = socialDomains.any { domain -> match.link?.contains(domain) == true }
 
         val urlUsername = match.link?.let { WebMatchDisplay.extractUsernameFromUrl(it) }
@@ -562,53 +555,35 @@ class CheckInViewModel(
         }
     }
 
-    private suspend fun verifyResultsLive(
+    /**
+     * Only returns candidates whose visible thumbnail contains a face that passes
+     * the local embedding comparison. Search-engine ranking is never displayed as
+     * a confidence score by itself.
+     */
+    private suspend fun verifyResults(
         results: List<SerpVisualMatch>,
-        sourceBitmap: Bitmap
-    ) {
-        val cropped = nativeFaceCropper.cropAndAlignFace(sourceBitmap, fullFaceMode) ?: return
-        val sourceEmbedding = faceEmbedder.getEmbedding(cropped) ?: return
+        sourceFaceBitmap: Bitmap
+    ): List<SerpVisualMatch> {
+        val sourceEmbedding = faceEmbedder.getEmbedding(sourceFaceBitmap) ?: return emptyList()
+        val verified = mutableListOf<SerpVisualMatch>()
 
-        // Maintain a local mutable list for updates
-        val currentResults = results.toMutableList()
-
-        // Verify top 20 candidates only to keep background work efficient
-        val candidates = results.take(20)
-
-        for (index in candidates.indices) {
-            val match = candidates[index]
+        for (match in results) {
             try {
-                var thumbUrl = match.thumbnail
-                
-                if (thumbUrl.isNullOrBlank() && !match.link.isNullOrBlank()) {
-                    thumbUrl = faceSearchRepository.extractMetadataThumbnail(match.link)
-                }
+                val thumbnailUrl = match.thumbnail
+                    ?: match.link?.let { faceSearchRepository.extractMetadataThumbnail(it) }
+                    ?: continue
+                val thumbnail = loadThumbnailBitmap(thumbnailUrl) ?: continue
+                val similarity = faceVerifier.verifyFaceMatch(thumbnail, sourceEmbedding) ?: continue
 
-                val finalThumb = thumbUrl ?: match.thumbnail
-                if (finalThumb.isNullOrBlank()) continue
-
-                val thumbBitmap = loadThumbnailBitmap(finalThumb) ?: continue
-                val similarity = faceVerifier.verifyFaceMatch(thumbBitmap, sourceEmbedding) ?: 0f
-
-                if (similarity > (sensitivity - 0.15f).coerceAtLeast(0.35f)) {
-                    val updatedMatch = match.copy(
-                        thumbnail = finalThumb,
-                        score = match.score + (similarity * 7000).toInt() // Slightly higher boost
-                    )
-                    currentResults[index] = updatedMatch
-                    
-                    // Trigger UI Update
-                    val currentState = uiState
-                    if (currentState is CheckInUiState.Success) {
-                        uiState = currentState.copy(
-                            matches = currentResults.map { mapToDisplay(it) }.sortedByDescending { it.score }
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("CheckIn", "Live verification error for ${match.link}", e)
+                verified += match.copy(
+                    thumbnail = thumbnailUrl,
+                    score = VERIFIED_MATCH_BASE_SCORE + (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt()
+                )
+            } catch (error: Exception) {
+                Log.w("CheckIn", "Candidate verification failed for ${match.link}", error)
             }
         }
+        return verified.sortedByDescending { it.score }
     }
     private fun extractExifHints(bitmap: Bitmap): String {
         val stream = ByteArrayOutputStream()
@@ -683,3 +658,6 @@ class CheckInViewModel(
         nativeFaceCropper.release()
     }
 }
+
+
+

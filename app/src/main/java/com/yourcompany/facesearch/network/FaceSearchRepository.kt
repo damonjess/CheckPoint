@@ -236,8 +236,13 @@ class FaceSearchRepository(private val context: Context) {
             val total = response.matches?.size ?: 0
             val allZeroEngines = response.meta?.engines?.values?.all { it.count == 0 } ?: false
             if (response.success && total == 0 && allZeroEngines) {
-                onLog("⚠ Termux returned 0 results for all engines (likely blocked by challenges)")
-                return ServerSearchResponse(success = false, error = "Termux blocked or returned no results")
+                val blocked = response.meta?.blockedEngines.orEmpty()
+                if (blocked.isNotEmpty()) {
+                    onLog("⚠ ${blocked.joinToString()} requested an access challenge.")
+                } else {
+                    onLog("No visual candidates were returned by the local helper.")
+                }
+                return response
             }
 
             if (response.success) {
@@ -446,3 +451,6 @@ class FaceSearchRepository(private val context: Context) {
         }
     }
 }
+
+
+

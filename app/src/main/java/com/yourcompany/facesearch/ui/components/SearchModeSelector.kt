@@ -23,13 +23,76 @@ import com.yourcompany.facesearch.ui.SearchMode
 @Composable
 fun SearchModeSelector(
     searchMode: SearchMode,
+    sensitivity: Float,
+    fullFaceMode: Boolean,
     debugMode: Boolean,
     isLoading: Boolean,
     onSearchModeChange: (SearchMode) -> Unit,
+    onSensitivityChange: (Float) -> Unit,
+    onFullFaceModeChange: (Boolean) -> Unit,
     onDebugModeChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "SENSITIVITY",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary
+            )
+            
+            val label = when {
+                sensitivity > 0.75f -> "Exact"
+                sensitivity > 0.55f -> "Precision"
+                else -> "Look-alike"
+            }
+            Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Amber)
+        }
+
+        Slider(
+            value = sensitivity,
+            onValueChange = onSensitivityChange,
+            valueRange = 0.4f..0.9f,
+            modifier = Modifier.height(32.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = Amber,
+                activeTrackColor = Amber,
+                inactiveTrackColor = Amber.copy(alpha = 0.2f)
+            )
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "FULL JAWLINE MODE",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Switch(
+                checked = fullFaceMode,
+                onCheckedChange = onFullFaceModeChange,
+                modifier = Modifier.scale(0.8f),
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Amber,
+                    checkedTrackColor = Amber.copy(alpha = 0.5f)
+                )
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,

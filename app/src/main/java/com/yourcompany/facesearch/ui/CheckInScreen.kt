@@ -25,11 +25,15 @@ fun CheckInScreen(
     capturedBitmap: Bitmap?,
     uiState: CheckInUiState,
     searchMode: SearchMode,
+    sensitivity: Float,
+    fullFaceMode: Boolean,
     isSearching: Boolean,
     targetHint: String,
     debugMode: Boolean,
     onTargetHintChange: (String) -> Unit,
     onSearchModeChange: (SearchMode) -> Unit,
+    onSensitivityChange: (Float) -> Unit,
+    onFullFaceModeChange: (Boolean) -> Unit,
     onDebugModeChange: (Boolean) -> Unit,
     onCapturePhotoClick: () -> Unit,
     onSelectGalleryClick: () -> Unit,
@@ -125,9 +129,13 @@ fun CheckInScreen(
 
                     SearchModeSelector(
                         searchMode = searchMode,
+                        sensitivity = sensitivity,
+                        fullFaceMode = fullFaceMode,
                         debugMode = debugMode,
                         isLoading = false,
                         onSearchModeChange = onSearchModeChange,
+                        onSensitivityChange = onSensitivityChange,
+                        onFullFaceModeChange = onFullFaceModeChange,
                         onDebugModeChange = onDebugModeChange
                     )
 

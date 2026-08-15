@@ -30,17 +30,18 @@ class FreeImageHost {
 
         onLog("PROBE READY: ${bytes.size / 1024} KB")
 
-        // 1. Telegra.ph (fastest, no limits)
-        telegraph(bytes, onLog)?.let { return it }
+        // Shuffle hosts to distribute load and bypass IP blocks
+        val hosts = listOf(
+            ::telegraph,
+            ::catbox,
+            ::imgur,
+            ::postimages
+        ).shuffled()
 
-        // 2. Catbox.moe (reliable anonymous)
-        catbox(bytes, onLog)?.let { return it }
-
-        // 3. Imgur Anonymous
-        imgur(bytes, onLog)?.let { return it }
-
-        // 4. Postimages
-        postimages(bytes, onLog)?.let { return it }
+        for (hostFunc in hosts) {
+            val result = hostFunc(bytes, onLog)
+            if (result != null) return result
+        }
 
         onLog("✗ ALL FREE HOSTS FAILED. Using local probe only.")
         return null

@@ -119,7 +119,7 @@ class NativeFaceCropper {
             }
     }
 
-    suspend fun cropAndAlignFace(bitmap: Bitmap): Bitmap? = suspendCancellableCoroutine { continuation ->
+    suspend fun cropAndAlignFace(bitmap: Bitmap, fullJawline: Boolean = false): Bitmap? = suspendCancellableCoroutine { continuation ->
         val image = InputImage.fromBitmap(bitmap, 0)
         
         detector.process(image)
@@ -144,15 +144,19 @@ class NativeFaceCropper {
                             rotationMatrix.postRotate(-face.headEulerAngleZ, face.boundingBox.centerX().toFloat(), face.boundingBox.centerY().toFloat())
                         }
 
-                        // 2. AGGRESSIVE ASYMMETRICAL PADDING
-                        // Shift crop upwards: include hair, cut strictly at chin
-                        val paddingX = (box.width() * 0.25f).toInt()
-                        val paddingTop = (box.height() * 0.45f).toInt()
+                        // 2. TIGHT FACIAL FOCUS
+                        val paddingX = (box.width() * 0.10f).toInt()
+                        val paddingTop = (box.height() * 0.15f).toInt()
+                        
+                        // If fullJawline is false, we subtract from bottom to cut at upper chin level
+                        // If true, we add padding to include the full jawline
+                        val chinReduction = if (fullJawline) 0 else (box.height() * 0.15f).toInt()
+                        val paddingBottom = if (fullJawline) (box.height() * 0.10f).toInt() else 0
 
                         val left = (box.left - paddingX).coerceAtLeast(0)
                         val top = (box.top - paddingTop).coerceAtLeast(0)
                         val width = (box.width() + (paddingX * 2)).coerceAtMost(bitmap.width - left).coerceAtLeast(1)
-                        val height = (box.bottom - top).coerceAtMost(bitmap.height - top).coerceAtLeast(1)
+                        val height = (box.bottom + paddingBottom - chinReduction - top).coerceAtMost(bitmap.height - top).coerceAtLeast(1)
 
                         // 3. CROP AND APPLY ALIGNMENT
                         val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
@@ -182,19 +186,20 @@ class NativeFaceCropper {
                         val face = faces[0]
                         val box = face.boundingBox
 
-                        // BYPASS STRATEGY: 350% wider crop, face shifted UP (neck cut)
-                        val widthScale = 3.5f
-                        val heightScale = 4.0f
+                        // BYPASS STRATEGY: 200% wider crop, centered strictly on EYES/NOSE
+                        val widthScale = 2.0f
+                        val heightScale = 2.0f
                         
                         val pWidth = (box.width() * widthScale).toInt().coerceAtLeast(1)
                         val pHeight = (box.height() * heightScale).toInt().coerceAtLeast(1)
 
-                        val left = (box.centerX() - (pWidth * 0.35f)).toInt().coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
-                        val top = (box.centerY() - (pHeight * 0.65f)).toInt().coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
+                        val left = (box.centerX() - (pWidth / 2)).toInt().coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
+                        val top = (box.centerY() - (pHeight * 0.75f)).toInt().coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
                         
                         val width = pWidth.coerceAtMost(bitmap.width - left).coerceAtLeast(1)
                         val rawHeight = pHeight.coerceAtMost(bitmap.height - top)
-                        val height = (box.bottom - top + (box.height() * 0.2f).toInt()).coerceIn(1, rawHeight)
+                        // Cut strictly below mouth
+                        val height = (box.centerY() - top + (box.height() * 0.2f).toInt()).coerceIn(1, rawHeight)
 
                         val cropped = Bitmap.createBitmap(bitmap, left, top, width, height)
                         continuation.resume(cropped)
@@ -265,21 +270,20 @@ class NativeFaceCropper {
                         val face = faces[0]
                         val box = face.boundingBox
 
-                        // 1. TOP HALF: Wide Context (Clothes/Background)
-                        // Centered HIGHER to prioritize forehead/hair and exclude neck
-                        val contextWidth = (box.width() * 4.0f).toInt().coerceIn(1, bitmap.width)
-                        val contextHeight = (contextWidth * 0.5f).toInt().coerceIn(1, bitmap.height)
+                        // 1. TOP HALF: Eyes-to-Nose Focus (Wide)
+                        val contextWidth = (box.width() * 3.0f).toInt().coerceIn(1, bitmap.width)
+                        val contextHeight = (contextWidth * 0.4f).toInt().coerceIn(1, bitmap.height)
                         val cLeft = (box.centerX() - (contextWidth / 2)).toInt().coerceIn(0, (bitmap.width - contextWidth).coerceAtLeast(0))
-                        val cTop = (box.centerY() - (contextHeight * 0.70f).toInt()).toInt().coerceIn(0, (bitmap.height - contextHeight).coerceAtLeast(0))
+                        val cTop = (box.centerY() - (contextHeight * 0.85f).toInt()).toInt().coerceIn(0, (bitmap.height - contextHeight).coerceAtLeast(0))
                         
                         val contextCrop = Bitmap.createBitmap(bitmap, cLeft, cTop, contextWidth, contextHeight)
                         val contextScaled = Bitmap.createScaledBitmap(contextCrop, 1024, 512, true)
                         canvas.drawBitmap(contextScaled, 0f, 0f, null)
 
-                        // 2. BOTTOM HALF PREPARATION: Square Aligned Face (Shifted up to cut at chin)
-                        val side = (box.width().coerceAtLeast(box.height()) * 1.4f).toInt()
+                        // 2. BOTTOM HALF PREPARATION: Square Aligned Face (Shifted UP to cut chin)
+                        val side = (box.width().coerceAtLeast(box.height()) * 1.2f).toInt()
                         val fLeft = (box.centerX() - (side / 2)).toInt().coerceIn(0, (bitmap.width - side).coerceAtLeast(0))
-                        val fTop = (box.centerY() - (side * 0.75f).toInt()).toInt().coerceIn(0, (bitmap.height - side).coerceAtLeast(0))
+                        val fTop = (box.centerY() - (side * 0.85f).toInt()).toInt().coerceIn(0, (bitmap.height - side).coerceAtLeast(0))
                         val fWidth = side.coerceAtMost(bitmap.width - fLeft).coerceAtLeast(1)
                         val fHeight = side.coerceAtMost(bitmap.height - fTop).coerceAtLeast(1)
                         
@@ -347,12 +351,12 @@ class NativeFaceCropper {
                         val box = face.boundingBox
 
                         // Social media platforms typically show profile pics at 1:1 aspect ratio (square)
-                        // Optimize for this: face centered HIGHER in a square crop with light padding
+                        // Optimize for this: face centered VERY HIGH to exclude chins/beards
                         val faceSize = box.width().coerceAtLeast(box.height())
-                        val targetSize = (faceSize * 1.4f).toInt().coerceIn(300, 800) // 40% padding, but constrained
+                        val targetSize = (faceSize * 1.2f).toInt().coerceIn(300, 800) 
                         
                         val centerX = box.centerX().toInt()
-                        val centerY = (box.centerY() - (faceSize * 0.15f)).toInt() // Shift center up
+                        val centerY = (box.centerY() - (faceSize * 0.25f)).toInt() // Significant upward shift to cut chin
                         
                         val left = (centerX - (targetSize / 2)).coerceIn(0, (bitmap.width - targetSize).coerceAtLeast(0))
                         val top = (centerY - (targetSize / 2)).coerceIn(0, (bitmap.height - targetSize).coerceAtLeast(0))

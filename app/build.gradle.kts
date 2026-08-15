@@ -13,6 +13,7 @@ val localProperties = Properties().apply {
     }
 }
 val imgbbApiKey = localProperties.getProperty("IMGBB_API_KEY") ?: ""
+val serpApiKey = localProperties.getProperty("SERP_API_KEY") ?: ""
 
 android {
     namespace = "com.yourcompany.facesearch"
@@ -28,6 +29,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         buildConfigField("String", "IMGBB_API_KEY", "\"$imgbbApiKey\"")
+        buildConfigField("String", "SERP_API_KEY", "\"$serpApiKey\"")
     }
 
     buildTypes {

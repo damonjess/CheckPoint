@@ -5,9 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -72,6 +70,9 @@ class CheckInViewModel(
 
     var targetHint by mutableStateOf("")
 
+    var sensitivity by mutableFloatStateOf(0.58f)
+    var fullFaceMode by mutableStateOf(false)
+
     private val currentLogs = mutableListOf<String>()
 
     private fun addLog(msg: String) {
@@ -109,11 +110,19 @@ class CheckInViewModel(
                 LocalServer.stageProbe(bitmap, isFaceCrop = false)
 
                 // 2. Detect and stage face crop
-                val faceCrop = nativeFaceCropper.cropAndAlignFace(bitmap)
+                val faceCrop = nativeFaceCropper.cropAndAlignFace(bitmap, fullFaceMode)
                 if (faceCrop != null) {
-                    LocalServer.stageProbe(faceCrop, isFaceCrop = true)
-                    // 3. Run pipeline
-                    performSearchPipeline(bitmap, faceCrop)
+                    // 3. Generate Probe (Hyper composite if in HYPER mode)
+                    val probeBitmap = if (searchMode == SearchMode.HYPER) {
+                        nativeFaceCropper.createHyperProbe(bitmap)
+                    } else {
+                        faceCrop
+                    }
+
+                    LocalServer.stageProbe(probeBitmap, isFaceCrop = true)
+                    
+                    // 4. Run pipeline
+                    performSearchPipeline(bitmap, faceCrop, probeBitmap)
                 } else {
                     Log.e("CheckIn", "No face detected in capture.")
                     uiState = CheckInUiState.NoFaceDetected(listOf("✗ No face detected in probe. Adjust angle and retry."))
@@ -238,22 +247,21 @@ class CheckInViewModel(
         }
     }
 
-    private suspend fun performSearchPipeline(bitmap: Bitmap, faceBitmap: Bitmap) {
+    private suspend fun performSearchPipeline(bitmap: Bitmap, faceBitmap: Bitmap, probeBitmap: Bitmap) {
         Log.e("CheckIn", "!!! CRITICAL LOG !!! Starting performSearchPipeline")
         currentLogs.clear()
         addLog("Initializing free-only pipeline (Face-Centric)...")
 
         uiState = CheckInUiState.Loading(0.1f, currentLogs.toList())
 
-        // Try to upload face crop to free hosting; if that fails, fall back to the local probe served by `LocalServer`.
-        addLog("Uploading face probe to free hosting...")
-        var publicUrl = freeImageHost.upload(faceBitmap, ::addLog)
+        // Try to upload probe to free hosting
+        addLog("Uploading probe to free hosting...")
+        var publicUrl = freeImageHost.upload(probeBitmap, ::addLog)
 
         if (publicUrl == null) {
-            addLog("✗ All free hosts failed. Falling back to local probe served by the app (offline mode).")
+            addLog("✗ All free hosts failed. Falling back to local probe.")
             try {
                 LocalServer.start(getApplication())
-                // Prefer face crop if available
                 publicUrl = "http://127.0.0.1:8080/face.jpg"
                 addLog("✓ Using local probe: $publicUrl")
             } catch (e: Exception) {
@@ -286,7 +294,8 @@ class CheckInViewModel(
 
         if (useTermux) {
             addLog("Probing for local Termux backend...")
-            val available = withTimeoutOrNull(5000L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
+            // Increased timeout for parallel discovery
+            val available = withTimeoutOrNull(10000L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
             if (!available) {
                 addLog("No local Termux server detected; falling back to in-app WebView scanning.")
                 useTermux = false
@@ -450,12 +459,15 @@ class CheckInViewModel(
             }
         }
 
-        // Ensure the UI shows the found results immediately (some code-paths add to allRawResults
-        // but didn't call updateResultsLive earlier). This guarantees loading stops.
+        // Ensure the UI shows the found results immediately
         addLog("⏳ Updating UI with ${allRawResults.distinctBy { it.link }.size} result(s)")
         try {
             updateResultsLive(allRawResults.distinctBy { it.link })
-            addLog("✅ UI update complete, switching to Success state")
+            addLog("✅ UI update complete")
+            
+            // Call verifyResultsLive for background precision boost
+            verifyResultsLive(allRawResults.distinctBy { it.link }, faceBitmap)
+            
         } catch (e: Exception) {
             addLog("❌ Error updating UI: ${e.message}")
             Log.e("CheckIn", "Error in search loop UI update", e)
@@ -568,7 +580,7 @@ class CheckInViewModel(
         results: List<SerpVisualMatch>,
         sourceBitmap: Bitmap
     ) {
-        val cropped = nativeFaceCropper.cropAndAlignFace(sourceBitmap) ?: return
+        val cropped = nativeFaceCropper.cropAndAlignFace(sourceBitmap, fullFaceMode) ?: return
         val sourceEmbedding = faceEmbedder.getEmbedding(cropped) ?: return
 
         // Maintain a local mutable list for updates
@@ -592,7 +604,7 @@ class CheckInViewModel(
                 val thumbBitmap = loadThumbnailBitmap(finalThumb) ?: continue
                 val similarity = faceVerifier.verifyFaceMatch(thumbBitmap, sourceEmbedding) ?: 0f
 
-                if (similarity > 0.40f) {
+                if (similarity > (sensitivity - 0.15f).coerceAtLeast(0.35f)) {
                     val updatedMatch = match.copy(
                         thumbnail = finalThumb,
                         score = match.score + (similarity * 7000).toInt() // Slightly higher boost

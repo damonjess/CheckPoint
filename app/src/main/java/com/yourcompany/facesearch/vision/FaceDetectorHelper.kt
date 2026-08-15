@@ -49,13 +49,15 @@ class FaceDetectorHelper(private val context: Context) {
 
     private fun cropWithMargin(source: Bitmap, face: Face): Bitmap {
         val box = face.boundingBox
-        val marginX = (box.width() * 0.25f).toInt()
-        val marginTop = (box.height() * 0.40f).toInt()
+        val marginX = (box.width() * 0.15f).toInt()
+        val marginTop = (box.height() * 0.20f).toInt()
+        // TRUNCATE CHIN: Move bottom up by 15% of face height to exclude beard/lower chin
+        val chinReduction = (box.height() * 0.15f).toInt()
 
         val left = (box.left - marginX).coerceIn(0, source.width - 1)
         val top = (box.top - marginTop).coerceIn(0, source.height - 1)
         val right = (box.right + marginX).coerceIn(left + 1, source.width)
-        val bottom = box.bottom.coerceIn(top + 1, source.height)
+        val bottom = (box.bottom - chinReduction).coerceIn(top + 1, source.height)
 
         return Bitmap.createBitmap(source, left, top, right - left, bottom - top)
     }

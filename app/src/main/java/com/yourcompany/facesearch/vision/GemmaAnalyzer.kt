@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 
 /**
  * Analyzes OSINT leads using the Gemma LLM via MediaPipe.
@@ -41,49 +40,20 @@ class GemmaAnalyzer(private val context: Context) {
         _initializationError.value = null
         
         try {
-            val internalFile = File(context.filesDir, MODEL_NAME)
-            
             // 1. Locate the model
-            var targetFile = findModelFile()
-
-            // 2. Fallback to assets if not found on disk
-            if (targetFile == null) {
-                try {
-                    val assetDescriptor = context.assets.openFd(MODEL_NAME)
-                    assetDescriptor.close() // Just checking if it exists
-                    
-                    if (!internalFile.exists() || internalFile.length() < MIN_MODEL_SIZE) {
-                        _initializationError.value = "Extracting Gemma model from assets... (1.2GB)"
-                        copyFromAssets(MODEL_NAME, internalFile)
-                    }
-                    targetFile = internalFile
-                } catch (e: Exception) {
-                    // Asset not found, continue to error
-                }
-            }
+            val targetFile = findModelFile()
 
             if (targetFile == null) {
-                _initializationError.value = "Model file $MODEL_NAME not found. Place it in /sdcard/Download/ or app files."
+                _initializationError.value = "Model file $MODEL_NAME not found. Place it in /sdcard/Download/ or app data."
                 return
-            }
-
-            android.util.Log.d("GemmaAnalyzer", "Found model: ${targetFile.absolutePath} (${targetFile.length()} bytes)")
-
-            // 3. Try to copy to internal storage if it's currently on external storage
-            if (targetFile.absolutePath != internalFile.absolutePath) {
-                if (!internalFile.exists() || internalFile.length() != targetFile.length()) {
-                    _initializationError.value = "Optimizing model access... (Copying 1.2GB)"
-                    copyFile(targetFile, internalFile)
-                }
-                targetFile = internalFile
             }
 
             if (targetFile.length() < MIN_MODEL_SIZE) {
-                _initializationError.value = "Model file too small. Full 1.2GB required."
+                _initializationError.value = "Model file too small. Full model required."
                 return
             }
 
-            android.util.Log.d("GemmaAnalyzer", "Initializing Gemma from: ${targetFile.absolutePath}")
+            android.util.Log.d("GemmaAnalyzer", "Initializing Gemma from: ${targetFile.absolutePath} (${targetFile.length()} bytes)")
 
             val options = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(targetFile.absolutePath)
@@ -99,22 +69,6 @@ class GemmaAnalyzer(private val context: Context) {
             val errorMsg = e.localizedMessage ?: "Unknown error"
             _initializationError.value = "Gemma Init Error: $errorMsg"
             android.util.Log.e("GemmaAnalyzer", "Init Error", e)
-        }
-    }
-
-    private fun copyFile(source: File, destination: File) {
-        source.inputStream().use { input ->
-            FileOutputStream(destination).use { output ->
-                input.copyTo(output)
-            }
-        }
-    }
-
-    private fun copyFromAssets(fileName: String, destination: File) {
-        context.assets.open(fileName).use { input ->
-            FileOutputStream(destination).use { output ->
-                input.copyTo(output)
-            }
         }
     }
 

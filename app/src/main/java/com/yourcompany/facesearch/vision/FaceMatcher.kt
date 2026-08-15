@@ -5,15 +5,15 @@ import kotlin.math.sqrt
 
 object FaceMatcher {
 
-    /**
-     * Below ~0.50 the two faces are essentially unrelated; above ~0.80 it's
-     * almost certainly the same person. 0.58 is a good balance for MobileFaceNet.
-     */
-    const val MATCH_THRESHOLD = 0.58f
+    const val DEFAULT_MATCH_THRESHOLD = 0.58f
 
     data class MatchResult(val face: EnrolledFace, val similarity: Float)
 
-    fun findBestMatch(embedding: FloatArray, enrolledFaces: List<EnrolledFace>): MatchResult? {
+    fun findBestMatch(
+        embedding: FloatArray, 
+        enrolledFaces: List<EnrolledFace>,
+        threshold: Float = DEFAULT_MATCH_THRESHOLD
+    ): MatchResult? {
         var best: MatchResult? = null
 
         for (enrolled in enrolledFaces) {
@@ -23,7 +23,7 @@ object FaceMatcher {
             }
         }
 
-        return best?.takeIf { it.similarity >= MATCH_THRESHOLD }
+        return best?.takeIf { it.similarity >= threshold }
     }
 
     fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {

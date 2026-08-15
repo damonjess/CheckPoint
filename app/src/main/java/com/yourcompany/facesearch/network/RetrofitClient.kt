@@ -44,4 +44,18 @@ object RetrofitClient {
     val instance: LocalServerApi by lazy {
         getInstance("http://127.0.0.1:3000")
     }
+
+    private var serpApi: SerpApiService? = null
+
+    fun getSerpApi(): SerpApiService {
+        if (serpApi == null) {
+            serpApi = Retrofit.Builder()
+                .baseUrl("https://serpapi.com/")
+                .client(okHttpClient)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+                .create(SerpApiService::class.java)
+        }
+        return serpApi!!
+    }
 }

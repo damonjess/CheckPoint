@@ -127,7 +127,7 @@ class FaceSearchRepository(private val context: Context) {
             coroutineScope {
                 // Visual Engines (Parallel with Dedicated Scrapers)
                 val visualJobs = if (!skipVisualEngines) {
-                    listOf(
+                    val jobs = mutableListOf(
                         async { 
                             val s = WebViewScraper.create(context)
                             try { s.scrapeYandex(publicUrl).also { allResults.addAll(it) } } 
@@ -149,6 +149,15 @@ class FaceSearchRepository(private val context: Context) {
                             finally { s.destroy() }
                         }
                     )
+                    
+                    // Add SerpApi if key is available
+                    if (com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
+                        jobs.add(async { 
+                            performSerpApiSearch(publicUrl, onLog).also { allResults.addAll(it) }
+                        })
+                    }
+                    
+                    jobs
                 } else {
                     onLog("Termux handling visual engines, skipping local WebView...")
                     emptyList()
@@ -282,26 +291,38 @@ class FaceSearchRepository(private val context: Context) {
     }
 
     suspend fun isLocalBackendAvailable(): Boolean = withContext(Dispatchers.IO) {
-        for (backend in potentialBackends) {
-            try {
-                val pingUrl = if (backend.endsWith("/api/search"))
-                    backend.replace("/api/search", "/api/ping")
-                else
-                    backend
+        val backends = potentialBackends
+        Log.e("CheckIn", "DEBUG: Probing ${backends.size} backends in parallel...")
+        
+        val jobs = backends.map { backend ->
+            async {
+                try {
+                    val pingUrl = if (backend.endsWith("/api/search"))
+                        backend.replace("/api/search", "/api/ping")
+                    else
+                        backend
 
-                val req = Request.Builder().url(pingUrl).build()
-                fastClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        // CRITICAL FIX: remember the working base URL
-                        activeBackend = backend.removeSuffix("/api/search")
-                        Log.d("CheckIn", "Termux found at: $activeBackend")
-                        return@withContext true
+                    val req = Request.Builder().url(pingUrl).build()
+                    fastClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            Log.e("CheckIn", "✓ Found Termux at $backend")
+                            activeBackend = backend.removeSuffix("/api/search")
+                            return@async true
+                        }
                     }
+                } catch (e: Exception) {
+                    // Log.v("CheckIn", "Probe failed for $backend: ${e.message}")
                 }
-            } catch (_: Exception) { }
+                false
+            }
         }
-        Log.d("CheckIn", "No Termux backend found on any interface")
-        return@withContext false
+        
+        val results = awaitAll(*jobs.toTypedArray())
+        val found = results.any { it }
+        if (!found) {
+            Log.e("CheckIn", "✗ No Termux found after probing ${backends.size} endpoints")
+        }
+        found
     }
 
     suspend fun extractHighResMedia(url: String): String? = withContext(Dispatchers.IO) {
@@ -351,6 +372,34 @@ class FaceSearchRepository(private val context: Context) {
             onLog("⚠ Termux Dork failed: ${e.message}")
         }
         emptyList()
+    }
+
+    suspend fun performSerpApiSearch(
+        imageUrl: String,
+        onLog: (String) -> Unit = {}
+    ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
+        val apiKey = com.yourcompany.facesearch.BuildConfig.SERP_API_KEY
+        if (apiKey.isBlank()) return@withContext emptyList()
+
+        onLog("Requesting Google Lens via SerpApi...")
+        try {
+            val response = RetrofitClient.getSerpApi().googleLensSearch(url = imageUrl, apiKey = apiKey)
+            val results = response.visualMatches?.map {
+                SerpVisualMatch(
+                    title = it.title,
+                    link = it.link,
+                    source = it.source,
+                    thumbnail = it.thumbnail,
+                    score = 800 // High baseline for paid API results
+                )
+            } ?: emptyList()
+            
+            onLog("✓ SerpApi found ${results.size} matches")
+            results
+        } catch (e: Exception) {
+            onLog("⚠ SerpApi error: ${e.message}")
+            emptyList()
+        }
     }
 
     suspend fun extractMetadataThumbnail(url: String): String? = withContext(Dispatchers.IO) {

@@ -251,33 +251,11 @@ app.post('/api/search', async (request, response) => {
   if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) {
     return response.status(400).json({ success: false, error: 'A public HTTP(S) image URL is required.' });
   }
-  if (/localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(imageUrl)) {
-    return response.status(400).json({ success: false, error: 'The image must be hosted at a public URL before reverse-image search.' });
-  }
 
-  // Mobile browser automation is intentionally disabled on Termux. Search
-  // providers consistently challenge headless Android Chromium, which makes the
-  // helper slower and less reliable than the app's own permitted visual-search
-  // path. Returning an explicit empty result lets the Android client fall back
-  // immediately without retrying Google Lens or cycling a ten-minute cooldown.
-  if (isTermux()) {
-    console.log('Termux browser engines are disabled; the Android app will use its in-app visual-search fallback.');
-    return response.json({
-      success: true,
-      matches: [],
-      meta: {
-        engines: {
-          'Termux browser engines': {
-            count: 0,
-            ms: 0,
-            error: 'Disabled on Termux to avoid access challenges; use the in-app fallback.'
-          }
-        },
-        blockedEngines: [],
-        totalMs: Date.now() - startedAt,
-        fallbackRecommended: true
-      }
-    });
+  // Warning: Remote search engines (Google/Bing) cannot see local loopback URLs.
+  // Termux engines will attempt them, but expect failures unless the engine supports local resolution or custom proxies.
+  if (/localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(imageUrl)) {
+    console.warn(`[Warning] Using local probe URL: ${imageUrl}. External visual engines may fail to fetch this.`);
   }
 
   const connectivity = await checkConnectivity();

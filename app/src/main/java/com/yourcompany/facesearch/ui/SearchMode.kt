@@ -9,7 +9,8 @@ enum class SearchMode {
     AGGRESSIVE,
     RAW,
     FREE,
-    DEEP_CRAWL
+    DEEP_CRAWL,
+    ADULT
 }
 
 

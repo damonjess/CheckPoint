@@ -158,7 +158,11 @@ fun CheckInScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                val isFreeMode = searchMode == SearchMode.FREE || searchMode == SearchMode.AGGRESSIVE || searchMode == SearchMode.HYPER
+                val isFreeMode = searchMode == SearchMode.FREE || 
+                                 searchMode == SearchMode.AGGRESSIVE || 
+                                 searchMode == SearchMode.HYPER ||
+                                 searchMode == SearchMode.DEEP_CRAWL ||
+                                 searchMode == SearchMode.ADULT
                 if ((isFreeMode && capturedBitmap != null) && !isLoading) {
                     Button(
                         onClick = { onConfirmFreeSearch(capturedBitmap) },

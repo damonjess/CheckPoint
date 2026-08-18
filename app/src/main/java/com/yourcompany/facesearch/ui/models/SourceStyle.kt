@@ -36,9 +36,12 @@ object SourceStyles {
                 Icons.Default.Public,
                 Brush.verticalGradient(listOf(Color(0xFF00C6FF), Color(0xFF0072FF)))
             )
-            s.contains("pornhub") || s.contains("xvideos") || s.contains("xhamster") ||
-            s.contains("redtube") || s.contains("youporn") || s.contains("spankbang") ||
-            s.contains("eporner") || s.contains("chaturbate") -> SourceStyle(
+            s.contains("pornhub") || s.contains("xvideos") || s.contains("xnxx") ||
+            s.contains("xhamster") || s.contains("redtube") || s.contains("youporn") ||
+            s.contains("spankbang") || s.contains("eporner") || s.contains("beeg") ||
+            s.contains("tnaflix") || s.contains("thumbzilla") || s.contains("motherless") ||
+            s.contains("tube8") || s.contains("cumlouder") || s.contains("hqporner") ||
+            s.contains("porntrex") || s.contains("txxx") || s.contains("chaturbate") -> SourceStyle(
                 Color(0xFFFF5722),
                 Icons.Default.PlayArrow,
                 Brush.verticalGradient(listOf(Color(0xFFFF7043), Color(0xFFD84315)))

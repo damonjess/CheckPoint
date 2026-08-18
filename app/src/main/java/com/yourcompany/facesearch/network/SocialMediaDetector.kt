@@ -48,7 +48,12 @@ object SocialMediaDetector {
             lower.contains("patreon.com") -> PlatformScore("Patreon", 800, true)
             lower.contains("substack.com") -> PlatformScore("Substack", 700, true)
             lower.contains("twitch.tv") -> PlatformScore("Twitch", 1500, true)
-            lower.contains("onlyfans.com") -> PlatformScore("OnlyFans", 500, true)
+            lower.contains("onlyfans.com") -> PlatformScore("OnlyFans", 1500, true)
+            lower.contains("fansly.com") -> PlatformScore("Fansly", 1400, true)
+            lower.contains("pornhub.com") -> PlatformScore("Pornhub", 1300, true)
+            lower.contains("xvideos.com") -> PlatformScore("XVideos", 1300, true)
+            lower.contains("xnxx.com") -> PlatformScore("XNXX", 1300, true)
+            lower.contains("xhamster.com") -> PlatformScore("xHamster", 1300, true)
             
             // Dating
             lower.contains("tinder.com") -> PlatformScore("Tinder", 400, true)

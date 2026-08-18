@@ -87,7 +87,7 @@ class FaceSearchRepository(private val context: Context) {
 
             // STEP 1: HOST IMAGE (if not already hosted)
             val visualProbe = faceBitmap ?: bitmap
-            val publicUrl = if (imageUrl != null && imageUrl.startsWith("http") && !imageUrl.contains("127.0.0.1") && !imageUrl.contains("localhost")) {
+            val publicUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
                 imageUrl
             } else {
                 onLog("Uploading face probe to free hosting...")
@@ -95,17 +95,17 @@ class FaceSearchRepository(private val context: Context) {
             }
 
             if (publicUrl == null) {
-                onLog("✗ All hosts failed.")
-                return@withContext emptyList()
-            }
-            if (imageUrl == null || imageUrl != publicUrl) {
-                onLog("✓ Probe live: ${publicUrl.take(45)}...")
+                onLog("✗ All free hosts failed. Visual search will be skipped.")
+            } else {
+                if (imageUrl == null || imageUrl != publicUrl) {
+                    onLog("✓ Probe live: ${publicUrl.take(45)}...")
+                }
             }
 
             // Parallelized OSINT Pipeline
             coroutineScope {
                 // Visual Engines (Parallel with Dedicated Scrapers)
-                val visualJobs = if (!skipVisualEngines) {
+                val visualJobs = if (!skipVisualEngines && publicUrl != null && !publicUrl.contains("127.0.0.1") && !publicUrl.contains("localhost")) {
                     val jobs = mutableListOf(
                         async { 
                             val s = WebViewScraper.create(context)
@@ -158,25 +158,35 @@ class FaceSearchRepository(private val context: Context) {
                 // Dorking & Social Scan (Parallel)
                 val dorkJobs = mutableListOf<Deferred<*>>()
                 if (!keywordHint.isNullOrBlank()) {
-                    dorkJobs.add(async { 
-                        onLog("Running social dorks...")
-                        val s = WebViewScraper.create(context)
-                        try {
-                            allResults.addAll(s.scrapeSocialDork("instagram.com", keywordHint))
-                            allResults.addAll(s.scrapeSocialDork("facebook.com", keywordHint))
-                        } finally { s.destroy() }
-                    })
-                    
-                    if (searchMode == "AGGRESSIVE" || searchMode == "DEEP_CRAWL") {
+                    if (searchMode != "ADULT") {
                         dorkJobs.add(async { 
+                            onLog("Running social dorks...")
                             val s = WebViewScraper.create(context)
                             try {
-                                allResults.addAll(s.scrapeSocialDork("twitter.com", keywordHint))
-                                allResults.addAll(s.scrapeSocialDork("tiktok.com", keywordHint))
-                                allResults.addAll(s.scrapeSocialDork("reddit.com", keywordHint))
+                                allResults.addAll(s.scrapeSocialDork("instagram.com", keywordHint))
+                                allResults.addAll(s.scrapeSocialDork("facebook.com", keywordHint))
                             } finally { s.destroy() }
                         })
                     }
+                    
+                    if (searchMode == "AGGRESSIVE" || searchMode == "DEEP_CRAWL" || searchMode == "ADULT") {
+                        dorkJobs.add(async { 
+                            val s = WebViewScraper.create(context)
+                            try {
+                                if (searchMode == "ADULT") {
+                                    onLog("Running targeted adult platform scan...")
+                                } else {
+                                    onLog("Running deep social & adult scan...")
+                                    allResults.addAll(s.scrapeSocialDork("twitter.com", keywordHint))
+                                    allResults.addAll(s.scrapeSocialDork("tiktok.com", keywordHint))
+                                    allResults.addAll(s.scrapeSocialDork("reddit.com", keywordHint))
+                                }
+                                allResults.addAll(s.scrapeAdultSites(keywordHint))
+                            } finally { s.destroy() }
+                        })
+                    }
+                } else if (searchMode == "ADULT") {
+                    onLog("⚠ Adult scan requires a name hint for deep platform dorking.")
                 }
 
                 // Wait for everything
@@ -200,7 +210,7 @@ class FaceSearchRepository(private val context: Context) {
         Log.e("CheckIn", "!!! REPO LOG !!! performLocalServerSearch started. Mode: $searchMode")
 
         // 1. Use existing URL or upload the FACE image if possible, otherwise full
-        val publicUrl = if (imageUrl != null && imageUrl.startsWith("http") && !imageUrl.contains("127.0.0.1") && !imageUrl.contains("localhost")) {
+        val publicUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
             imageUrl
         } else {
             val probe = faceBitmap ?: bitmap
@@ -212,15 +222,9 @@ class FaceSearchRepository(private val context: Context) {
         }
 
         if (publicUrl == null) {
-            onLog("✗ Upload failed")
-            Log.e("CheckIn", "Upload failed - no public URL")
-            return ServerSearchResponse(
-                success = false,
-                error = "Failed to upload image to any host"
-            )
-        }
-
-        if (imageUrl == null || imageUrl != publicUrl) {
+            onLog("⚠ Public upload failed. Termux will use internal loopback probe.")
+            Log.e("CheckIn", "Public upload failed - will rely on localFaceUrl")
+        } else if (imageUrl == null || imageUrl != publicUrl) {
             onLog("✓ Hosted: ${publicUrl.take(30)}...")
         }
         Log.e("CheckIn", "REPO LOG: Image ready: $publicUrl. Calling Termux...")
@@ -234,7 +238,7 @@ class FaceSearchRepository(private val context: Context) {
         onLog("Starting local helper search ($backendMode)...")
 
         val request = ServerSearchRequest(
-            imageUrl = publicUrl,
+            imageUrl = publicUrl ?: "http://127.0.0.1:8080/face.jpg",
             keywordHint = keywordHint,
             searchMode = backendMode,
             localBypassUrl = "http://127.0.0.1:8080/probe.jpg",

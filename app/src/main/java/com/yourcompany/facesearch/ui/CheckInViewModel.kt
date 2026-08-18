@@ -41,7 +41,7 @@ class CheckInViewModel(
 ) : AndroidViewModel(application) {
 
     private companion object {
-        const val MAX_CANDIDATES_TO_VERIFY = 24
+        const val MAX_CANDIDATES_TO_VERIFY = 40
         const val VERIFIED_MATCH_BASE_SCORE = 5_000
         const val VERIFIED_MATCH_SIMILARITY_WEIGHT = 1_000
         const val LIKELY_MATCH_BASE_SCORE = 3_000
@@ -126,7 +126,7 @@ class CheckInViewModel(
                                 "brightness ${quality.meanLuminance.toInt()}, " +
                                 "sharpness ${quality.sharpness.toInt()}."
                         )
-                        LocalServer.stageProbe(searchPhoto, isFaceCrop = true)
+                        LocalServer.stageProbe(detection.croppedFace, isFaceCrop = true)
                         performSearchPipeline(searchPhoto, detection.croppedFace, searchPhoto)
                     }
                     is FaceDetectionResult.MultipleFacesFound -> {
@@ -313,10 +313,10 @@ class CheckInViewModel(
     }
 
     private suspend fun performSearchPipeline(bitmap: Bitmap, faceBitmap: Bitmap, probeBitmap: Bitmap) {
-        Log.e("CheckIn", "!!! CRITICAL LOG !!! Starting performSearchPipeline")
+        Log.e("CheckIn", "!!! CRITICAL LOG !!! Starting performSearchPipeline in mode: ${searchMode.name}")
         currentLogs.clear()
         addLog("Initializing consent-based reverse-image search...")
-        val effectiveSearchMode = SearchMode.PRECISION
+        val effectiveSearchMode = searchMode
 
         uiState = CheckInUiState.Loading(0.1f, currentLogs.toList())
 
@@ -440,70 +440,47 @@ class CheckInViewModel(
                 }
             }
 
-            if (useTermux) {
-                val response = try { 
-                    withTimeoutOrNull(120000L) { termuxDeferred.await() } 
-                } catch (e: kotlinx.coroutines.CancellationException) { 
-                    throw e 
-                } catch (e: Exception) { 
-                    addLog("⚠ Termux call failed: ${e.message}")
-                    null 
-                }
-                
-                if (response == null) {
-                    addLog("⚠ Termux call timed out; falling back to in-app WebView.")
-                    termuxDeferred.cancel()
-                    val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
-                    if (webResults.isNotEmpty()) {
-                        allRawResults.addAll(webResults)
-                    }
-                    return@coroutineScope
-                }
-                
-                if (response.success) {
-                    val total = response.matches?.size ?: 0
-                    val blocked = response.meta?.blockedEngines ?: emptyList()
-                    val engines = response.meta?.engines?.keys?.joinToString(", ") ?: "Multiple"
-                    
-                    addLog("✓ Termux SUCCESS: $total matches via $engines")
-                    
-                    if (blocked.isNotEmpty()) {
-                        blockedEngines.addAll(blocked)
-                        addLog("${blocked.joinToString()} requested an access challenge. Use the in-app 'Open in Lens' action if you choose to continue manually.")
-                    }
-                    
-                    if (total == 0) {
-                        addLog("Termux returned no usable candidates; switching to the in-app visual-search flow.")
-                        val webResults = try {
-                            webDeferred.await()
-                        } catch (_: kotlinx.coroutines.CancellationException) {
-                            emptyList<SerpVisualMatch>()
+            val termuxResults = if (useTermux) {
+                try {
+                    val response = withTimeoutOrNull(120000L) { termuxDeferred.await() }
+                    if (response == null) {
+                        addLog("⚠ Termux call timed out; relying on in-app results.")
+                        emptyList<SerpVisualMatch>()
+                    } else if (response.success) {
+                        val total = response.matches?.size ?: 0
+                        val blocked = response.meta?.blockedEngines ?: emptyList()
+                        val engines = response.meta?.engines?.keys?.joinToString(", ") ?: "Multiple"
+                        addLog("✓ Termux SUCCESS: $total matches via $engines")
+                        if (blocked.isNotEmpty()) {
+                            blockedEngines.addAll(blocked)
+                            addLog("${blocked.joinToString()} requested an access challenge.")
                         }
-                        if (webResults.isNotEmpty()) {
-                            allRawResults.addAll(webResults)
-                        }
-                        return@coroutineScope
-                    }
-
-                    response.matches?.let { matches ->
-                        val newMatches = matches.map {
+                        response.matches?.map {
                             SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail, score = it.score)
-                        }
-                        allRawResults.addAll(newMatches)
+                        } ?: emptyList()
+                    } else {
+                        if (response.error != null) addLog("⚠ Termux error: ${response.error}")
+                        emptyList()
                     }
-                } else {
-                    if (response.error != null) addLog("⚠ Termux error: ${response.error}")
-                    val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
-                    if (webResults.isNotEmpty()) {
-                        allRawResults.addAll(webResults)
+                } catch (e: Exception) {
+                    if (e !is kotlinx.coroutines.CancellationException) {
+                        addLog("⚠ Termux call failed: ${e.message}")
                     }
+                    emptyList()
                 }
-            } else {
-                val webResults = try { webDeferred.await() } catch (_: kotlinx.coroutines.CancellationException) { emptyList<SerpVisualMatch>() }
-                if (webResults.isNotEmpty()) {
-                    allRawResults.addAll(webResults)
+            } else emptyList()
+
+            val webResults = try {
+                webDeferred.await()
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    addLog("⚠ WebView error: ${e.message}")
                 }
+                emptyList<SerpVisualMatch>()
             }
+
+            allRawResults.addAll(termuxResults)
+            allRawResults.addAll(webResults)
         }
 
         if (allRawResults.isEmpty()) {
@@ -581,7 +558,8 @@ class CheckInViewModel(
     private fun prioritizeCandidates(results: List<SerpVisualMatch>): List<SerpVisualMatch> {
         val socialHosts = listOf(
             "instagram.com", "facebook.com", "linkedin.com", "x.com", "twitter.com",
-            "tiktok.com", "youtube.com", "reddit.com"
+            "tiktok.com", "youtube.com", "reddit.com", "onlyfans.com", "fansly.com",
+            "pornhub.com", "xvideos.com", "xnxx.com", "xhamster.com"
         )
         return results.asSequence()
             .filter { !it.link.isNullOrBlank() }
@@ -607,19 +585,28 @@ class CheckInViewModel(
             "womenswear", "outfit", "size", "fabric", "shop", "store", "product", "buy",
             "sale", "amazon", "ebay", "etsy", "walmart", "shopify"
         )
+        val junkTerms = listOf(
+            "watch?v=", "shorts/", "video", "subscribe", "playlist", "trending"
+        )
         val metadata = listOfNotNull(match.title, match.link, match.source)
             .joinToString(" ")
             .lowercase(Locale.US)
-        return productTerms.any { term ->
+        
+        val isProduct = productTerms.any { term ->
             Regex("(?<![a-z0-9])${Regex.escape(term)}(?![a-z0-9])")
                 .containsMatchIn(metadata)
         }
+        val isYoutubeJunk = match.link?.contains("youtube.com") == true && 
+                junkTerms.any { match.link.contains(it, ignoreCase = true) }
+        
+        return isProduct || isYoutubeJunk
     }
 
     private fun mapToDisplay(match: SerpVisualMatch): WebMatchDisplay {
         val socialDomains = listOf(
             "facebook.com", "instagram.com", "linkedin.com", "twitter.com",
-            "x.com", "tiktok.com", "youtube.com", "reddit.com"
+            "x.com", "tiktok.com", "youtube.com", "reddit.com", "onlyfans.com",
+            "fansly.com", "pornhub.com", "xvideos.com", "xnxx.com", "xhamster.com"
         )
         val isSocial = socialDomains.any { domain -> match.link?.contains(domain) == true }
 

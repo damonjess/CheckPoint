@@ -132,7 +132,16 @@ fun SearchModeSelector(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            listOf(SearchMode.PRECISION).forEach { mode ->
+            val modes = listOf(
+                SearchMode.PRECISION,
+                SearchMode.ADULT,
+                SearchMode.AGGRESSIVE,
+                SearchMode.DEEP_CRAWL,
+                SearchMode.SOCIAL,
+                SearchMode.HYPER,
+                SearchMode.FREE
+            )
+            modes.forEach { mode ->
                 ModeChip(
                     label = mode.getLabel(),
                     icon = mode.getIcon(),
@@ -186,6 +195,7 @@ private fun SearchMode.getLabel(): String = when (this) {
     SearchMode.RAW -> "Raw"
     SearchMode.FREE -> "Free"
     SearchMode.DEEP_CRAWL -> "🕸️ Deep Crawl"
+    SearchMode.ADULT -> "🔞 Adult"
 }
 
 private fun SearchMode.getIcon(): ImageVector = when (this) {
@@ -198,6 +208,7 @@ private fun SearchMode.getIcon(): ImageVector = when (this) {
     SearchMode.RAW -> Icons.Default.Image
     SearchMode.FREE -> Icons.Default.FilterCenterFocus
     SearchMode.DEEP_CRAWL -> Icons.Default.Public
+    SearchMode.ADULT -> Icons.Default.Lock
 }
 
 

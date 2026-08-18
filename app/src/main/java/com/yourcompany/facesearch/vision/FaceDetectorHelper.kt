@@ -57,7 +57,7 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-            .setMinFaceSize(0.12f)
+            .setMinFaceSize(0.10f)
             .build()
     )
 
@@ -69,7 +69,7 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-            .setMinFaceSize(0.05f)
+            .setMinFaceSize(0.04f)
             .build()
     )
 
@@ -286,7 +286,7 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
     }
 
     private fun Bitmap.asSoftwareBitmap(): Bitmap =
-        if (config == Bitmap.Config.HARDWARE || config == null) copy(Bitmap.Config.ARGB_8888, false) else this
+        if (config == Bitmap.Config.HARDWARE || config == null) copy(Bitmap.Config.ARGB_8888, true) else this
 
     private fun emptyQuality() = FaceQuality(0f, 0, 0, 0f, 0f, 0f, 0f, 0f, null, null)
 
@@ -298,23 +298,23 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
     private companion object {
         const val MIN_IMAGE_WIDTH = 480
         const val MIN_IMAGE_HEIGHT = 360
-        const val MIN_FACE_PIXELS = 100
-        const val MIN_FACE_COVERAGE = 0.07f
-        const val MIN_CAPTURE_FALLBACK_FACE_PIXELS = 72
-        const val MIN_CAPTURE_FALLBACK_FACE_COVERAGE = 0.035f
+        const val MIN_FACE_PIXELS = 80
+        const val MIN_FACE_COVERAGE = 0.05f
+        const val MIN_CAPTURE_FALLBACK_FACE_PIXELS = 64
+        const val MIN_CAPTURE_FALLBACK_FACE_COVERAGE = 0.03f
         const val MIN_CANDIDATE_IMAGE_EDGE = 96
-        const val MIN_CANDIDATE_FACE_PIXELS = 36
-        const val MIN_CANDIDATE_FACE_COVERAGE = 0.025f
-        const val MAX_YAW_DEGREES = 28f
-        const val MAX_PITCH_DEGREES = 20f
-        const val MAX_ROLL_DEGREES = 18f
-        const val MIN_LUMINANCE = 45f
-        const val MAX_LUMINANCE = 220f
-        const val MIN_SHARPNESS = 35f
-        const val MIN_CAPTURE_FALLBACK_LUMINANCE = 28f
-        const val MAX_CAPTURE_FALLBACK_LUMINANCE = 235f
-        const val MIN_CAPTURE_FALLBACK_SHARPNESS = 12f
-        const val MIN_EYE_OPEN_PROBABILITY = 0.35f
+        const val MIN_CANDIDATE_FACE_PIXELS = 32
+        const val MIN_CANDIDATE_FACE_COVERAGE = 0.02f
+        const val MAX_YAW_DEGREES = 32f
+        const val MAX_PITCH_DEGREES = 25f
+        const val MAX_ROLL_DEGREES = 22f
+        const val MIN_LUMINANCE = 40f
+        const val MAX_LUMINANCE = 230f
+        const val MIN_SHARPNESS = 25f
+        const val MIN_CAPTURE_FALLBACK_LUMINANCE = 25f
+        const val MAX_CAPTURE_FALLBACK_LUMINANCE = 240f
+        const val MIN_CAPTURE_FALLBACK_SHARPNESS = 10f
+        const val MIN_EYE_OPEN_PROBABILITY = 0.30f
         const val SHARPNESS_SAMPLE_SIZE = 128
     }
 }

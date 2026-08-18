@@ -14,7 +14,10 @@ sealed class CheckInUiState {
         val logs: List<String> = emptyList()
     ) : CheckInUiState()
     data class Confirming(val faceBitmap: Bitmap) : CheckInUiState()
-    data class NoFaceDetected(val logs: List<String> = emptyList()) : CheckInUiState()
+    data class NoFaceDetected(
+        val reasons: List<String> = emptyList(),
+        val logs: List<String> = emptyList()
+    ) : CheckInUiState()
     data class NoMatch(
         val logs: List<String> = emptyList(),
         val message: String = "No locally verified face match was found.",

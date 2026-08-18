@@ -234,6 +234,7 @@ fun SuccessContent(
 
 @Composable
 fun NoFaceContent(
+    reasons: List<String>,
     logs: List<String>,
     onRetryClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -245,7 +246,9 @@ fun NoFaceContent(
     ) {
         ErrorState(
             "No face detected",
-            "Use a closer, well-lit photo with one full face visible. You can also choose a different photo from Gallery.",
+            reasons.joinToString("\n\n").ifBlank {
+                "Use a closer, well-lit photo with one full face visible. You can also choose a different photo from Gallery."
+            },
             onRetryClick
         )
         

@@ -2,6 +2,8 @@ package com.yourcompany.facesearch
 
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -13,6 +15,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
@@ -76,7 +79,8 @@ class MainActivity : ComponentActivity() {
                                 MediaStore.Images.Media.getBitmap(contentResolver, it)
                             }
                             val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-                            checkInViewModel.onPhotoCaptured(softwareBitmap)
+                            val rotatedBitmap = rotateImageIfRequired(softwareBitmap, it)
+                            checkInViewModel.onPhotoCaptured(rotatedBitmap)
                         } catch (e: Exception) {
                             e.printStackTrace()
                         }
@@ -128,6 +132,32 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun rotateImageIfRequired(img: Bitmap, selectedImage: Uri): Bitmap {
+        val input = contentResolver.openInputStream(selectedImage) ?: return img
+        val ei = try {
+            ExifInterface(input)
+        } catch (e: Exception) {
+            return img
+        } finally {
+            input.close()
+        }
+
+        return when (ei.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> rotateImage(img, 90)
+            ExifInterface.ORIENTATION_ROTATE_180 -> rotateImage(img, 180)
+            ExifInterface.ORIENTATION_ROTATE_270 -> rotateImage(img, 270)
+            else -> img
+        }
+    }
+
+    private fun rotateImage(img: Bitmap, degree: Int): Bitmap {
+        val matrix = Matrix()
+        matrix.postRotate(degree.toFloat())
+        val rotatedImg = Bitmap.createBitmap(img, 0, 0, img.width, img.height, matrix, true)
+        img.recycle()
+        return rotatedImg
     }
 
     override fun onDestroy() {

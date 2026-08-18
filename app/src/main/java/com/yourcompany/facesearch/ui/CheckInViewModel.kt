@@ -133,16 +133,21 @@ class CheckInViewModel(
                     }
                     is FaceDetectionResult.MultipleFacesFound -> {
                         uiState = CheckInUiState.NoFaceDetected(
-                            listOf("Use a photo with only one visible face before searching.")
+                            reasons = listOf("Use a photo with only one visible face before searching."),
+                            logs = currentLogs.toList()
                         )
                     }
                     is FaceDetectionResult.PoorQuality -> {
-                        uiState = CheckInUiState.NoFaceDetected(listOf(detection.reason))
+                        uiState = CheckInUiState.NoFaceDetected(
+                            reasons = listOf(detection.reason),
+                            logs = currentLogs.toList()
+                        )
                     }
                     FaceDetectionResult.NoFaceFound -> {
                         Log.e("CheckIn", "No face detected in capture.")
                         uiState = CheckInUiState.NoFaceDetected(
-                            listOf("No clear single face was detected. Try a closer, well-lit photo with your full face visible.")
+                            reasons = listOf("No clear single face was detected. Try a closer, well-lit photo with your full face visible."),
+                            logs = currentLogs.toList()
                         )
                     }
                     is FaceDetectionResult.Error -> {

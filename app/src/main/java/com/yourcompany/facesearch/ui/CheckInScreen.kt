@@ -242,6 +242,7 @@ fun CheckInScreen(
 
                     is CheckInUiState.NoFaceDetected -> {
                         NoFaceContent(
+                            reasons = uiState.reasons,
                             logs = uiState.logs,
                             onRetryClick = onRetryClick
                         )

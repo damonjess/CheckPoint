@@ -143,16 +143,16 @@ class NativeFaceCropper {
     }
 
     private fun Bitmap.asSoftwareBitmap(): Bitmap =
-        if (config == null || config == Bitmap.Config.HARDWARE) copy(Bitmap.Config.ARGB_8888, false) else this
+        if (config == null || config == Bitmap.Config.HARDWARE) copy(Bitmap.Config.ARGB_8888, true) else this
 
     fun release() = detector.close()
 
     private companion object {
-        const val MIN_FACE_PIXELS = 100
-        const val MIN_COVERAGE = 0.07f
-        const val MAX_YAW = 28f
-        const val MAX_PITCH = 20f
-        const val MAX_ROLL = 18f
+        const val MIN_FACE_PIXELS = 80
+        const val MIN_COVERAGE = 0.05f
+        const val MAX_YAW = 32f
+        const val MAX_PITCH = 25f
+        const val MAX_ROLL = 22f
         const val MAX_OUTPUT_DIMENSION = 1600
     }
 }

@@ -90,7 +90,13 @@ class CheckInViewModel(
         targetHint = newHint
     }
 
+    fun onBroadenLensCoverageChange(enabled: Boolean) {
+        broadenLensCoverage = enabled
+    }
+
     var searchMode by mutableStateOf(SearchMode.PRECISION)
+    var broadenLensCoverage by mutableStateOf(false)
+        private set
     var debugMode by mutableStateOf(false)
 
     fun onPhotoCaptured(bitmap: Bitmap) {
@@ -177,7 +183,11 @@ class CheckInViewModel(
                     faceSearchRepository.extractMetadataThumbnail(match.profileUrl)
                 }
 
-                val highResBitmap = highResUrl?.let { loadThumbnailBitmap(it) }
+                val highResBitmap = if (highResUrl != null) {
+                    loadThumbnailBitmap(highResUrl)
+                } else {
+                    null
+                }
                 val highResSimilarity = if (
                     highResBitmap != null &&
                     latestSourceEmbedding != null &&
@@ -309,7 +319,7 @@ class CheckInViewModel(
 
         // Try to upload probe to free hosting
         addLog("Uploading probe to free hosting...")
-        var publicUrl = freeImageHost.upload(probeBitmap, ::addLog)
+        var publicUrl = freeImageHost.upload(probeBitmap) { message -> addLog(message) }
 
         if (publicUrl == null) {
             addLog("✗ All free hosts failed. Falling back to local probe.")
@@ -397,7 +407,7 @@ class CheckInViewModel(
                         keywordHint = combinedHint,
                         imageUrl = publicUrl,
                         searchMode = effectiveSearchMode.name,
-                        onLog = ::addLog
+                        onLog = { message -> addLog(message) }
                     )
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e // Don't log cancellation as an error
@@ -417,8 +427,9 @@ class CheckInViewModel(
                         imageUrl = publicUrl,
                         deepCrawl = false,
                         searchMode = effectiveSearchMode.name,
+                        includeExactLensMatches = broadenLensCoverage,
                         skipVisualEngines = false,
-                        onLog = ::addLog
+                        onLog = { message -> addLog(message) }
                     )
                 } catch (e: Exception) {
                     addLog("⚠ WebView error: ${e.message}")
@@ -571,7 +582,7 @@ class CheckInViewModel(
         )
         return results.asSequence()
             .filter { !it.link.isNullOrBlank() }
-            .filterNot(::isLikelyProductResult)
+            .filterNot { match -> isLikelyProductResult(match) }
             .distinctBy { match -> ThumbnailUtils.canonicalKey(match.thumbnail) ?: match.link }
             .sortedByDescending { match ->
                 val thumbnail = ThumbnailUtils.normalize(match.thumbnail)

@@ -110,9 +110,9 @@ object PublicProfileLeadGenerator {
 
     fun generateWebQueries(profile: IdentityProfile): List<String> {
         val terms = buildList {
-            profile.fullName.trim().takeIf { it.length >= 2 }?.let(::add)
-            splitValues(profile.aliases).filter { it.length >= 2 }.forEach(::add)
-            splitValues(profile.handles).map(::normalizeHandle).filter { it.length >= 2 }.forEach(::add)
+            profile.fullName.trim().takeIf { it.length >= 2 }?.let { value -> add(value) }
+            splitValues(profile.aliases).filter { it.length >= 2 }.forEach { value -> add(value) }
+            splitValues(profile.handles).map { value -> normalizeHandle(value) }.filter { it.length >= 2 }.forEach { value -> add(value) }
         }.distinct().take(MAX_VARIANTS)
 
         return terms.map { term ->
@@ -125,8 +125,8 @@ object PublicProfileLeadGenerator {
 
     private fun generateNameVariants(profile: IdentityProfile): List<String> {
         val seeds = buildList {
-            profile.fullName.trim().takeIf { it.length >= 2 }?.let(::add)
-            splitValues(profile.aliases).filter { it.length >= 2 }.forEach(::add)
+            profile.fullName.trim().takeIf { it.length >= 2 }?.let { value -> add(value) }
+            splitValues(profile.aliases).filter { it.length >= 2 }.forEach { value -> add(value) }
         }
         return seeds.flatMap { seed ->
             val normalized = normalizeHandle(seed)
@@ -144,11 +144,11 @@ object PublicProfileLeadGenerator {
                     add(words.first().first() + words.last())
                 }
             }
-        }.map(::normalizeHandle).filter { it.length >= 2 }.distinct()
+        }.map { value -> normalizeHandle(value) }.filter { it.length >= 2 }.distinct()
     }
 
     private fun splitValues(value: String): List<String> =
-        value.split(',', '\n', ';').map(String::trim).filter(String::isNotBlank)
+        value.split(',', '\n', ';').map { part -> part.trim() }.filter { part -> part.isNotBlank() }
 
     private fun normalizeHandle(value: String): String = value
         .lowercase(Locale.US)

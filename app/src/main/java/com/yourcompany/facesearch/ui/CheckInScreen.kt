@@ -25,12 +25,14 @@ fun CheckInScreen(
     capturedBitmap: Bitmap?,
     uiState: CheckInUiState,
     searchMode: SearchMode,
+    broadenLensCoverage: Boolean,
     sensitivity: Float,
     fullFaceMode: Boolean,
     isSearching: Boolean,
     targetHint: String,
     debugMode: Boolean,
     onTargetHintChange: (String) -> Unit,
+    onBroadenLensCoverageChange: (Boolean) -> Unit,
     onSearchModeChange: (SearchMode) -> Unit,
     onSensitivityChange: (Float) -> Unit,
     onFullFaceModeChange: (Boolean) -> Unit,
@@ -115,6 +117,28 @@ fun CheckInScreen(
                             isEnabled = true
                         )
 
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Broader Lens coverage", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(
+                                "Also request exact-image candidates when a SerpApi key is configured. This uses one additional authorized API request.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.DarkGray
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Switch(
+                            checked = broadenLensCoverage,
+                            onCheckedChange = onBroadenLensCoverageChange
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -247,6 +271,3 @@ fun CheckInScreen(
         }
     }
 }
-
-
-

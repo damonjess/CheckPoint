@@ -78,6 +78,7 @@ class FaceSearchRepository(private val context: Context) {
         imageUrl: String? = null,
         deepCrawl: Boolean = false,
         searchMode: String = "PRECISION",
+        includeExactLensMatches: Boolean = false,
         skipVisualEngines: Boolean = false,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = searchMutex.withLock {
@@ -108,30 +109,43 @@ class FaceSearchRepository(private val context: Context) {
                     val jobs = mutableListOf(
                         async { 
                             val s = WebViewScraper.create(context)
-                            try { s.scrapeYandex(publicUrl).also { allResults.addAll(it) } } 
-                            finally { s.destroy() }
+                            try {
+                                val matches: List<SerpVisualMatch> = s.scrapeYandex(publicUrl)
+                                allResults.addAll(matches)
+                            } finally { s.destroy() }
                         },
                         async { 
                             val s = WebViewScraper.create(context)
-                            try { s.scrapeBing(publicUrl).also { allResults.addAll(it) } } 
-                            finally { s.destroy() }
+                            try {
+                                val matches: List<SerpVisualMatch> = s.scrapeBing(publicUrl)
+                                allResults.addAll(matches)
+                            } finally { s.destroy() }
                         },
                         async { 
                             val s = WebViewScraper.create(context)
-                            try { s.scrapeGoogle(publicUrl).also { allResults.addAll(it) } } 
-                            finally { s.destroy() }
+                            try {
+                                val matches: List<SerpVisualMatch> = s.scrapeGoogle(publicUrl)
+                                allResults.addAll(matches)
+                            } finally { s.destroy() }
                         },
                         async { 
                             val s = WebViewScraper.create(context)
-                            try { s.scrapeBaidu(publicUrl).also { allResults.addAll(it) } } 
-                            finally { s.destroy() }
+                            try {
+                                val matches: List<SerpVisualMatch> = s.scrapeBaidu(publicUrl)
+                                allResults.addAll(matches)
+                            } finally { s.destroy() }
                         }
                     )
                     
                     // Add SerpApi if key is available
                     if (com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
                         jobs.add(async { 
-                            performSerpApiSearch(publicUrl, onLog).also { allResults.addAll(it) }
+                            val matches: List<SerpVisualMatch> = performSerpApiSearch(
+                                publicUrl,
+                                includeExactLensMatches,
+                                onLog
+                            )
+                            allResults.addAll(matches)
                         })
                     }
                     
@@ -354,25 +368,64 @@ class FaceSearchRepository(private val context: Context) {
 
     suspend fun performSerpApiSearch(
         imageUrl: String,
+        includeExactMatches: Boolean = false,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
         val apiKey = com.yourcompany.facesearch.BuildConfig.SERP_API_KEY
         if (apiKey.isBlank()) return@withContext emptyList()
 
-        onLog("Requesting Google Lens via SerpApi...")
+        onLog(if (includeExactMatches) {
+            "Requesting Google Lens visual and exact matches via SerpApi..."
+        } else {
+            "Requesting Google Lens visual matches via SerpApi..."
+        })
+        val api = RetrofitClient.getSerpApi()
         try {
-            val response = RetrofitClient.getSerpApi().googleLensSearch(url = imageUrl, apiKey = apiKey)
-            val results = response.visualMatches?.map {
+            val visualResponse = runCatching {
+                api.googleLensSearch(url = imageUrl, type = "visual_matches", apiKey = apiKey)
+            }.getOrElse { error ->
+                onLog("⚠ Lens visual-match request failed: ${error.message}")
+                null
+            }
+            val exactResponse = if (includeExactMatches) {
+                runCatching {
+                    api.googleLensSearch(url = imageUrl, type = "exact_matches", apiKey = apiKey)
+                }.getOrElse { error ->
+                    onLog("⚠ Lens exact-match request failed: ${error.message}")
+                    null
+                }
+            } else {
+                null
+            }
+
+            val visualMatches = visualResponse?.visualMatches.orEmpty().map { match ->
                 SerpVisualMatch(
-                    title = it.title,
-                    link = it.link,
-                    source = it.source,
-                    thumbnail = it.thumbnail,
-                    score = 800 // High baseline for paid API results
+                    title = match.title,
+                    link = match.link,
+                    source = "Google Lens visual · ${match.source ?: "web"}",
+                    thumbnail = match.thumbnail,
+                    score = 800
                 )
-            } ?: emptyList()
-            
-            onLog("✓ SerpApi found ${results.size} matches")
+            }
+            val exactMatches = (exactResponse?.exactMatches ?: exactResponse?.visualMatches).orEmpty().map { match ->
+                SerpVisualMatch(
+                    title = match.title,
+                    link = match.link,
+                    source = "Google Lens exact · ${match.source ?: "web"}",
+                    thumbnail = match.thumbnail,
+                    score = 1_000
+                )
+            }
+            val results = (exactMatches + visualMatches)
+                .distinctBy { match -> ThumbnailUtils.canonicalKey(match.thumbnail) ?: match.link }
+
+            onLog(
+                if (includeExactMatches) {
+                    "✓ SerpApi found ${visualMatches.size} visual and ${exactMatches.size} exact candidate(s)"
+                } else {
+                    "✓ SerpApi found ${visualMatches.size} visual candidate(s)"
+                }
+            )
             results
         } catch (e: Exception) {
             onLog("⚠ SerpApi error: ${e.message}")
@@ -451,6 +504,3 @@ class FaceSearchRepository(private val context: Context) {
         }
     }
 }
-
-
-

@@ -5,6 +5,9 @@ import com.google.gson.annotations.SerializedName
 data class SerpResponse(
     @SerializedName("visual_matches")
     val visualMatches: List<SerpVisualMatch>? = null,
+
+    @SerializedName("exact_matches")
+    val exactMatches: List<SerpVisualMatch>? = null,
     
     @SerializedName("search_metadata")
     val searchMetadata: SearchMetadata? = null,
@@ -34,6 +37,3 @@ data class SearchMetadata(
     @SerializedName("id")
     val id: String?
 )
-
-
-

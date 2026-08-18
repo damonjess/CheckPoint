@@ -88,12 +88,14 @@ class MainActivity : ComponentActivity() {
                         capturedBitmap = checkInViewModel.capturedBitmap,
                         uiState = checkInViewModel.uiState,
                         searchMode = checkInViewModel.searchMode,
+                        broadenLensCoverage = checkInViewModel.broadenLensCoverage,
                         sensitivity = checkInViewModel.sensitivity,
                         fullFaceMode = checkInViewModel.fullFaceMode,
                         isSearching = checkInViewModel.isSearching,
                         targetHint = checkInViewModel.targetHint,
                         debugMode = checkInViewModel.debugMode,
                         onTargetHintChange = { checkInViewModel.onTargetHintChange(it) },
+                        onBroadenLensCoverageChange = { checkInViewModel.onBroadenLensCoverageChange(it) },
                         onSearchModeChange = { checkInViewModel.searchMode = it },
                         onSensitivityChange = { checkInViewModel.sensitivity = it },
                         onFullFaceModeChange = { checkInViewModel.fullFaceMode = it },
@@ -133,6 +135,3 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 }
-
-
-

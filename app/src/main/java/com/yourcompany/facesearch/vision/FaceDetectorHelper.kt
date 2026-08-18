@@ -61,7 +61,22 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
             .build()
     )
 
-    suspend fun detectAndCropFace(sourceBitmap: Bitmap): FaceDetectionResult {
+    // Used only when the user is capturing their own search photo. It keeps
+    // landmark detection but allows ML Kit to inspect a smaller clear face when
+    // the strict primary detector returns no result.
+    private val captureFallbackDetector = FaceDetection.getClient(
+        FaceDetectorOptions.Builder()
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
+            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
+            .setMinFaceSize(0.05f)
+            .build()
+    )
+
+    suspend fun detectAndCropFace(
+        sourceBitmap: Bitmap,
+        allowCaptureFallback: Boolean = false
+    ): FaceDetectionResult {
         if (sourceBitmap.width < MIN_IMAGE_WIDTH || sourceBitmap.height < MIN_IMAGE_HEIGHT) {
             return FaceDetectionResult.PoorQuality(
                 "Use a photo at least ${MIN_IMAGE_WIDTH}×${MIN_IMAGE_HEIGHT} pixels.",
@@ -71,7 +86,14 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
 
         return try {
             val bitmap = sourceBitmap.asSoftwareBitmap()
-            val faces = detector.process(InputImage.fromBitmap(bitmap, 0)).await()
+            val primaryFaces = detector.process(InputImage.fromBitmap(bitmap, 0)).await()
+            val fallbackFaces = if (allowCaptureFallback && primaryFaces.isEmpty()) {
+                captureFallbackDetector.process(InputImage.fromBitmap(bitmap, 0)).await()
+            } else {
+                emptyList()
+            }
+            val faces = if (primaryFaces.isNotEmpty()) primaryFaces else fallbackFaces
+            val usedFallbackDetector = primaryFaces.isEmpty() && fallbackFaces.isNotEmpty()
 
             when {
                 faces.isEmpty() -> FaceDetectionResult.NoFaceFound
@@ -79,7 +101,12 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
                 else -> {
                     val face = faces.single()
                     val quality = assessQuality(bitmap, face)
-                    val rejection = qualityRejectionReason(quality)
+                    val strictRejection = qualityRejectionReason(quality)
+                    val rejection = if (allowCaptureFallback && (usedFallbackDetector || strictRejection != null)) {
+                        captureFallbackRejectionReason(quality)
+                    } else {
+                        strictRejection
+                    }
                     if (rejection != null) {
                         FaceDetectionResult.PoorQuality(rejection, quality)
                     } else {
@@ -159,6 +186,23 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
             "Keep both eyes open and look at the camera."
         quality.rightEyeOpenProbability != null && quality.rightEyeOpenProbability < MIN_EYE_OPEN_PROBABILITY ->
             "Keep both eyes open and look at the camera."
+        else -> null
+    }
+
+    /**
+     * Capture fallback remains conservative about image usability but does not
+     * reject a single clear self-photo solely for moderate pose, eye, or roll.
+     */
+    private fun captureFallbackRejectionReason(quality: FaceQuality): String? = when {
+        quality.faceWidthPx < MIN_CAPTURE_FALLBACK_FACE_PIXELS ||
+            quality.faceHeightPx < MIN_CAPTURE_FALLBACK_FACE_PIXELS ->
+            "Move a little closer so your face is easier to detect."
+        quality.faceCoverage < MIN_CAPTURE_FALLBACK_FACE_COVERAGE ->
+            "Use a closer photo with your face taking up more of the frame."
+        quality.meanLuminance !in MIN_CAPTURE_FALLBACK_LUMINANCE..MAX_CAPTURE_FALLBACK_LUMINANCE ->
+            "Try a brighter, evenly lit photo."
+        quality.sharpness < MIN_CAPTURE_FALLBACK_SHARPNESS ->
+            "The photo is too blurry. Hold still and try again."
         else -> null
     }
 
@@ -246,13 +290,18 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
 
     private fun emptyQuality() = FaceQuality(0f, 0, 0, 0f, 0f, 0f, 0f, 0f, null, null)
 
-    fun release() = detector.close()
+    fun release() {
+        detector.close()
+        captureFallbackDetector.close()
+    }
 
     private companion object {
         const val MIN_IMAGE_WIDTH = 480
         const val MIN_IMAGE_HEIGHT = 360
         const val MIN_FACE_PIXELS = 100
         const val MIN_FACE_COVERAGE = 0.07f
+        const val MIN_CAPTURE_FALLBACK_FACE_PIXELS = 72
+        const val MIN_CAPTURE_FALLBACK_FACE_COVERAGE = 0.035f
         const val MIN_CANDIDATE_IMAGE_EDGE = 96
         const val MIN_CANDIDATE_FACE_PIXELS = 36
         const val MIN_CANDIDATE_FACE_COVERAGE = 0.025f
@@ -262,6 +311,9 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
         const val MIN_LUMINANCE = 45f
         const val MAX_LUMINANCE = 220f
         const val MIN_SHARPNESS = 35f
+        const val MIN_CAPTURE_FALLBACK_LUMINANCE = 28f
+        const val MAX_CAPTURE_FALLBACK_LUMINANCE = 235f
+        const val MIN_CAPTURE_FALLBACK_SHARPNESS = 12f
         const val MIN_EYE_OPEN_PROBABILITY = 0.35f
         const val SHARPNESS_SAMPLE_SIZE = 128
     }

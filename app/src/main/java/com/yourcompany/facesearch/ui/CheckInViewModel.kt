@@ -115,7 +115,10 @@ class CheckInViewModel(
                 val searchPhoto = normalizeReverseImageProbe(bitmap)
                 LocalServer.stageProbe(searchPhoto, isFaceCrop = false)
 
-                when (val detection = captureDetector.detectAndCropFace(searchPhoto)) {
+                when (val detection = captureDetector.detectAndCropFace(
+                    sourceBitmap = searchPhoto,
+                    allowCaptureFallback = true
+                )) {
                     is FaceDetectionResult.Success -> {
                         val quality = detection.quality
                         addLog(
@@ -137,7 +140,7 @@ class CheckInViewModel(
                     FaceDetectionResult.NoFaceFound -> {
                         Log.e("CheckIn", "No face detected in capture.")
                         uiState = CheckInUiState.NoFaceDetected(
-                            listOf("No face detected. Use even lighting, face the camera, and try again.")
+                            listOf("No clear single face was detected. Try a closer, well-lit photo with your full face visible.")
                         )
                     }
                     is FaceDetectionResult.Error -> {
@@ -844,3 +847,6 @@ class CheckInViewModel(
         nativeFaceCropper.release()
     }
 }
+
+
+

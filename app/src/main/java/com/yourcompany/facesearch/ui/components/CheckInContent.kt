@@ -243,7 +243,11 @@ fun NoFaceContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        ErrorState("No face detected", "Try HYPER or RAW mode if precision fails.", onRetryClick)
+        ErrorState(
+            "No face detected",
+            "Use a closer, well-lit photo with one full face visible. You can also choose a different photo from Gallery.",
+            onRetryClick
+        )
         
         if (logs.isNotEmpty()) {
             Text(
@@ -356,3 +360,6 @@ fun ErrorContent(
         }
     }
 }
+
+
+

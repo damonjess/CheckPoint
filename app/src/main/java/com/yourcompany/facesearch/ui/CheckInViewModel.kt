@@ -36,6 +36,7 @@ import java.io.ByteArrayOutputStream
 import java.util.Locale
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 class CheckInViewModel(
     application: Application
@@ -388,8 +389,36 @@ class CheckInViewModel(
                     .addFormDataPart("file", "face.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
                     .build()
                 val req = okhttp3.Request.Builder().url("http://127.0.0.1:8080/api/v1/face-search").post(body).build()
-                client.newCall(req).execute().use {
-                    addLog("Local image quality analysis completed. Online reverse-image results require an internet connection.")
+                
+                client.newCall(req).execute().use { response ->
+                    val jsonStr = response.body?.string()
+                    if (jsonStr != null) {
+                        val json = JSONObject(jsonStr)
+                        if (json.optBoolean("match_found", false)) {
+                            val name = json.getString("name")
+                            val similarity = json.getDouble("similarity").toFloat()
+                            val id = json.optString("id", "unknown")
+
+                            addLog("✓ Local Database Match: $name (${(similarity * 100).toInt()}%)")
+                            
+                            val localMatch = WebMatchDisplay(
+                                name = name,
+                                source = "Local Database",
+                                profileUrl = "local://$id",
+                                score = VERIFIED_MATCH_BASE_SCORE + (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt(),
+                                isFaceVerified = true,
+                                confidence = 1.0f
+                            )
+                            
+                            uiState = CheckInUiState.Success(
+                                matches = listOf(localMatch),
+                                logs = currentLogs.toList()
+                            )
+                            isSearching = false
+                            return
+                        }
+                    }
+                    addLog("Local analysis complete. No database match found.")
                 }
             } catch (e: Exception) {
                 addLog("⚠ LocalServer offline analysis failed: ${e.message}")
@@ -399,6 +428,7 @@ class CheckInViewModel(
                 message = "Your photo was checked locally, but reverse-image search needs an internet connection.",
                 hasAccessChallenge = false
             )
+            isSearching = false
             return
         }
         coroutineScope {

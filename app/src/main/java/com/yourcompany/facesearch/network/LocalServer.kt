@@ -12,7 +12,9 @@ import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.server.plugins.cors.routing.*
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.util.Log
+import com.yourcompany.facesearch.data.EnrolledFaceStore
 import com.yourcompany.facesearch.vision.FaceDetectionResult
 import com.yourcompany.facesearch.vision.FaceDetectorHelper
 import com.yourcompany.facesearch.vision.FaceEmbedder
@@ -104,13 +106,32 @@ object LocalServer {
     }
 
     private suspend fun performRealFaceAnalysis(imageBytes: ByteArray): Map<String, Any> {
-        // TODO: In future you can expand this for fully local server mode
-        // For now, just return success so the UI doesn't break
-        return mapOf(
-            "match_found" to true,
-            "status" to "real_search_triggered",
-            "message" to "Using main API pipeline instead of local mock"
-        )
+        val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            ?: return mapOf("match_found" to false, "error" to "Invalid image data")
+
+        val detection = faceDetector?.detectAndCropFace(bitmap)
+        if (detection !is FaceDetectionResult.Success) {
+            return mapOf("match_found" to false, "error" to "No face detected in probe")
+        }
+
+        val embedding = faceEmbedder?.getEmbedding(detection.croppedFace)
+            ?: return mapOf("match_found" to false, "error" to "Failed to generate embedding")
+
+        val enrolledFaces = EnrolledFaceStore.getAll(appContext)
+        val bestMatch = FaceMatcher.findBestMatch(embedding, enrolledFaces)
+
+        return if (bestMatch != null) {
+            Log.e("LocalServer", "✓ Local Match Found: ${bestMatch.face.name} (${bestMatch.similarity})")
+            mapOf(
+                "match_found" to true,
+                "name" to bestMatch.face.name,
+                "similarity" to bestMatch.similarity,
+                "id" to bestMatch.face.id
+            )
+        } else {
+            Log.e("LocalServer", "✗ No local match found in database")
+            mapOf("match_found" to false, "message" to "No local database match found")
+        }
     }
 
     fun stop() {

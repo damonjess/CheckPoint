@@ -89,3 +89,6 @@ class FaceEmbedder(private val context: Context) {
         compiledModel.close()
     }
 }
+
+
+

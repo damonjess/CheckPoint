@@ -44,6 +44,9 @@ class CheckInViewModel(
         const val MAX_CANDIDATES_TO_VERIFY = 24
         const val VERIFIED_MATCH_BASE_SCORE = 5_000
         const val VERIFIED_MATCH_SIMILARITY_WEIGHT = 1_000
+        const val LIKELY_MATCH_BASE_SCORE = 3_000
+        const val LIKELY_MATCH_SIMILARITY_WEIGHT = 1_000
+        const val LIKELY_MATCH_THRESHOLD = 0.58f
     }
 
     var isSearching by mutableStateOf(false)
@@ -68,6 +71,7 @@ class CheckInViewModel(
     var fullFaceMode by mutableStateOf(false)
 
     private val currentLogs = mutableListOf<String>()
+    private var latestSourceEmbedding: FloatArray? = null
 
     private fun addLog(msg: String) {
         currentLogs.add(msg)
@@ -173,18 +177,57 @@ class CheckInViewModel(
                     faceSearchRepository.extractMetadataThumbnail(match.profileUrl)
                 }
 
+                val highResBitmap = highResUrl?.let { loadThumbnailBitmap(it) }
+                val highResSimilarity = if (
+                    highResBitmap != null &&
+                    latestSourceEmbedding != null &&
+                    captureDetector.hasSingleCandidateFace(highResBitmap)
+                ) {
+                    faceVerifier.calculateSimilarity(highResBitmap, latestSourceEmbedding)
+                } else {
+                    null
+                }
+
                 val finalState = uiState
                 if (finalState is CheckInUiState.Success) {
                     uiState = finalState.copy(
                         matches = finalState.matches.map { m ->
                             if (m.profileUrl == match.profileUrl) {
-                                m.copy(
-                                    imageUrl = highResUrl ?: m.imageUrl,
-                                    isHighResLoading = false
-                                )
+                                when {
+                                    highResSimilarity != null && highResSimilarity >= FaceVerifier.VERIFICATION_THRESHOLD -> {
+                                        m.copy(
+                                            imageUrl = highResUrl ?: m.imageUrl,
+                                            score = VERIFIED_MATCH_BASE_SCORE + (highResSimilarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt(),
+                                            confidence = calculateConfidence(VERIFIED_MATCH_BASE_SCORE + (highResSimilarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt()),
+                                            isFaceVerified = true,
+                                            isLikelyFaceMatch = false,
+                                            isHighResLoading = false
+                                        )
+                                    }
+                                    highResSimilarity != null && highResSimilarity >= LIKELY_MATCH_THRESHOLD -> {
+                                        m.copy(
+                                            imageUrl = highResUrl ?: m.imageUrl,
+                                            score = LIKELY_MATCH_BASE_SCORE + (highResSimilarity * LIKELY_MATCH_SIMILARITY_WEIGHT).toInt(),
+                                            confidence = calculatePossibleConfidence(LIKELY_MATCH_BASE_SCORE + (highResSimilarity * LIKELY_MATCH_SIMILARITY_WEIGHT).toInt()),
+                                            isFaceVerified = false,
+                                            isLikelyFaceMatch = true,
+                                            isHighResLoading = false
+                                        )
+                                    }
+                                    else -> m.copy(
+                                        imageUrl = highResUrl ?: m.imageUrl,
+                                        isHighResLoading = false
+                                    )
+                                }
                             } else m
                         }
                     )
+                    when {
+                        highResSimilarity != null && highResSimilarity >= FaceVerifier.VERIFICATION_THRESHOLD ->
+                            addLog("High-resolution recheck promoted one candidate to a locally verified match.")
+                        highResSimilarity != null && highResSimilarity >= LIKELY_MATCH_THRESHOLD ->
+                            addLog("High-resolution recheck found a possible face match. Manual review is still required.")
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("CheckIn", "Manual extraction failed", e)
@@ -415,8 +458,21 @@ class CheckInViewModel(
                         addLog("${blocked.joinToString()} requested an access challenge. Use the in-app 'Open in Lens' action if you choose to continue manually.")
                     }
                     
-                    if (response.matches != null) {
-                        val newMatches = response.matches.map {
+                    if (total == 0) {
+                        addLog("Termux returned no usable candidates; switching to the in-app visual-search flow.")
+                        val webResults = try {
+                            webDeferred.await()
+                        } catch (_: kotlinx.coroutines.CancellationException) {
+                            emptyList<SerpVisualMatch>()
+                        }
+                        if (webResults.isNotEmpty()) {
+                            allRawResults.addAll(webResults)
+                        }
+                        return@coroutineScope
+                    }
+
+                    response.matches?.let { matches ->
+                        val newMatches = matches.map {
                             SerpVisualMatch(title = it.title, link = it.link, source = it.source, thumbnail = it.thumbnail, score = it.score)
                         }
                         allRawResults.addAll(newMatches)
@@ -454,13 +510,14 @@ class CheckInViewModel(
         addLog("Checking ${candidates.size} best visual candidate(s) for a visible face…")
         val review = reviewCandidates(candidates, faceBitmap)
         val verifiedMatches = review.verifiedMatches
+        val likelyMatches = review.likelyMatches
         val unverifiedLeads = review.faceBearingLeads
 
         if (review.excludedNoFace > 0) {
             addLog("Excluded ${review.excludedNoFace} product, body-only, group, or no-face thumbnail(s).")
         }
 
-        if (verifiedMatches.isEmpty() && unverifiedLeads.isEmpty()) {
+        if (verifiedMatches.isEmpty() && likelyMatches.isEmpty() && unverifiedLeads.isEmpty()) {
             addLog("No candidate with one visible face remained after local filtering.")
             uiState = CheckInUiState.NoMatch(
                 logs = currentLogs.toList(),
@@ -470,14 +527,14 @@ class CheckInViewModel(
             return
         }
 
-        if (verifiedMatches.isEmpty()) {
-            addLog("No locally verified face match was found. Showing ${unverifiedLeads.size} face-bearing visual lead(s).")
+        if (verifiedMatches.isEmpty() && likelyMatches.isEmpty()) {
+            addLog("No locally verified or possible face match was found. Showing ${unverifiedLeads.size} face-bearing visual lead(s).")
             updateResultsLive(unverifiedLeads)
             return
         }
 
-        updateResultsLive(verifiedMatches + unverifiedLeads)
-        addLog("Showing ${verifiedMatches.size} locally verified match(es) and ${unverifiedLeads.size} face-bearing visual lead(s).")
+        updateResultsLive(verifiedMatches + likelyMatches + unverifiedLeads)
+        addLog("Showing ${verifiedMatches.size} verified, ${likelyMatches.size} possible face match(es), and ${unverifiedLeads.size} face-bearing visual lead(s).")
     }
 
     private fun updateResultsLive(newResults: List<SerpVisualMatch>) {
@@ -515,7 +572,7 @@ class CheckInViewModel(
         return results.asSequence()
             .filter { !it.link.isNullOrBlank() }
             .filterNot(::isLikelyProductResult)
-            .distinctBy { it.link }
+            .distinctBy { match -> ThumbnailUtils.canonicalKey(match.thumbnail) ?: match.link }
             .sortedByDescending { match ->
                 val thumbnail = ThumbnailUtils.normalize(match.thumbnail)
                 val hasUsableThumbnail = thumbnail != null &&
@@ -594,8 +651,13 @@ class CheckInViewModel(
             !thumb.contains("preview") && 
             thumb.length > 20
 
-        val isVerified = match.score > 5000
-        val sourceLabel = if (isVerified) "✓ ${match.source}" else match.source
+        val isVerified = match.score >= VERIFIED_MATCH_BASE_SCORE
+        val isLikely = !isVerified && match.score >= LIKELY_MATCH_BASE_SCORE
+        val sourceLabel = when {
+            isVerified -> "✓ ${match.source}"
+            isLikely -> "≈ ${match.source}"
+            else -> match.source
+        }
 
         return WebMatchDisplay(
             name = cleanTitle,
@@ -604,11 +666,20 @@ class CheckInViewModel(
             score = match.score,
             imageUrl = thumb,
             isSocial = isSocial,
-            confidence = if (isVerified) calculateConfidence(match.score) else 0f,
+            confidence = when {
+                isVerified -> calculateConfidence(match.score)
+                isLikely -> calculatePossibleConfidence(match.score)
+                else -> 0f
+            },
             isFaceVerified = isVerified,
-            isHighResLoading = isVerified && !hasGoodThumbnail && isSocial
+            isLikelyFaceMatch = isLikely,
+            isHighResLoading = (isVerified || isLikely) && !hasGoodThumbnail && isSocial
         )
     }
+
+    private fun calculatePossibleConfidence(score: Int): Float =
+        (0.45f + ((score - LIKELY_MATCH_BASE_SCORE) / LIKELY_MATCH_SIMILARITY_WEIGHT.toFloat()) * 0.18f)
+            .coerceIn(0.45f, 0.63f)
 
     private fun calculateConfidence(score: Int): Float {
         return when {
@@ -622,6 +693,7 @@ class CheckInViewModel(
 
     private data class CandidateReview(
         val verifiedMatches: List<SerpVisualMatch>,
+        val likelyMatches: List<SerpVisualMatch>,
         val faceBearingLeads: List<SerpVisualMatch>,
         val excludedNoFace: Int
     )
@@ -638,8 +710,10 @@ class CheckInViewModel(
         sourceFaceBitmap: Bitmap
     ): CandidateReview {
         val sourceEmbedding = faceEmbedder.getEmbedding(sourceFaceBitmap)
-            ?: return CandidateReview(emptyList(), emptyList(), results.size)
+            ?: return CandidateReview(emptyList(), emptyList(), emptyList(), results.size)
+        latestSourceEmbedding = sourceEmbedding
         val verified = mutableListOf<SerpVisualMatch>()
+        val likely = mutableListOf<SerpVisualMatch>()
         val faceBearingLeads = mutableListOf<SerpVisualMatch>()
         var excludedNoFace = 0
 
@@ -658,14 +732,21 @@ class CheckInViewModel(
                 }
 
                 val faceBearingMatch = match.copy(thumbnail = thumbnailUrl)
-                val similarity = faceVerifier.verifyFaceMatch(thumbnail, sourceEmbedding)
-                if (similarity != null) {
-                    verified += faceBearingMatch.copy(
-                        score = VERIFIED_MATCH_BASE_SCORE +
-                            (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt()
-                    )
-                } else {
-                    faceBearingLeads += faceBearingMatch
+                val similarity = faceVerifier.calculateSimilarity(thumbnail, sourceEmbedding)
+                when {
+                    similarity != null && similarity >= FaceVerifier.VERIFICATION_THRESHOLD -> {
+                        verified += faceBearingMatch.copy(
+                            score = VERIFIED_MATCH_BASE_SCORE +
+                                (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt()
+                        )
+                    }
+                    similarity != null && similarity >= LIKELY_MATCH_THRESHOLD -> {
+                        likely += faceBearingMatch.copy(
+                            score = LIKELY_MATCH_BASE_SCORE +
+                                (similarity * LIKELY_MATCH_SIMILARITY_WEIGHT).toInt()
+                        )
+                    }
+                    else -> faceBearingLeads += faceBearingMatch
                 }
             } catch (error: Exception) {
                 excludedNoFace++
@@ -674,6 +755,7 @@ class CheckInViewModel(
         }
         return CandidateReview(
             verifiedMatches = verified.sortedByDescending { it.score },
+            likelyMatches = likely.sortedByDescending { it.score },
             faceBearingLeads = faceBearingLeads.sortedByDescending { it.score },
             excludedNoFace = excludedNoFace
         )

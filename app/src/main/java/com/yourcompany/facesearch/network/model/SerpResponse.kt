@@ -34,3 +34,6 @@ data class SearchMetadata(
     @SerializedName("id")
     val id: String?
 )
+
+
+

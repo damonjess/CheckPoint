@@ -63,3 +63,5 @@ object EnrolledFaceStore {
         File(context.filesDir, FILE_NAME).writeText(gson.toJson(faces))
     }
 }
+
+

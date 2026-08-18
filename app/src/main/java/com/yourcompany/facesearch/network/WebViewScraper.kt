@@ -368,3 +368,6 @@ class WebViewScraper private constructor(
         handler.post { webView.destroy() }
     }
 }
+
+
+

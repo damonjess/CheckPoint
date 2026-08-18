@@ -105,8 +105,12 @@ fun SuccessContent(
         uiState.matches.filter { it.isFaceVerified }
             .sortedByDescending { it.score }
     }
+    val likelyMatches = remember(uiState.matches) {
+        uiState.matches.filter { it.isLikelyFaceMatch && !it.isFaceVerified }
+            .sortedByDescending { it.score }
+    }
     val visualLeads = remember(uiState.matches) {
-        uiState.matches.filterNot { it.isFaceVerified }
+        uiState.matches.filterNot { it.isFaceVerified || it.isLikelyFaceMatch }
             .sortedWith(compareByDescending<WebMatchDisplay> { it.isSocial }.thenByDescending { it.score })
     }
 
@@ -117,7 +121,11 @@ fun SuccessContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (verifiedMatches.isNotEmpty()) "face-verified matches" else "visual leads",
+                text = when {
+                    verifiedMatches.isNotEmpty() -> "face-verified matches"
+                    likelyMatches.isNotEmpty() -> "possible face matches"
+                    else -> "visual leads"
+                },
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp,
                 color = Color.Black
@@ -125,7 +133,11 @@ fun SuccessContent(
 
             IconButton(onClick = {
                 val summary = uiState.matches.take(10).joinToString("\n\n") {
-                    "${if (it.isFaceVerified) "Verified face match" else "Unverified visual lead"}: ${it.displayName} (${it.source})\n${it.profileUrl}"
+                    "${when {
+                        it.isFaceVerified -> "Verified face match"
+                        it.isLikelyFaceMatch -> "Possible face match — review manually"
+                        else -> "Unverified visual lead"
+                    }}: ${it.displayName} (${it.source})\n${it.profileUrl}"
                 }
                 val sendIntent = Intent().apply {
                     action = Intent.ACTION_SEND
@@ -152,8 +164,34 @@ fun SuccessContent(
             }
         }
 
-        if (visualLeads.isNotEmpty()) {
+        if (likelyMatches.isNotEmpty()) {
             if (verifiedMatches.isNotEmpty()) Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "POSSIBLE FACE MATCHES — REVIEW MANUALLY",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = Amber
+            )
+            Text(
+                text = "These candidates have local face similarity below the confirmation threshold. They are not confirmed matches.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.DarkGray
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            likelyMatches.forEach { match ->
+                MatchCard(
+                    match = match,
+                    isPrimary = false,
+                    debugMode = debugMode,
+                    onLoadHighRes = { onLoadHighRes(match) },
+                    onClick = { onMatchClick(match) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+
+        if (visualLeads.isNotEmpty()) {
+            if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty()) Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "UNVERIFIED VISUAL LEADS",
                 style = MaterialTheme.typography.labelSmall,

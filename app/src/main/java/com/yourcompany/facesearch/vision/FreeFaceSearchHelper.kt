@@ -80,3 +80,6 @@ class FreeFaceSearchHelper(private val context: Context) {
         return FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
     }
 }
+
+
+

@@ -27,3 +27,6 @@ data class Match(
     val isSocial: Boolean,
     val score: Int
 )
+
+
+

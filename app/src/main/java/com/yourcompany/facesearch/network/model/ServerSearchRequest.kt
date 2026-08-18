@@ -8,3 +8,6 @@ data class ServerSearchRequest(
     val localFaceUrl: String? = null,
     val searchTarget: String? = null
 )
+
+
+

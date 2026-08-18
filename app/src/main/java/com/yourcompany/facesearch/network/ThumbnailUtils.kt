@@ -16,6 +16,32 @@ object ThumbnailUtils {
         return null
     }
 
+    /**
+     * Produces a stable key for common image-CDN resize/cache variants. This is
+     * used only for local result deduplication; it never changes the URL opened
+     * by the user.
+     */
+    fun canonicalKey(raw: String?): String? {
+        val normalized = normalize(raw) ?: return null
+        if (normalized.startsWith("data:image")) return normalized.take(96)
+        return try {
+            val uri = android.net.Uri.parse(normalized)
+            val retained = uri.queryParameterNames
+                .filterNot { name -> name.lowercase() in setOf("w", "h", "width", "height", "q", "quality", "fit", "crop", "format", "fm", "auto", "cache", "cb") }
+                .sorted()
+                .joinToString("&") { name -> "$name=${uri.getQueryParameter(name).orEmpty()}" }
+            buildString {
+                append(uri.scheme?.lowercase().orEmpty())
+                append("://")
+                append(uri.host?.lowercase().orEmpty())
+                append(uri.path.orEmpty().trimEnd('/'))
+                if (retained.isNotBlank()) append('?').append(retained)
+            }
+        } catch (_: Exception) {
+            normalized.substringBefore('?').trimEnd('/')
+        }
+    }
+
     private fun isNoise(url: String): Boolean {
         val lower = url.lowercase()
         val noise = listOf(

@@ -22,3 +22,7 @@ sealed class CheckInUiState {
     ) : CheckInUiState()
     data class Error(val message: String, val logs: List<String> = emptyList()) : CheckInUiState()
 }
+
+
+
+

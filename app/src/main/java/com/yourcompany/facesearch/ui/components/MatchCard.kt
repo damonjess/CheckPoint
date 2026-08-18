@@ -145,8 +145,12 @@ private fun PrimaryMatchContent(
             Column(horizontalAlignment = Alignment.End) {
                 val confidenceInt = (match.confidence * 100).toInt()
                 Text(
-                    text = if (confidenceInt >= 99) "100% match" else "$confidenceInt% match",
-                    color = if (confidenceInt >= 90) Color(0xFF2E7D32) else Color(0xFFF57F17),
+                    text = when {
+                        match.isFaceVerified -> if (confidenceInt >= 99) "100% match" else "$confidenceInt% match"
+                        match.isLikelyFaceMatch -> "Possible match"
+                        else -> "Visual lead"
+                    },
+                    color = if (match.isFaceVerified && confidenceInt >= 90) Color(0xFF2E7D32) else Color(0xFFF57F17),
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = (-0.5).sp
@@ -336,7 +340,11 @@ private fun SecondaryMatchContent(
                     modifier = Modifier.align(Alignment.TopEnd)
                 ) {
                     Text(
-                        text = if (match.isFaceVerified) "${(match.confidence * 100).toInt()}%" else "LEAD",
+                        text = when {
+                            match.isFaceVerified -> "${(match.confidence * 100).toInt()}%"
+                            match.isLikelyFaceMatch -> "POSSIBLE"
+                            else -> "LEAD"
+                        },
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Black,
@@ -387,7 +395,11 @@ private fun SecondaryMatchContent(
 
             if (!match.isFaceVerified) {
                 Text(
-                    text = "Visual-search lead — not locally face verified",
+                    text = if (match.isLikelyFaceMatch) {
+                        "Possible face match — review manually; it did not meet the confirmation threshold"
+                    } else {
+                        "Visual-search lead — not locally face verified"
+                    },
                     fontSize = 10.sp,
                     color = Amber,
                     fontWeight = FontWeight.Medium

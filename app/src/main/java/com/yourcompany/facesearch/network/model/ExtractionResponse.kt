@@ -5,3 +5,6 @@ data class ExtractionResponse(
     val highResUrl: String? = null,
     val error: String? = null
 )
+
+
+

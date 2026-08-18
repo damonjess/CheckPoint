@@ -29,33 +29,28 @@ class FaceVerifier(context: Context) {
     suspend fun verifyFaceMatch(
         searchResultBitmap: Bitmap,
         sourceEmbedding: FloatArray?
+    ): Float? = calculateSimilarity(searchResultBitmap, sourceEmbedding)
+        ?.takeIf { it >= VERIFICATION_THRESHOLD }
+
+    /**
+     * Returns the raw embedding similarity for an already face-bearing result.
+     * Callers must keep the conservative [VERIFICATION_THRESHOLD] for confirmed
+     * matches; lower values are suitable only for visibly labelled review leads.
+     */
+    suspend fun calculateSimilarity(
+        searchResultBitmap: Bitmap,
+        sourceEmbedding: FloatArray?
     ): Float? {
         if (sourceEmbedding == null) return null
-        
+
         return withContext(Dispatchers.Default) {
             try {
-                // FIX 1: Convert hardware bitmap to software bitmap
                 val safeBitmap = ensureSoftwareBitmap(searchResultBitmap)
-                
-                // 1. Detect and extract face from search result
                 val resultFace = faceCropper.getTightFaceCrop(safeBitmap) ?: return@withContext null
-                
-                // 2. Generate embedding for result
                 val resultEmbedding = faceEmbedder.getEmbedding(resultFace)
-                
-                // 3. Compare embeddings
-                val similarity = if (resultEmbedding != null) {
-                    FaceMatcherExt.cosineSimilarity(sourceEmbedding, resultEmbedding)
-                } else {
-                    null
-                }
-                
-                // FIX 2: DON'T recycle manually - let GC handle it
-                // if (resultFace != safeBitmap) { resultFace.recycle() } // REMOVED
-                
-                similarity?.takeIf { it >= VERIFICATION_THRESHOLD }
+                resultEmbedding?.let { FaceMatcherExt.cosineSimilarity(sourceEmbedding, it) }
             } catch (e: Exception) {
-                android.util.Log.e("FaceVerifier", "Error verifying face: ${e.message}")
+                android.util.Log.e("FaceVerifier", "Error comparing face: ${e.message}")
                 null
             }
         }
@@ -104,6 +99,3 @@ object FaceMatcherExt {
         return dot / denom
     }
 }
-
-
-

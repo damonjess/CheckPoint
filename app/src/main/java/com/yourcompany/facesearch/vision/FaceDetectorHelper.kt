@@ -225,7 +225,7 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
         }
         if (values.isEmpty()) return 0f
         val mean = values.average().toFloat()
-        return values.fold(0f) { acc, it -> acc + (it - mean) * (it - mean) } / values.size
+        return values.sumOf { ((it - mean) * (it - mean)).toDouble() }.toFloat() / values.size
     }
 
     private fun luminance(pixel: Int): Float =

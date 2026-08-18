@@ -199,3 +199,6 @@ private fun SearchMode.getIcon(): ImageVector = when (this) {
     SearchMode.FREE -> Icons.Default.FilterCenterFocus
     SearchMode.DEEP_CRAWL -> Icons.Default.Public
 }
+
+
+

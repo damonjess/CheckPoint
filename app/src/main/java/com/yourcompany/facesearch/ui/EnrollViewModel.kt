@@ -84,3 +84,5 @@ class EnrollViewModel(application: Application) : AndroidViewModel(application) 
         faceEmbedder.close()
     }
 }
+
+

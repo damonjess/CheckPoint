@@ -29,3 +29,6 @@ object AdultSiteConfig {
         else -> domain.substringBefore('.').replaceFirstChar { it.uppercase() }
     }
 }
+
+
+

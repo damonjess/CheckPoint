@@ -240,6 +240,7 @@ app.get('/api/ping', (_request, response) => {
     runtime: isTermux() ? 'termux' : 'desktop',
     chromiumPath: getChromiumPath() || '',
     sequentialEngines: String(isTermux()),
+    termuxBrowserAutomation: isTermux() ? 'disabled' : 'enabled',
     cloudBrowser: 'disabled'
   });
 });
@@ -252,6 +253,31 @@ app.post('/api/search', async (request, response) => {
   }
   if (/localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(imageUrl)) {
     return response.status(400).json({ success: false, error: 'The image must be hosted at a public URL before reverse-image search.' });
+  }
+
+  // Mobile browser automation is intentionally disabled on Termux. Search
+  // providers consistently challenge headless Android Chromium, which makes the
+  // helper slower and less reliable than the app's own permitted visual-search
+  // path. Returning an explicit empty result lets the Android client fall back
+  // immediately without retrying Google Lens or cycling a ten-minute cooldown.
+  if (isTermux()) {
+    console.log('Termux browser engines are disabled; the Android app will use its in-app visual-search fallback.');
+    return response.json({
+      success: true,
+      matches: [],
+      meta: {
+        engines: {
+          'Termux browser engines': {
+            count: 0,
+            ms: 0,
+            error: 'Disabled on Termux to avoid access challenges; use the in-app fallback.'
+          }
+        },
+        blockedEngines: [],
+        totalMs: Date.now() - startedAt,
+        fallbackRecommended: true
+      }
+    });
   }
 
   const connectivity = await checkConnectivity();

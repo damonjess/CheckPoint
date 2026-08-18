@@ -21,10 +21,12 @@ import com.yourcompany.facesearch.network.LocalServer
 import com.yourcompany.facesearch.ui.CameraCaptureScreen
 import com.yourcompany.facesearch.ui.CheckInScreen
 import com.yourcompany.facesearch.ui.CheckInViewModel
+import com.yourcompany.facesearch.ui.ProfileDiscoveryScreen
+import com.yourcompany.facesearch.ui.ProfileDiscoveryViewModel
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-private enum class Screen { SEARCH, CAMERA }
+private enum class Screen { SEARCH, CAMERA, PROFILES }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +60,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 val checkInViewModel: CheckInViewModel = viewModel()
+                val profileDiscoveryViewModel: ProfileDiscoveryViewModel = viewModel()
                 var screen by remember { mutableStateOf(Screen.SEARCH) }
 
                 val galleryLauncher = rememberLauncherForActivityResult(
@@ -96,6 +99,7 @@ class MainActivity : ComponentActivity() {
                         onFullFaceModeChange = { checkInViewModel.fullFaceMode = it },
                         onDebugModeChange = { checkInViewModel.debugMode = it },
                         onCapturePhotoClick = { screen = Screen.CAMERA },
+                        onProfileDiscoveryClick = { screen = Screen.PROFILES },
                         onSelectGalleryClick = {
                             galleryLauncher.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -114,6 +118,11 @@ class MainActivity : ComponentActivity() {
                         },
                         onCancel = { screen = Screen.SEARCH }
                     )
+
+                    Screen.PROFILES -> ProfileDiscoveryScreen(
+                        viewModel = profileDiscoveryViewModel,
+                        onBack = { screen = Screen.SEARCH }
+                    )
                 }
             }
         }
@@ -124,3 +133,6 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 }
+
+
+

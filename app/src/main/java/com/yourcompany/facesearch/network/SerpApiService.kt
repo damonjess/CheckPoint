@@ -12,3 +12,6 @@ interface SerpApiService {
         @Query("api_key") apiKey: String
     ): SerpResponse
 }
+
+
+

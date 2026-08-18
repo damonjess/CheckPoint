@@ -12,6 +12,8 @@ data class WebMatchDisplay(
     val isSocial: Boolean = false,
     val confidence: Float = 0f,
     val isFaceVerified: Boolean = false,
+    val isLikelyFaceMatch: Boolean = false,
+    val duplicateCount: Int = 1,
     val isHighResLoading: Boolean = false
 ) {
     val displayName: String by lazy {

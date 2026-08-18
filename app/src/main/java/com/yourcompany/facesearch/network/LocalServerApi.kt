@@ -26,3 +26,6 @@ interface LocalServerApi {
     @GET("api/ping")
     suspend fun ping(): Map<String, String>
 }
+
+
+

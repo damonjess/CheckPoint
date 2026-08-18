@@ -278,3 +278,6 @@ private fun capturePhoto(
         }
     )
 }
+
+
+

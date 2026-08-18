@@ -162,3 +162,5 @@ private fun EnrolledPersonRow(person: EnrolledFace, onDelete: () -> Unit) {
         }
     }
 }
+
+

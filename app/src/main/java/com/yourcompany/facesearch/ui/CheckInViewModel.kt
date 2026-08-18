@@ -30,6 +30,7 @@ import com.yourcompany.facesearch.vision.FaceVerifier
 import com.yourcompany.facesearch.vision.FreeFaceSearchHelper
 import com.yourcompany.facesearch.vision.NativeFaceCropper
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.withPermit
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.Locale
@@ -41,7 +42,7 @@ class CheckInViewModel(
 ) : AndroidViewModel(application) {
 
     private companion object {
-        const val MAX_CANDIDATES_TO_VERIFY = 40
+        const val MAX_CANDIDATES_TO_VERIFY = 250
         const val VERIFIED_MATCH_BASE_SCORE = 5_000
         const val VERIFIED_MATCH_SIMILARITY_WEIGHT = 1_000
         const val LIKELY_MATCH_BASE_SCORE = 3_000
@@ -580,10 +581,9 @@ class CheckInViewModel(
     }
 
     private fun isLikelyProductResult(match: SerpVisualMatch): Boolean {
+        // Significantly relaxed for "massive" search expansion
         val productTerms = listOf(
-            "shirt", "t-shirt", "tshirt", "tee", "clothing", "apparel", "menswear",
-            "womenswear", "outfit", "size", "fabric", "shop", "store", "product", "buy",
-            "sale", "amazon", "ebay", "etsy", "walmart", "shopify"
+            "shop", "store", "product", "buy", "sale", "amazon", "ebay", "etsy", "walmart", "shopify"
         )
         val junkTerms = listOf(
             "watch?v=", "shorts/", "video", "subscribe", "playlist", "trending"
@@ -709,56 +709,65 @@ class CheckInViewModel(
     private suspend fun reviewCandidates(
         results: List<SerpVisualMatch>,
         sourceFaceBitmap: Bitmap
-    ): CandidateReview {
+    ): CandidateReview = coroutineScope {
         val sourceEmbedding = faceEmbedder.getEmbedding(sourceFaceBitmap)
-            ?: return CandidateReview(emptyList(), emptyList(), emptyList(), results.size)
+            ?: return@coroutineScope CandidateReview(emptyList(), emptyList(), emptyList(), results.size)
         latestSourceEmbedding = sourceEmbedding
-        val verified = mutableListOf<SerpVisualMatch>()
-        val likely = mutableListOf<SerpVisualMatch>()
-        val faceBearingLeads = mutableListOf<SerpVisualMatch>()
-        var excludedNoFace = 0
+        
+        val verified = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
+        val likely = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
+        val faceBearingLeads = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
+        val excludedCounter = java.util.concurrent.atomic.AtomicInteger(0)
 
-        for (match in results) {
-            try {
-                val thumbnailUrl = match.thumbnail
-                    ?: match.link?.let { faceSearchRepository.extractMetadataThumbnail(it) }
-                if (thumbnailUrl == null) {
-                    excludedNoFace++
-                    continue
-                }
-                val thumbnail = loadThumbnailBitmap(thumbnailUrl)
-                if (thumbnail == null || !captureDetector.hasSingleCandidateFace(thumbnail)) {
-                    excludedNoFace++
-                    continue
-                }
+        // Limit parallelism to avoid overwhelming the device (ML Kit/Embedder)
+        val semaphore = kotlinx.coroutines.sync.Semaphore(8)
 
-                val faceBearingMatch = match.copy(thumbnail = thumbnailUrl)
-                val similarity = faceVerifier.calculateSimilarity(thumbnail, sourceEmbedding)
-                when {
-                    similarity != null && similarity >= FaceVerifier.VERIFICATION_THRESHOLD -> {
-                        verified += faceBearingMatch.copy(
-                            score = VERIFIED_MATCH_BASE_SCORE +
-                                (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt()
-                        )
+        results.map { match ->
+            async {
+                semaphore.withPermit {
+                    try {
+                        val thumbnailUrl = match.thumbnail
+                            ?: if (match.link != null) faceSearchRepository.extractMetadataThumbnail(match.link) else null
+                        
+                        if (thumbnailUrl == null) {
+                            excludedCounter.incrementAndGet()
+                        } else {
+                            val thumbnail = loadThumbnailBitmap(thumbnailUrl)
+                            if (thumbnail == null || !captureDetector.hasSingleCandidateFace(thumbnail)) {
+                                excludedCounter.incrementAndGet()
+                            } else {
+                                val faceBearingMatch = match.copy(thumbnail = thumbnailUrl)
+                                val similarity = faceVerifier.calculateSimilarity(thumbnail, sourceEmbedding)
+                                when {
+                                    similarity != null && similarity >= FaceVerifier.VERIFICATION_THRESHOLD -> {
+                                        verified += faceBearingMatch.copy(
+                                            score = VERIFIED_MATCH_BASE_SCORE +
+                                                (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt()
+                                        )
+                                    }
+                                    similarity != null && similarity >= LIKELY_MATCH_THRESHOLD -> {
+                                        likely += faceBearingMatch.copy(
+                                            score = LIKELY_MATCH_BASE_SCORE +
+                                                (similarity * LIKELY_MATCH_SIMILARITY_WEIGHT).toInt()
+                                        )
+                                    }
+                                    else -> faceBearingLeads += faceBearingMatch
+                                }
+                            }
+                        }
+                    } catch (error: Exception) {
+                        excludedCounter.incrementAndGet()
+                        Log.w("CheckIn", "Candidate review failed for ${match.link}", error)
                     }
-                    similarity != null && similarity >= LIKELY_MATCH_THRESHOLD -> {
-                        likely += faceBearingMatch.copy(
-                            score = LIKELY_MATCH_BASE_SCORE +
-                                (similarity * LIKELY_MATCH_SIMILARITY_WEIGHT).toInt()
-                        )
-                    }
-                    else -> faceBearingLeads += faceBearingMatch
                 }
-            } catch (error: Exception) {
-                excludedNoFace++
-                Log.w("CheckIn", "Candidate review failed for ${match.link}", error)
             }
-        }
-        return CandidateReview(
+        }.awaitAll()
+
+        CandidateReview(
             verifiedMatches = verified.sortedByDescending { it.score },
             likelyMatches = likely.sortedByDescending { it.score },
             faceBearingLeads = faceBearingLeads.sortedByDescending { it.score },
-            excludedNoFace = excludedNoFace
+            excludedNoFace = excludedCounter.get()
         )
     }
     private fun extractExifHints(bitmap: Bitmap): String {

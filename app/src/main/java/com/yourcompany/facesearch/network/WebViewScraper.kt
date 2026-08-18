@@ -310,8 +310,8 @@ class WebViewScraper private constructor(
         suspendCancellableCoroutine { continuation ->
             val accumulated = linkedMapOf<String, SerpVisualMatch>()
             var passesDone = 0
-            val totalPasses = 2
-            val maxTimeout = 40000L
+            val totalPasses = 4
+            val maxTimeout = 60000L
 
             val timeoutRunnable = Runnable {
                 if (continuation.isActive) continuation.resume(accumulated.values.toList())
@@ -354,10 +354,25 @@ class WebViewScraper private constructor(
                 override fun onPageFinished(view: WebView?, url: String?) {
                     val random = java.util.Random()
                     val jitter1 = delayMs + random.nextInt(2000)
-                    val jitter2 = jitter1 + 4000 + random.nextInt(3000)
+                    val jitter2 = jitter1 + 3000 + random.nextInt(2000)
+                    val jitter3 = jitter2 + 4000 + random.nextInt(2000)
+                    val jitter4 = jitter3 + 5000 + random.nextInt(2000)
                     
-                    handler.postDelayed({ view?.evaluateJavascript(extractJs, null) }, jitter1)
-                    handler.postDelayed({ view?.evaluateJavascript(extractJs, null) }, jitter2)
+                    handler.postDelayed({ 
+                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight/3);", null)
+                        view?.evaluateJavascript(extractJs, null) 
+                    }, jitter1)
+                    handler.postDelayed({ 
+                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight/1.5);", null)
+                        view?.evaluateJavascript(extractJs, null) 
+                    }, jitter2)
+                    handler.postDelayed({ 
+                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight);", null)
+                        view?.evaluateJavascript(extractJs, null) 
+                    }, jitter3)
+                    handler.postDelayed({ 
+                        view?.evaluateJavascript(extractJs, null) 
+                    }, jitter4)
                 }
             }
             webView.loadUrl(url)

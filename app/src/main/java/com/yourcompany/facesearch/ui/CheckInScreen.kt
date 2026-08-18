@@ -42,7 +42,7 @@ fun CheckInScreen(
     onSelectGalleryClick: () -> Unit,
     onRetryClick: () -> Unit,
     onConfirmFreeSearch: (Bitmap) -> Unit,
-    onGoogleLensOnlySearch: (Bitmap) -> Unit,
+    onTinEyeExactSearch: (Bitmap) -> Unit,
     onLoadHighRes: (WebMatchDisplay) -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
@@ -226,7 +226,7 @@ fun CheckInScreen(
                             nameHint = targetHint,
                             searchMode = searchMode,
                             onConfirm = { onConfirmFreeSearch(uiState.faceBitmap) },
-                            onGoogleLensOnly = { onGoogleLensOnlySearch(uiState.faceBitmap) },
+                            onTinEyeExactSearch = { onTinEyeExactSearch(uiState.faceBitmap) },
                             onCancel = onRetryClick
                         )
                     }
@@ -250,12 +250,10 @@ fun CheckInScreen(
 
                     is CheckInUiState.NoMatch -> {
                         NoMatchContent(
+                            uiState = uiState,
                             targetHint = targetHint,
-                            message = uiState.message,
-                            hasAccessChallenge = uiState.hasAccessChallenge,
-                            logs = uiState.logs,
                             onRetryClick = onRetryClick,
-                            onGoogleLensOnly = { capturedBitmap?.let { onGoogleLensOnlySearch(it) } },
+                            onTinEyeExactSearch = { capturedBitmap?.let { onTinEyeExactSearch(it) } },
                             onConfirmFreeSearch = { capturedBitmap?.let { onConfirmFreeSearch(it) } }
                         )
                     }

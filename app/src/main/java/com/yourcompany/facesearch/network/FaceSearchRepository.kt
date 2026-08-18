@@ -104,8 +104,10 @@ class FaceSearchRepository(private val context: Context) {
 
             // Parallelized OSINT Pipeline
             coroutineScope {
+                val termuxActive = isLocalBackendAvailable()
                 // Visual Engines (Parallel with Dedicated Scrapers)
-                val visualJobs = if (!skipVisualEngines && publicUrl != null && !publicUrl.contains("127.0.0.1") && !publicUrl.contains("localhost")) {
+                // Fix: Only skip WebView engines if Termux is actually ACTIVE and handling them.
+                val visualJobs = if (!skipVisualEngines && publicUrl != null && !termuxActive) {
                     val jobs = mutableListOf(
                         async { 
                             val s = WebViewScraper.create(context)
@@ -134,6 +136,15 @@ class FaceSearchRepository(private val context: Context) {
                                 val matches: List<SerpVisualMatch> = s.scrapeBaidu(publicUrl)
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
+                        },
+                        async {
+                            val s = WebViewScraper.create(context)
+                            try {
+                                // TinEye complements similarity engines with an
+                                // exact-image and near-duplicate reverse-image index.
+                                val matches: List<SerpVisualMatch> = s.scrapeTinEye(publicUrl)
+                                allResults.addAll(matches)
+                            } finally { s.destroy() }
                         }
                     )
                     
@@ -159,8 +170,8 @@ class FaceSearchRepository(private val context: Context) {
                 val dorkJobs = mutableListOf<Deferred<*>>()
                 if (!keywordHint.isNullOrBlank()) {
                     if (searchMode != "ADULT") {
-                        dorkJobs.add(async { 
-                            onLog("Running social dorks...")
+                        dorkJobs.add(async {
+                            onLog("Running core social profile queries...")
                             val s = WebViewScraper.create(context)
                             try {
                                 allResults.addAll(s.scrapeSocialDork("instagram.com", keywordHint))
@@ -168,19 +179,37 @@ class FaceSearchRepository(private val context: Context) {
                             } finally { s.destroy() }
                         })
                     }
-                    
-                    if (searchMode == "AGGRESSIVE" || searchMode == "DEEP_CRAWL" || searchMode == "ADULT") {
-                        dorkJobs.add(async { 
+
+                    val expandedSocialMode = searchMode in setOf(
+                        "SOCIAL", "SOCIAL_OPTIMIZED", "HYPER", "AGGRESSIVE", "DEEP_CRAWL"
+                    )
+                    if (expandedSocialMode) {
+                        dorkJobs.add(async {
+                            onLog("Expanding social coverage across LinkedIn, X, TikTok, Reddit, Pinterest, Threads, and YouTube...")
                             val s = WebViewScraper.create(context)
                             try {
-                                if (searchMode == "ADULT") {
-                                    onLog("Running targeted adult platform scan...")
-                                } else {
-                                    onLog("Running deep social & adult scan...")
-                                    allResults.addAll(s.scrapeSocialDork("twitter.com", keywordHint))
-                                    allResults.addAll(s.scrapeSocialDork("tiktok.com", keywordHint))
-                                    allResults.addAll(s.scrapeSocialDork("reddit.com", keywordHint))
+                                val expandedSites = listOf(
+                                    "linkedin.com", "x.com", "tiktok.com", "reddit.com",
+                                    "pinterest.com", "threads.net", "youtube.com"
+                                )
+                                expandedSites.forEach { site ->
+                                    allResults.addAll(s.scrapeSocialDork(site, keywordHint))
                                 }
+                            } finally { s.destroy() }
+                        })
+                    }
+
+                    if (searchMode == "AGGRESSIVE" || searchMode == "DEEP_CRAWL" || searchMode == "ADULT") {
+                        dorkJobs.add(async {
+                            val s = WebViewScraper.create(context)
+                            try {
+                                onLog(
+                                    if (searchMode == "ADULT") {
+                                        "Running targeted adult platform scan..."
+                                    } else {
+                                        "Running expanded public-web and adult-platform coverage..."
+                                    }
+                                )
                                 allResults.addAll(s.scrapeAdultSites(keywordHint))
                             } finally { s.destroy() }
                         })

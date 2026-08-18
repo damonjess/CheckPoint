@@ -24,7 +24,7 @@ fun FaceSearchConfirmScreen(
     nameHint: String?,
     searchMode: SearchMode = SearchMode.FREE,
     onConfirm: () -> Unit,
-    onGoogleLensOnly: () -> Unit,
+    onTinEyeExactSearch: () -> Unit,
     onCancel: () -> Unit
 ) {
     Column(
@@ -86,14 +86,14 @@ fun FaceSearchConfirmScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             Button(
-                onClick = onGoogleLensOnly,
+                onClick = onTinEyeExactSearch,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4)),
                 enabled = true
             ) {
-                Text("🎯 Direct Google Lens Search", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Open TinEye Exact-Image Search", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         }
         
@@ -109,6 +109,3 @@ fun FaceSearchConfirmScreen(
         }
     }
 }
-
-
-

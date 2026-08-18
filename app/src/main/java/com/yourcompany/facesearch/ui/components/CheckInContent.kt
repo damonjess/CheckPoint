@@ -101,6 +101,12 @@ fun SuccessContent(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val hasStrongerResult = uiState.matches.any {
+        it.isFaceVerified || it.isLikelyFaceMatch || it.confidence >= 0.45f
+    }
+    // If the fallback only found ranked face candidates, show them immediately
+    // instead of presenting a blank or no-match screen.
+    var showReviewLeads by remember(uiState.matches) { mutableStateOf(!hasStrongerResult) }
     val verifiedMatches = remember(uiState.matches) {
         uiState.matches.filter { it.isFaceVerified }
             .sortedByDescending { it.score }
@@ -193,26 +199,47 @@ fun SuccessContent(
         if (visualLeads.isNotEmpty()) {
             if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty()) Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "UNVERIFIED VISUAL LEADS",
+                text = "IN-APP VISUAL CANDIDATES (${visualLeads.size})",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
                 color = Amber
             )
             Text(
-                text = "These links were returned by visual search but did not pass local face verification. They are leads only, not confirmed matches.",
+                text = "These candidates contain one visible face and passed source filtering. They are ranked by local similarity only and are not identity matches.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.DarkGray
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            visualLeads.forEach { match ->
-                MatchCard(
-                    match = match,
-                    isPrimary = false,
-                    debugMode = debugMode,
-                    onLoadHighRes = { onLoadHighRes(match) },
-                    onClick = { onMatchClick(match) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+
+            if (!uiState.termuxAvailable) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "Tip: Start the Termux OSINT helper for 5x deeper coverage and more verified matches.",
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF5D4037),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            TextButton(onClick = { showReviewLeads = !showReviewLeads }) {
+                Text(if (showReviewLeads) "Hide visual candidates" else "Show visual candidates")
+            }
+            if (showReviewLeads) {
+                visualLeads.forEach { match ->
+                    MatchCard(
+                        match = match,
+                        isPrimary = false,
+                        debugMode = debugMode,
+                        onLoadHighRes = { onLoadHighRes(match) },
+                        onClick = { onMatchClick(match) }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
             }
         }
 
@@ -245,9 +272,9 @@ fun NoFaceContent(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         ErrorState(
-            "No face detected",
+            "Face could not be used",
             reasons.joinToString("\n\n").ifBlank {
-                "Use a closer, well-lit photo with one full face visible. You can also choose a different photo from Gallery."
+                "No clear single face was found. Use a closer, well-lit photo with one full face visible, or choose a different Gallery image."
             },
             onRetryClick
         )
@@ -269,15 +296,17 @@ fun NoFaceContent(
 
 @Composable
 fun NoMatchContent(
+    uiState: CheckInUiState.NoMatch,
     targetHint: String,
-    message: String,
-    hasAccessChallenge: Boolean,
-    logs: List<String>,
     onRetryClick: () -> Unit,
-    onGoogleLensOnly: () -> Unit,
+    onTinEyeExactSearch: () -> Unit,
     onConfirmFreeSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val message = uiState.message
+    val hasAccessChallenge = uiState.hasAccessChallenge
+    val logs = uiState.logs
+
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -291,9 +320,25 @@ fun NoMatchContent(
             onRetry = onRetryClick
         )
 
+        if (!uiState.termuxAvailable) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = "Tip: Results are limited because the Termux OSINT backend is not running. Start it to unlock deep web scanning.",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF5D4037),
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
         if (hasAccessChallenge) {
             Text(
-                text = "A search provider requested an access check. Open the photo in Lens and complete any prompt yourself; this app will not automate that step.",
+                text = "A search provider requested an access check. Use the TinEye exact-image check below, or complete any provider prompt yourself; this app will not automate access checks.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.DarkGray
             )
@@ -312,14 +357,14 @@ fun NoMatchContent(
         )
         
         Button(
-            onClick = onGoogleLensOnly,
+            onClick = onTinEyeExactSearch,
             modifier = Modifier.fillMaxWidth().height(56.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
             shape = RoundedCornerShape(12.dp)
         ) {
             Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = Color.White)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Open Photo in Google Lens", color = Color.White, fontWeight = FontWeight.Bold)
+            Text("Open TinEye Exact-Image Check", color = Color.White, fontWeight = FontWeight.Bold)
         }
 
         OutlinedButton(
@@ -363,6 +408,3 @@ fun ErrorContent(
         }
     }
 }
-
-
-

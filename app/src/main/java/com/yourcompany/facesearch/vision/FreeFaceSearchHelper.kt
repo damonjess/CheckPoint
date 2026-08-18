@@ -19,15 +19,6 @@ class FreeFaceSearchHelper(private val context: Context) {
         val name = nameHint ?: "Unknown"
 
         val intents = listOf(
-            // Google Lens via Google App
-            Intent(Intent.ACTION_SEND).apply {
-                type = "image/jpeg"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_TEXT, "Search: $name")
-                `package` = "com.google.android.googlequicksearchbox"
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            } to "Google Lens",
-
             // Bing via Edge
             Intent(Intent.ACTION_SEND).apply {
                 type = "image/jpeg"
@@ -60,7 +51,6 @@ class FreeFaceSearchHelper(private val context: Context) {
                 } catch (e: Exception) {
                     // App not installed, open browser URL fallback
                     val fallback = when (label) {
-                        "Google Lens" -> "https://lens.google.com/upload"
                         "Bing/Edge" -> "https://www.bing.com/images/searchbyimage"
                         else -> "https://yandex.com/images/search"
                     }
@@ -72,6 +62,21 @@ class FreeFaceSearchHelper(private val context: Context) {
         }
     }
 
+    /**
+     * Opens TinEye with a publicly hosted probe URL. Unlike the Google Lens
+     * handoff, this goes straight to an exact/near-duplicate image search and
+     * does not depend on the Google app's share-sheet behavior.
+     */
+    fun launchTinEyeExactSearch(publicImageUrl: String?) {
+        val target = publicImageUrl
+            ?.takeIf { it.startsWith("http") }
+            ?.let { "https://tineye.com/search?url=${Uri.encode(it)}" }
+            ?: "https://tineye.com/"
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
     fun saveToCache(bitmap: Bitmap): Uri {
         val file = File(context.cacheDir, "free_search_probe.jpg")
         FileOutputStream(file).use {
@@ -80,6 +85,3 @@ class FreeFaceSearchHelper(private val context: Context) {
         return FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
     }
 }
-
-
-

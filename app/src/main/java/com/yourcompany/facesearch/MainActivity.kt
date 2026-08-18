@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onRetryClick = { checkInViewModel.onRetry() },
                         onConfirmFreeSearch = { checkInViewModel.onConfirmFreeSearch(it) },
-                        onGoogleLensOnlySearch = { checkInViewModel.onGoogleLensOnlySearch(it) },
+                        onTinEyeExactSearch = { checkInViewModel.onTinEyeExactSearch(it) },
                         onLoadHighRes = { checkInViewModel.loadHighRes(it) }
                     )
 

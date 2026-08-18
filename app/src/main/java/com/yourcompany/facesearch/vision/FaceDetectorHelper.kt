@@ -73,13 +73,46 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
             .build()
     )
 
+    // Visual-search providers frequently return small thumbnails. The primary
+    // detector's 10% minimum face size rejects many otherwise valid results
+    // before the candidate-specific pixel and coverage checks can run. This
+    // detector is intentionally used only for candidate eligibility; those
+    // explicit checks below still require one visible, usable face.
+    private val candidateDetector = FaceDetection.getClient(
+        FaceDetectorOptions.Builder()
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+            .setMinFaceSize(0.04f)
+            .build()
+    )
+
+    // Last-resort detector for a user-selected image. It is only consulted
+    // after the accurate detectors find nothing, and its result still passes
+    // the single-face and fallback-quality rules below. This avoids a false
+    // “no face detected” result for a clear but relatively small face.
+    private val recoveryDetector = FaceDetection.getClient(
+        FaceDetectorOptions.Builder()
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setMinFaceSize(0.02f)
+            .build()
+    )
+
     suspend fun detectAndCropFace(
         sourceBitmap: Bitmap,
         allowCaptureFallback: Boolean = false
     ): FaceDetectionResult {
-        if (sourceBitmap.width < MIN_IMAGE_WIDTH || sourceBitmap.height < MIN_IMAGE_HEIGHT) {
+        val minimumWidth = if (allowCaptureFallback) {
+            MIN_CAPTURE_FALLBACK_IMAGE_EDGE
+        } else {
+            MIN_IMAGE_WIDTH
+        }
+        val minimumHeight = if (allowCaptureFallback) {
+            MIN_CAPTURE_FALLBACK_IMAGE_EDGE
+        } else {
+            MIN_IMAGE_HEIGHT
+        }
+        if (sourceBitmap.width < minimumWidth || sourceBitmap.height < minimumHeight) {
             return FaceDetectionResult.PoorQuality(
-                "Use a photo at least ${MIN_IMAGE_WIDTH}×${MIN_IMAGE_HEIGHT} pixels.",
+                "Use a face image at least ${minimumWidth}×${minimumHeight} pixels.",
                 emptyQuality()
             )
         }
@@ -92,17 +125,28 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
             } else {
                 emptyList()
             }
-            val faces = if (primaryFaces.isNotEmpty()) primaryFaces else fallbackFaces
-            val usedFallbackDetector = primaryFaces.isEmpty() && fallbackFaces.isNotEmpty()
+            val recoveryFaces = if (allowCaptureFallback && primaryFaces.isEmpty() && fallbackFaces.isEmpty()) {
+                recoveryDetector.process(InputImage.fromBitmap(bitmap, 0)).await()
+            } else {
+                emptyList()
+            }
+            val faces = when {
+                primaryFaces.isNotEmpty() -> primaryFaces
+                fallbackFaces.isNotEmpty() -> fallbackFaces
+                else -> recoveryFaces
+            }
+            val usedRelaxedDetector = primaryFaces.isEmpty() &&
+                (fallbackFaces.isNotEmpty() || recoveryFaces.isNotEmpty())
 
+            val selectedFace = selectSingleOrDominantFace(faces, bitmap)
             when {
                 faces.isEmpty() -> FaceDetectionResult.NoFaceFound
-                faces.size > 1 -> FaceDetectionResult.MultipleFacesFound(faces.size)
+                selectedFace == null -> FaceDetectionResult.MultipleFacesFound(faces.size)
                 else -> {
-                    val face = faces.single()
+                    val face = selectedFace
                     val quality = assessQuality(bitmap, face)
                     val strictRejection = qualityRejectionReason(quality)
-                    val rejection = if (allowCaptureFallback && (usedFallbackDetector || strictRejection != null)) {
+                    val rejection = if (allowCaptureFallback && (usedRelaxedDetector || strictRejection != null)) {
                         captureFallbackRejectionReason(quality)
                     } else {
                         strictRejection
@@ -135,7 +179,22 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
         }
         return try {
             val bitmap = sourceBitmap.asSoftwareBitmap()
-            val faces = detector.process(InputImage.fromBitmap(bitmap, 0)).await()
+            val primaryFaces = detector.process(InputImage.fromBitmap(bitmap, 0)).await()
+            val candidateFaces = if (primaryFaces.isEmpty()) {
+                candidateDetector.process(InputImage.fromBitmap(bitmap, 0)).await()
+            } else {
+                emptyList()
+            }
+            val recoveryFaces = if (primaryFaces.isEmpty() && candidateFaces.isEmpty()) {
+                recoveryDetector.process(InputImage.fromBitmap(bitmap, 0)).await()
+            } else {
+                emptyList()
+            }
+            val faces = when {
+                primaryFaces.isNotEmpty() -> primaryFaces
+                candidateFaces.isNotEmpty() -> candidateFaces
+                else -> recoveryFaces
+            }
             if (faces.size != 1) return false
 
             val box = faces.single().boundingBox.clampTo(bitmap.width, bitmap.height)
@@ -146,6 +205,40 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
                 coverage >= MIN_CANDIDATE_FACE_COVERAGE
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /**
+     * ML Kit can occasionally emit a very small false positive alongside a
+     * clearly dominant real face. Keep the app safe for actual group photos,
+     * but use the dominant face when it is at least 2.5× the next detection and
+     * occupies a meaningful part of the selected image.
+     */
+    private fun selectSingleOrDominantFace(faces: List<Face>, bitmap: Bitmap): Face? {
+        if (faces.isEmpty()) return null
+        if (faces.size == 1) return faces.single()
+
+        val ranked = faces.sortedByDescending { face ->
+            val box = face.boundingBox.clampTo(bitmap.width, bitmap.height)
+            box.width().toLong() * box.height().toLong()
+        }
+        val dominant = ranked.first()
+        val dominantBox = dominant.boundingBox.clampTo(bitmap.width, bitmap.height)
+        val dominantArea = dominantBox.width().toLong() * dominantBox.height().toLong()
+        val nextBox = ranked[1].boundingBox.clampTo(bitmap.width, bitmap.height)
+        val nextArea = (nextBox.width().toLong() * nextBox.height().toLong()).coerceAtLeast(1L)
+        val dominantCoverage = dominantArea.toFloat() /
+            (bitmap.width.toLong() * bitmap.height.toLong()).coerceAtLeast(1L)
+
+        return if (
+            dominantArea.toDouble() >= nextArea.toDouble() * DOMINANT_FACE_AREA_RATIO &&
+            dominantBox.width() >= MIN_DOMINANT_FACE_PIXELS &&
+            dominantBox.height() >= MIN_DOMINANT_FACE_PIXELS &&
+            dominantCoverage >= MIN_DOMINANT_FACE_COVERAGE
+        ) {
+            dominant
+        } else {
+            null
         }
     }
 
@@ -293,6 +386,8 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
     fun release() {
         detector.close()
         captureFallbackDetector.close()
+        candidateDetector.close()
+        recoveryDetector.close()
     }
 
     private companion object {
@@ -300,11 +395,15 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
         const val MIN_IMAGE_HEIGHT = 360
         const val MIN_FACE_PIXELS = 80
         const val MIN_FACE_COVERAGE = 0.05f
+        const val MIN_CAPTURE_FALLBACK_IMAGE_EDGE = 160
         const val MIN_CAPTURE_FALLBACK_FACE_PIXELS = 64
         const val MIN_CAPTURE_FALLBACK_FACE_COVERAGE = 0.03f
-        const val MIN_CANDIDATE_IMAGE_EDGE = 96
-        const val MIN_CANDIDATE_FACE_PIXELS = 32
-        const val MIN_CANDIDATE_FACE_COVERAGE = 0.02f
+        const val MIN_CANDIDATE_IMAGE_EDGE = 64
+        const val MIN_CANDIDATE_FACE_PIXELS = 24
+        const val MIN_CANDIDATE_FACE_COVERAGE = 0.015f
+        const val MIN_DOMINANT_FACE_PIXELS = 64
+        const val MIN_DOMINANT_FACE_COVERAGE = 0.03f
+        const val DOMINANT_FACE_AREA_RATIO = 2.5
         const val MAX_YAW_DEGREES = 32f
         const val MAX_PITCH_DEGREES = 25f
         const val MAX_ROLL_DEGREES = 22f

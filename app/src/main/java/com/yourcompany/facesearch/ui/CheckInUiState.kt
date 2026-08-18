@@ -11,7 +11,8 @@ sealed class CheckInUiState {
     ) : CheckInUiState()
     data class Success(
         val matches: List<WebMatchDisplay>,
-        val logs: List<String> = emptyList()
+        val logs: List<String> = emptyList(),
+        val termuxAvailable: Boolean = true
     ) : CheckInUiState()
     data class Confirming(val faceBitmap: Bitmap) : CheckInUiState()
     data class NoFaceDetected(
@@ -21,7 +22,8 @@ sealed class CheckInUiState {
     data class NoMatch(
         val logs: List<String> = emptyList(),
         val message: String = "No locally verified face match was found.",
-        val hasAccessChallenge: Boolean = false
+        val hasAccessChallenge: Boolean = false,
+        val termuxAvailable: Boolean = true
     ) : CheckInUiState()
     data class Error(val message: String, val logs: List<String> = emptyList()) : CheckInUiState()
 }

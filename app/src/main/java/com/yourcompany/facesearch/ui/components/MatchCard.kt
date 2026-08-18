@@ -393,10 +393,23 @@ private fun SecondaryMatchContent(
                 }
             }
 
+            if (match.duplicateCount > 1) {
+                Text(
+                    text = "${match.duplicateCount} duplicate leads merged",
+                    fontSize = 10.sp,
+                    color = Color.Gray,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
             if (!match.isFaceVerified) {
                 Text(
                     text = if (match.isLikelyFaceMatch) {
                         "Possible face match — review manually; it did not meet the confirmation threshold"
+                    } else if (match.confidence >= 0.45f) {
+                        "Review lead — ${(match.confidence * 100).toInt()}% local similarity; not identity verified"
+                    } else if (match.confidence > 0f) {
+                        "Ranked visual candidate — ${(match.confidence * 100).toInt()}% local similarity; not identity verified"
                     } else {
                         "Visual-search lead — not locally face verified"
                     },
@@ -428,7 +441,7 @@ private fun rememberHandle(match: WebMatchDisplay): String {
                 val compact = name.lowercase().replace(" ", "")
                 if (compact.length > 3 && !compact.contains("match")) "@$compact" else null
             }
-        // 3. Generic fallback
-            ?: "@user_${match.score % 1000}"
+        // 3. Do not fabricate an account label from a result score.
+            ?: "Unnamed visual lead"
     }
 }

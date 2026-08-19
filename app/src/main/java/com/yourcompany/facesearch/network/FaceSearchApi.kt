@@ -22,7 +22,8 @@ data class SerpVisualMatch(
     @JsonAdapter(ThumbnailAdapter::class)
     val thumbnail: String?, // The image profile link
 
-    val score: Int = 0
+    val score: Int = 0,
+    val embedding: FloatArray? = null
 )
 
 /**

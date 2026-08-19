@@ -61,7 +61,7 @@ class FaceEmbedder(private val context: Context) {
             brightnessSum += (0.299f * r + 0.587f * g + 0.114f * b)
         }
         val avgBrightness = brightnessSum / pixels.size
-        return avgBrightness in 40f..220f
+        return avgBrightness in 25f..240f
     }
 
     private fun bitmapToFloatArray(bitmap: Bitmap): FloatArray {

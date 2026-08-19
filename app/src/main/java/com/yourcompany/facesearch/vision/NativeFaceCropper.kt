@@ -24,7 +24,7 @@ class NativeFaceCropper {
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-            .setMinFaceSize(0.10f)
+            .setMinFaceSize(0.04f)
             .build()
     )
 

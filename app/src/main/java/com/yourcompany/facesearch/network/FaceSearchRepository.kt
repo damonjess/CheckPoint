@@ -104,15 +104,16 @@ class FaceSearchRepository(private val context: Context) {
 
             // Parallelized OSINT Pipeline
             coroutineScope {
-                val termuxActive = isLocalBackendAvailable()
                 // Visual Engines (Parallel with Dedicated Scrapers)
-                // Fix: Only skip WebView engines if Termux is actually ACTIVE and handling them.
-                val visualJobs = if (!skipVisualEngines && publicUrl != null && !termuxActive) {
+                // We no longer auto-skip WebView engines just because Termux is available;
+                // the caller (CheckInViewModel) manages the balance between local and offloaded engines.
+                val visualJobs = if (!skipVisualEngines && publicUrl != null) {
                     val jobs = mutableListOf(
                         async { 
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeYandex(publicUrl)
+                                onLog("Yandex found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         },
@@ -120,6 +121,7 @@ class FaceSearchRepository(private val context: Context) {
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeBing(publicUrl)
+                                onLog("Bing found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         },
@@ -127,6 +129,7 @@ class FaceSearchRepository(private val context: Context) {
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeGoogle(publicUrl)
+                                onLog("Google found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         },
@@ -134,6 +137,7 @@ class FaceSearchRepository(private val context: Context) {
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeBaidu(publicUrl)
+                                onLog("Baidu found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         },
@@ -143,6 +147,7 @@ class FaceSearchRepository(private val context: Context) {
                                 // TinEye complements similarity engines with an
                                 // exact-image and near-duplicate reverse-image index.
                                 val matches: List<SerpVisualMatch> = s.scrapeTinEye(publicUrl)
+                                onLog("TinEye found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         }
@@ -166,16 +171,27 @@ class FaceSearchRepository(private val context: Context) {
                     emptyList()
                 }
 
+                // Wait for visual jobs first to potentially extract hints for social dorking
+                visualJobs.awaitAll()
+                
+                // If keywordHint is missing, try to harvest names from visual matches for a follow-up social scan
+                val harvestedHint = if (keywordHint.isNullOrBlank()) {
+                    harvestNamesFromMatches(allResults.toList())
+                } else null
+                
+                val effectiveHint = keywordHint ?: harvestedHint
+
                 // Dorking & Social Scan (Parallel)
                 val dorkJobs = mutableListOf<Deferred<*>>()
-                if (!keywordHint.isNullOrBlank()) {
+                if (!effectiveHint.isNullOrBlank()) {
                     if (searchMode != "ADULT") {
                         dorkJobs.add(async {
-                            onLog("Running core social profile queries...")
+                            onLog("Running core social profile queries for '$effectiveHint'...")
                             val s = WebViewScraper.create(context)
                             try {
-                                allResults.addAll(s.scrapeSocialDork("instagram.com", keywordHint))
-                                allResults.addAll(s.scrapeSocialDork("facebook.com", keywordHint))
+                                allResults.addAll(s.scrapeSocialDork("instagram.com", effectiveHint))
+                                allResults.addAll(s.scrapeSocialDork("facebook.com", effectiveHint))
+                                allResults.addAll(s.scrapeSocialDork("twitter.com", effectiveHint))
                             } finally { s.destroy() }
                         })
                     }
@@ -185,15 +201,15 @@ class FaceSearchRepository(private val context: Context) {
                     )
                     if (expandedSocialMode) {
                         dorkJobs.add(async {
-                            onLog("Expanding social coverage across LinkedIn, X, TikTok, Reddit, Pinterest, Threads, and YouTube...")
+                            onLog("Expanding social coverage for '$effectiveHint' across LinkedIn, X, TikTok, Reddit, Pinterest, Threads, and YouTube...")
                             val s = WebViewScraper.create(context)
                             try {
                                 val expandedSites = listOf(
                                     "linkedin.com", "x.com", "tiktok.com", "reddit.com",
-                                    "pinterest.com", "threads.net", "youtube.com"
+                                    "pinterest.com", "threads.net", "youtube.com", "onlyfans.com", "fansly.com"
                                 )
                                 expandedSites.forEach { site ->
-                                    allResults.addAll(s.scrapeSocialDork(site, keywordHint))
+                                    allResults.addAll(s.scrapeSocialDork(site, effectiveHint))
                                 }
                             } finally { s.destroy() }
                         })
@@ -205,12 +221,12 @@ class FaceSearchRepository(private val context: Context) {
                             try {
                                 onLog(
                                     if (searchMode == "ADULT") {
-                                        "Running targeted adult platform scan..."
+                                        "Running targeted adult platform scan for '$effectiveHint'..."
                                     } else {
-                                        "Running expanded public-web and adult-platform coverage..."
+                                        "Running expanded public-web and adult-platform coverage for '$effectiveHint'..."
                                     }
                                 )
-                                allResults.addAll(s.scrapeAdultSites(keywordHint))
+                                allResults.addAll(s.scrapeAdultSites(effectiveHint))
                             } finally { s.destroy() }
                         })
                     }
@@ -218,14 +234,48 @@ class FaceSearchRepository(private val context: Context) {
                     onLog("⚠ Adult scan requires a name hint for deep platform dorking.")
                 }
 
-                // Wait for everything
-                (visualJobs + dorkJobs).awaitAll()
+                // Wait for social dorking
+                dorkJobs.awaitAll()
                 onLog("✓ Global pipeline complete")
             }
 
             // Deduplicate & sort
             allResults.distinctBy { it.link }.sortedByDescending { it.score }
         }
+    }
+
+    /**
+     * Harvests potential names from the most relevant visual matches.
+     * This allows the "social" search to function even when the user
+     * provides no initial name hint.
+     */
+    private fun harvestNamesFromMatches(matches: List<SerpVisualMatch>): String? {
+        val candidates = matches
+            .filter { !it.title.isNullOrBlank() && it.title != "Visual Match" }
+            .filter { it.score > 200 }
+            .take(15)
+        
+        if (candidates.isEmpty()) return null
+        
+        // Count word frequencies to find a likely name
+        val words = mutableMapOf<String, Int>()
+        val stopWords = setOf("image", "photo", "profile", "picture", "social", "media", "results", "found", "match", "visual")
+        
+        candidates.forEach { match ->
+            match.title?.split(Regex("\\s+"))?.forEach { word ->
+                val clean = word.lowercase().trim().replace(Regex("[^a-z]"), "")
+                if (clean.length > 2 && clean !in stopWords) {
+                    words[clean] = (words[clean] ?: 0) + 1
+                }
+            }
+        }
+        
+        // Take the top two words as a likely name
+        return words.entries
+            .sortedByDescending { it.value }
+            .take(2)
+            .joinToString(" ") { it.key.replaceFirstChar { c -> c.uppercase() } }
+            .ifBlank { null }
     }
 
     suspend fun performLocalServerSearch(

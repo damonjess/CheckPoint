@@ -44,10 +44,10 @@ class WebViewScraper private constructor(
                 function pickUrl(v){
                     if(!v || v.length < 8) return '';
                     var low = v.toLowerCase();
-                    // Skip tiny preview/thumbnail paths
-                    if(low.indexOf('preview') >= 0 && low.indexOf('preview.redd.it') < 0) return '';
-                    if(low.indexOf('thumb') >= 0 && low.indexOf('thumbnail') >= 0) return '';
-                    if(low.indexOf('icon') >= 0 || low.indexOf('logo') >= 0 || low.indexOf('favicon') >= 0) return '';
+                    // Keep most things unless they are obviously tiny junk icons
+                    if(low.indexOf('icon') >= 0 || low.indexOf('logo') >= 0 || low.indexOf('favicon') >= 0) {
+                       if(low.indexOf('profile') < 0 && low.indexOf('user') < 0) return '';
+                    }
                     
                     if(v.indexOf('data:image') === 0 && v.length > 200) return v;
                     if(v.indexOf('http')===0) return v;
@@ -310,8 +310,8 @@ class WebViewScraper private constructor(
         suspendCancellableCoroutine { continuation ->
             val accumulated = linkedMapOf<String, SerpVisualMatch>()
             var passesDone = 0
-            val totalPasses = 4
-            val maxTimeout = 60000L
+            val totalPasses = 8
+            val maxTimeout = 90000L
 
             val timeoutRunnable = Runnable {
                 if (continuation.isActive) continuation.resume(accumulated.values.toList())
@@ -359,20 +359,27 @@ class WebViewScraper private constructor(
                     val jitter4 = jitter3 + 5000 + random.nextInt(2000)
                     
                     handler.postDelayed({ 
-                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight/3);", null)
+                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight/4);", null)
                         view?.evaluateJavascript(extractJs, null) 
                     }, jitter1)
                     handler.postDelayed({ 
-                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight/1.5);", null)
+                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight/2);", null)
                         view?.evaluateJavascript(extractJs, null) 
                     }, jitter2)
                     handler.postDelayed({ 
-                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight);", null)
+                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight/1.3);", null)
                         view?.evaluateJavascript(extractJs, null) 
                     }, jitter3)
                     handler.postDelayed({ 
+                        view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight);", null)
                         view?.evaluateJavascript(extractJs, null) 
                     }, jitter4)
+                    
+                    // Extra passes for deeper extraction
+                    handler.postDelayed({ view?.evaluateJavascript(extractJs, null) }, jitter4 + 4000)
+                    handler.postDelayed({ view?.evaluateJavascript(extractJs, null) }, jitter4 + 8000)
+                    handler.postDelayed({ view?.evaluateJavascript(extractJs, null) }, jitter4 + 12000)
+                    handler.postDelayed({ view?.evaluateJavascript(extractJs, null) }, jitter4 + 16000)
                 }
             }
             webView.loadUrl(url)

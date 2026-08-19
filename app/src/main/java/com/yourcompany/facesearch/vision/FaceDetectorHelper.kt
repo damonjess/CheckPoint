@@ -195,9 +195,14 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
                 candidateFaces.isNotEmpty() -> candidateFaces
                 else -> recoveryFaces
             }
-            if (faces.size != 1) return false
+            if (faces.isEmpty()) return false
 
-            val box = faces.single().boundingBox.clampTo(bitmap.width, bitmap.height)
+            // Use the largest detected face as the primary candidate.
+            // This allows group photos to be processed while focusing on the dominant subject.
+            val dominant = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+                ?: return false
+
+            val box = dominant.boundingBox.clampTo(bitmap.width, bitmap.height)
             val coverage = (box.width().toFloat() * box.height().toFloat()) /
                 (bitmap.width.toFloat() * bitmap.height.toFloat())
             box.width() >= MIN_CANDIDATE_FACE_PIXELS &&

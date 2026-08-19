@@ -9,7 +9,6 @@ import androidx.compose.runtime.*
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import coil3.ImageLoader
 import coil3.request.ImageRequest
 import coil3.imageLoader
 import coil3.toBitmap
@@ -53,15 +52,15 @@ class CheckInViewModel(
         const val REVIEW_LEAD_SIMILARITY_WEIGHT = 1_000
         const val FALLBACK_CANDIDATE_BASE_SCORE = 250
         const val FALLBACK_CANDIDATE_SIMILARITY_WEIGHT = 1_000
-        const val MAX_FALLBACK_CANDIDATES = 10
+        const val MAX_FALLBACK_CANDIDATES = 100
         // In-app web results often provide small, compressed thumbnails. Keep
         // stronger review leads distinct, but retain a limited set of weaker
         // real-face candidates so non-Termux searches do not end empty.
-        const val REVIEW_LEAD_SIMILARITY_THRESHOLD = 0.38f
-        const val FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD = 0.25f
+        const val REVIEW_LEAD_SIMILARITY_THRESHOLD = 0.25f
+        const val FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD = 0.10f
     }
 
-    var isSearching by mutableStateOf(false)
+    var isSearching by mutableStateOf(value = false)
         private set
 
     private val nativeFaceCropper = NativeFaceCropper()
@@ -207,14 +206,14 @@ class CheckInViewModel(
                     faceSearchRepository.extractMetadataThumbnail(match.profileUrl)
                 }
 
-                val highResBitmap = if (highResUrl != null) {
+        val highResBitmap = if (highResUrl != null) {
                     loadThumbnailBitmap(highResUrl)
                 } else {
                     null
                 }
                 val highResSimilarity = if (
-                    highResBitmap != null &&
-                    latestSourceEmbedding != null &&
+                    (highResBitmap != null) &&
+                    (latestSourceEmbedding != null) &&
                     captureDetector.hasSingleCandidateFace(highResBitmap)
                 ) {
                     faceVerifier.calculateSimilarity(highResBitmap, latestSourceEmbedding)
@@ -379,17 +378,15 @@ class CheckInViewModel(
         // Use the optional local helper for the same supported precision flow on every runtime.
         var useTermux = true
 
-        if (useTermux) {
-            addLog("Probing for local Termux backend...")
-            // Increased timeout for parallel discovery
-            val available = withTimeoutOrNull(10000L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
-            if (!available) {
-                addLog("⚠ No local Termux server detected; results will be limited.")
-                addLog("Tip: Start the Termux OSINT helper for 5x deeper coverage.")
-                useTermux = false
-            } else {
-                addLog("Local Termux backend detected; offloading heavy engines.")
-            }
+        addLog("Probing for local Termux backend...")
+        // Increased timeout for parallel discovery
+        val available = withTimeoutOrNull(10000L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
+        if (!available) {
+            addLog("⚠ No local Termux server detected; results will be limited.")
+            addLog("Tip: Start the Termux OSINT helper for 5x deeper coverage.")
+            useTermux = false
+        } else {
+            addLog("Local Termux backend detected; offloading heavy engines.")
         }
 
         // Execute searches in parallel
@@ -397,14 +394,12 @@ class CheckInViewModel(
         val blockedEngines = linkedSetOf<String>()
         // If we're using the local probe URL and there's no network, call the local server's face-search endpoint
         fun isNetworkAvailable(): Boolean {
-            try {
-                val cm = getApplication<Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-                val cap = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-                return cap.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            } catch (e: Exception) { return false }
+            val cm = getApplication<Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val cap = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            return cap.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
         }
 
-        if (publicUrl != null && publicUrl.startsWith("http://127.0.0.1") && !isNetworkAvailable()) {
+        if (publicUrl.startsWith("http://127.0.0.1") && !isNetworkAvailable()) {
             addLog("No network detected — running local offline analysis via LocalServer...")
             try {
                 // Post face bytes to local server endpoint
@@ -552,6 +547,9 @@ class CheckInViewModel(
                 hasAccessChallenge = blockedEngines.isNotEmpty(),
                 termuxAvailable = useTermux
             )
+            if (blockedEngines.isNotEmpty()) {
+                openBlockedEnginesInBrowser(publicUrl, blockedEngines.toList())
+            }
             return
         }
 
@@ -620,12 +618,13 @@ class CheckInViewModel(
     }
 
     /**
-     * Collapses the same visual lead returned by multiple providers. A canonical
-     * profile URL is preferred, then a canonical image URL; this preserves
-     * distinct leads while preventing repeated cards from expanded coverage.
+     * Collapses duplicate leads and performs visual deduplication.
+     * Near-identical photos (same person, same shot) are grouped to show
+     * more variety in the results.
      */
-    private fun deduplicateDisplayMatches(matches: List<WebMatchDisplay>): List<WebMatchDisplay> =
-        matches.groupBy(::displayDeduplicationKey).values.map { duplicates ->
+    private fun deduplicateDisplayMatches(matches: List<WebMatchDisplay>): List<WebMatchDisplay> {
+        // 1. Primary deduplication by URL/Thumbnail
+        val groupedByUrl = matches.groupBy(::displayDeduplicationKey).values.map { duplicates ->
             val best = duplicates.maxWithOrNull(
                 compareBy<WebMatchDisplay> {
                     when {
@@ -647,6 +646,50 @@ class CheckInViewModel(
             )
         }
 
+        // 2. Secondary visual deduplication by face embedding
+        val finalMatches = mutableListOf<WebMatchDisplay>()
+        val processed = mutableSetOf<Int>()
+
+        for (i in groupedByUrl.indices) {
+            if (i in processed) continue
+            val current = groupedByUrl[i]
+            val currentEmb = current.faceEmbedding
+            
+            val duplicates = mutableListOf(current)
+            processed.add(i)
+
+            // Cosine similarity > 0.99 indicates identical visual content.
+            // Relaxed from 0.96 to allow more "same person, different shot" variety.
+            if (currentEmb != null) {
+                for (j in i + 1 until groupedByUrl.size) {
+                    if (j in processed) continue
+                    val other = groupedByUrl[j]
+                    val otherEmb = other.faceEmbedding ?: continue
+                    
+                    if (com.yourcompany.facesearch.vision.FaceMatcherExt.cosineSimilarity(currentEmb, otherEmb) > 0.99f) {
+                        duplicates.add(other)
+                        processed.add(j)
+                    }
+                }
+            }
+
+            if (duplicates.size > 1) {
+                val best = duplicates.maxBy { it.score }
+                val allExtraImages = duplicates.flatMap { it.extraImages + listOfNotNull(it.imageUrl as? String) }
+                    .filter { it != best.imageUrl }
+                    .distinct()
+                
+                finalMatches.add(best.copy(
+                    extraImages = allExtraImages,
+                    duplicateCount = duplicates.sumOf { it.duplicateCount }
+                ))
+            } else {
+                finalMatches.add(current)
+            }
+        }
+        return finalMatches
+    }
+
     private fun displayDeduplicationKey(match: WebMatchDisplay): String {
         val normalizedProfileUrl = try {
             val uri = Uri.parse(match.profileUrl)
@@ -661,12 +704,9 @@ class CheckInViewModel(
         val thumbnailKey = ThumbnailUtils.canonicalKey(match.imageUrl as? String)
         if (thumbnailKey != null) return "image:$thumbnailKey"
 
-        val nameKey = match.name.lowercase(Locale.US).trim()
-        return if (nameKey.isNotBlank() && nameKey != "visual match") {
-            "name:$nameKey"
-        } else {
-            "fallback:${match.source.lowercase(Locale.US)}:${match.score}"
-        }
+        // We no longer merge by name only; this prevents losing distinct visual leads
+        // from different sources that share generic titles like "Visual Match".
+        return "fallback:${match.source.lowercase(Locale.US)}:${match.score}:${java.util.UUID.randomUUID()}"
     }
 
     private fun prioritizeCandidates(results: List<SerpVisualMatch>): List<SerpVisualMatch> {
@@ -737,26 +777,17 @@ class CheckInViewModel(
     }
 
     private fun mapToDisplay(match: SerpVisualMatch): WebMatchDisplay {
-        val socialDomains = listOf(
-            "facebook.com", "instagram.com", "linkedin.com", "twitter.com",
-            "x.com", "tiktok.com", "youtube.com", "reddit.com", "onlyfans.com",
-            "fansly.com", "pornhub.com", "xvideos.com", "xnxx.com", "xhamster.com"
-        )
-        val isSocial = socialDomains.any { domain -> match.link?.contains(domain) == true }
+        val platform = SocialMediaDetector.detectPlatform(match.link)
+        val isSocial = platform.isProfileBased || SocialMediaDetector.isProfileUrl(match.link)
 
         val urlUsername = match.link?.let { WebMatchDisplay.extractUsernameFromUrl(it) }
         
         var cleanTitle = match.title ?: "Visual Match"
         
         // Only trust URL username if the link actually points to a profile page
-        val isLikelyProfileUrl = match.link?.let { link ->
+        val isLikelyProfileUrl = isSocial || match.link?.let { link ->
             val lower = link.lowercase()
-            lower.contains("/user/") || lower.contains("/in/") || lower.contains("/@") ||
-            (lower.contains("instagram.com/") && !lower.contains("/p/")) ||
-            (lower.contains("facebook.com/") && !lower.contains("/pages/") && !lower.contains("/groups/")) ||
-            lower.contains("twitter.com/") || lower.contains("x.com/") ||
-            lower.contains("tiktok.com/@") || lower.contains("youtube.com/@") ||
-            lower.contains("reddit.com/user/") || lower.contains("reddit.com/u/")
+            lower.contains("/user/") || lower.contains("/in/") || lower.contains("/@")
         } ?: false
 
         if (urlUsername != null && isLikelyProfileUrl && (
@@ -767,14 +798,6 @@ class CheckInViewModel(
                 || cleanTitle.contains("reddit", ignoreCase = true)
             )) {
             cleanTitle = urlUsername.replaceFirstChar { it.titlecase(Locale.US) }
-        } else if (cleanTitle.contains(Regex("^[a-zA-Z0-9-]+\\.[a-z]{2,}$")) || cleanTitle == "Visual Match") {
-            val uri = try { Uri.parse(match.link) } catch(e: Exception) { null }
-            val pathSegments = uri?.pathSegments
-            if (pathSegments?.isNotEmpty() == true) {
-                val fromUrl = pathSegments.last().replace("-", " ").replace("_", " ")
-                    .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
-                if (fromUrl.length > 2) cleanTitle = fromUrl
-            }
         }
         
         cleanTitle = cleanTitle.replace(Regex("#\\w+"), "").trim()
@@ -786,34 +809,39 @@ class CheckInViewModel(
             !thumb.contains("preview") && 
             thumb.length > 20
 
-        val isVerified = match.score >= VERIFIED_MATCH_BASE_SCORE
-        val isLikely = !isVerified && match.score >= LIKELY_MATCH_BASE_SCORE
-        val isReviewLead = !isVerified && !isLikely && match.score >= REVIEW_LEAD_BASE_SCORE
+        // Use SocialMediaDetector to boost and identify platform
+        val finalSource = if (platform.name != "Web") platform.name else (match.source ?: "Free Engine")
+        val finalScore = match.score + platform.baseScore
+
+        val isVerified = finalScore >= VERIFIED_MATCH_BASE_SCORE
+        val isLikely = !isVerified && finalScore >= LIKELY_MATCH_BASE_SCORE
+        val isReviewLead = !isVerified && !isLikely && finalScore >= REVIEW_LEAD_BASE_SCORE
         val isFallbackCandidate = !isVerified && !isLikely && !isReviewLead &&
-            match.score >= FALLBACK_CANDIDATE_BASE_SCORE
+            finalScore >= FALLBACK_CANDIDATE_BASE_SCORE
         val sourceLabel = when {
-            isVerified -> "✓ ${match.source}"
-            isLikely -> "≈ ${match.source}"
-            else -> match.source
+            isVerified -> "✓ $finalSource"
+            isLikely -> "≈ $finalSource"
+            else -> finalSource
         }
 
         return WebMatchDisplay(
             name = cleanTitle,
-            source = sourceLabel ?: "Free Engine",
+            source = sourceLabel,
             profileUrl = match.link ?: "",
-            score = match.score,
+            score = finalScore,
             imageUrl = thumb,
             isSocial = isSocial,
             confidence = when {
-                isVerified -> calculateConfidence(match.score)
-                isLikely -> calculatePossibleConfidence(match.score)
-                isReviewLead -> calculateReviewLeadConfidence(match.score)
-                isFallbackCandidate -> calculateFallbackCandidateConfidence(match.score)
+                isVerified -> calculateConfidence(finalScore)
+                isLikely -> calculatePossibleConfidence(finalScore)
+                isReviewLead -> calculateReviewLeadConfidence(finalScore)
+                isFallbackCandidate -> calculateFallbackCandidateConfidence(finalScore)
                 else -> 0f
             },
             isFaceVerified = isVerified,
             isLikelyFaceMatch = isLikely,
-            isHighResLoading = (isVerified || isLikely) && !hasGoodThumbnail && isSocial
+            isHighResLoading = (isVerified || isLikely) && !hasGoodThumbnail && isSocial,
+            faceEmbedding = match.embedding
         )
     }
 
@@ -891,34 +919,50 @@ class CheckInViewModel(
                             if (thumbnail == null || !captureDetector.hasSingleCandidateFace(thumbnail)) {
                                 excludedCounter.incrementAndGet()
                             } else {
-                                val faceBearingMatch = match.copy(thumbnail = thumbnailUrl)
-                                val similarity = faceVerifier.calculateSimilarity(thumbnail, sourceEmbedding)
-                                when {
-                                    similarity != null && similarity >= FaceVerifier.VERIFICATION_THRESHOLD -> {
-                                        verified += faceBearingMatch.copy(
-                                            score = VERIFIED_MATCH_BASE_SCORE +
-                                                (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt()
-                                        )
+                                val result = faceVerifier.calculateSimilarityAndEmbedding(thumbnail, sourceEmbedding)
+                                if (result == null) {
+                                    excludedCounter.incrementAndGet()
+                                } else {
+                                    val (similarity, embedding) = result
+                                    val faceBearingMatch = match.copy(
+                                        thumbnail = thumbnailUrl,
+                                        embedding = embedding
+                                    )
+                                    
+                                    // Discovery/Variety Boost: Give a small rank boost to high-confidence
+                                    // matches that are NOT identical to the source photo. This helps
+                                    // different photos of the same person compete with exact matches.
+                                    val discoveryBoost = if (similarity in 0.72f..0.94f) 450 else 0
+
+                                    when {
+                                        similarity >= FaceVerifier.VERIFICATION_THRESHOLD -> {
+                                            verified += faceBearingMatch.copy(
+                                                score = VERIFIED_MATCH_BASE_SCORE +
+                                                    (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt() +
+                                                    discoveryBoost
+                                            )
+                                        }
+                                        similarity >= LIKELY_MATCH_THRESHOLD -> {
+                                            likely += faceBearingMatch.copy(
+                                                score = LIKELY_MATCH_BASE_SCORE +
+                                                    (similarity * LIKELY_MATCH_SIMILARITY_WEIGHT).toInt() +
+                                                    discoveryBoost
+                                            )
+                                        }
+                                        similarity >= REVIEW_LEAD_SIMILARITY_THRESHOLD -> {
+                                            faceBearingLeads += faceBearingMatch.copy(
+                                                score = REVIEW_LEAD_BASE_SCORE +
+                                                    (similarity * REVIEW_LEAD_SIMILARITY_WEIGHT).toInt()
+                                            )
+                                        }
+                                        similarity >= FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD -> {
+                                            fallbackCandidates += faceBearingMatch.copy(
+                                                score = FALLBACK_CANDIDATE_BASE_SCORE +
+                                                    (similarity * FALLBACK_CANDIDATE_SIMILARITY_WEIGHT).toInt()
+                                            )
+                                        }
+                                        else -> lowRelevanceCounter.incrementAndGet()
                                     }
-                                    similarity != null && similarity >= LIKELY_MATCH_THRESHOLD -> {
-                                        likely += faceBearingMatch.copy(
-                                            score = LIKELY_MATCH_BASE_SCORE +
-                                                (similarity * LIKELY_MATCH_SIMILARITY_WEIGHT).toInt()
-                                        )
-                                    }
-                                    similarity != null && similarity >= REVIEW_LEAD_SIMILARITY_THRESHOLD -> {
-                                        faceBearingLeads += faceBearingMatch.copy(
-                                            score = REVIEW_LEAD_BASE_SCORE +
-                                                (similarity * REVIEW_LEAD_SIMILARITY_WEIGHT).toInt()
-                                        )
-                                    }
-                                    similarity != null && similarity >= FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD -> {
-                                        fallbackCandidates += faceBearingMatch.copy(
-                                            score = FALLBACK_CANDIDATE_BASE_SCORE +
-                                                (similarity * FALLBACK_CANDIDATE_SIMILARITY_WEIGHT).toInt()
-                                        )
-                                    }
-                                    else -> lowRelevanceCounter.incrementAndGet()
                                 }
                             }
                         }

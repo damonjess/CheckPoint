@@ -14,7 +14,8 @@ data class WebMatchDisplay(
     val isFaceVerified: Boolean = false,
     val isLikelyFaceMatch: Boolean = false,
     val duplicateCount: Int = 1,
-    val isHighResLoading: Boolean = false
+    val isHighResLoading: Boolean = false,
+    val faceEmbedding: FloatArray? = null
 ) {
     val displayName: String by lazy {
         var n = name

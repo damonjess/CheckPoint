@@ -40,15 +40,21 @@ class FaceVerifier(context: Context) {
     suspend fun calculateSimilarity(
         searchResultBitmap: Bitmap,
         sourceEmbedding: FloatArray?
-    ): Float? {
+    ): Float? = calculateSimilarityAndEmbedding(searchResultBitmap, sourceEmbedding)?.first
+
+    suspend fun calculateSimilarityAndEmbedding(
+        searchResultBitmap: Bitmap,
+        sourceEmbedding: FloatArray?
+    ): Pair<Float, FloatArray>? {
         if (sourceEmbedding == null) return null
 
         return withContext(Dispatchers.Default) {
             try {
                 val safeBitmap = ensureSoftwareBitmap(searchResultBitmap)
                 val resultFace = faceCropper.getTightFaceCrop(safeBitmap) ?: return@withContext null
-                val resultEmbedding = faceEmbedder.getEmbedding(resultFace)
-                resultEmbedding?.let { FaceMatcherExt.cosineSimilarity(sourceEmbedding, it) }
+                val resultEmbedding = faceEmbedder.getEmbedding(resultFace) ?: return@withContext null
+                val similarity = FaceMatcherExt.cosineSimilarity(sourceEmbedding, resultEmbedding)
+                Pair(similarity, resultEmbedding)
             } catch (e: Exception) {
                 android.util.Log.e("FaceVerifier", "Error comparing face: ${e.message}")
                 null

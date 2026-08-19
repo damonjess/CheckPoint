@@ -1,19 +1,28 @@
-# Local Reverse-Image Helper
+# Local Reverse-Image Helper (Enhanced)
 
-This optional Node.js helper runs on the same device as the Android app. It accepts an image URL, queries publicly accessible visual-search pages in a standard browser runtime, and reports any returned links. It does **not** alter face images, attempt to bypass access challenges, or expose a network-facing server. Use it only with your own photograph or one you are authorized to search.
+This enhanced Node.js helper runs on the same device as the Android app. It uses **Puppeteer Stealth** and **Incognito Browser Contexts** to query visual-search engines with improved resilience against bot detection. It also provides real-time progress updates via WebSockets.
+
+## New Features
+
+- **Stealth Mode**: Uses `puppeteer-extra-plugin-stealth` to bypass basic bot detection.
+- **Incognito Isolation**: Each engine runs in a separate incognito context for better security and efficiency.
+- **Real-Time Progress**: The Android app now receives live progress logs (e.g., "Running Google Lens...") via WebSockets.
+- **Dynamic Concurrency**: Automatically adjusts the number of parallel engines based on available system memory (RAM).
+- **DNS Diagnostics**: Startup check to ensure Termux has valid internet connectivity.
+- **Pinterest Support**: Added Pinterest Visual Search to the engine list.
 
 ## Runtime behavior
 
 | Environment | Behavior |
 |---|---|
-| **Termux** | Detects the Termux runtime and runs engines sequentially to reduce memory pressure. |
-| **Desktop Linux** | Runs available engines concurrently for faster completion. |
-| **Blocked engine** | Records the challenge, cools that engine down, and returns control to the Android share flow rather than retrying around the block. |
+| **Termux** | Detects Termux and uses dynamic concurrency (usually 1-2 engines) to save RAM. |
+| **Desktop Linux** | Runs up to 4 engines concurrently for maximum speed. |
+| **Blocked engine** | Marks engine as blocked, cools down for 15 minutes, and notifies the app. |
 | **Network exposure** | Listens only on `127.0.0.1:3000`. |
 
 ## Termux setup
 
-Install Node.js and Chromium, then install the service dependencies without downloading an extra Chromium build:
+Install Node.js, Chromium, and dependencies:
 
 ```bash
 pkg update
@@ -21,37 +30,17 @@ pkg install nodejs-lts chromium
 cd face-search-service
 export PUPPETEER_SKIP_DOWNLOAD=true
 npm install
+# Startup check: ensure DNS is working
+# If ping google.com fails, run:
+# echo "nameserver 8.8.8.8" > /data/data/com.termux/files/usr/etc/resolv.conf
+
 CHROMIUM_PATH="$(command -v chromium || command -v chromium-browser)" npm start
-```
-
-Confirm that the service is reachable from the device:
-
-```bash
-curl http://127.0.0.1:3000/api/ping
-```
-
-The reply should include `"status":"pong"` and `"runtime":"termux"`. Keep the process running while you use the Android app. The app probes `127.0.0.1:3000` first and automatically falls back to its regular in-app share/search path if the helper is unavailable.
-
-## Desktop Linux setup
-
-Install Node.js 20 or later and Chromium or Google Chrome. Then run:
-
-```bash
-cd face-search-service
-npm install
-CHROMIUM_PATH="$(command -v chromium || command -v google-chrome)" npm start
 ```
 
 ## API
 
-`POST /api/search` accepts a public image URL and an optional identifier that you own or are authorized to use. The supported mode is `PRECISION`.
+`POST /api/search` (Standard OSINT precision flow).
+`GET /api/ping` (Diagnostic endpoint).
+`WS /` (WebSocket for real-time progress).
 
-```json
-{
-  "imageUrl": "https://example.com/your-photo.jpg",
-  "keywordHint": "optional public handle or name",
-  "searchMode": "PRECISION"
-}
-```
-
-The helper returns public result links only. Treat them as leads, not identity confirmation: the Android app applies local face verification to thumbnails when available.
+The helper returns public result links. The Android app automatically applies local face verification to these candidates.

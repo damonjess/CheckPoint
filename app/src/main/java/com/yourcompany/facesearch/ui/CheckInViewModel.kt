@@ -35,6 +35,11 @@ import java.io.ByteArrayOutputStream
 import java.util.Locale
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import org.json.JSONObject
 
 class CheckInViewModel(
@@ -56,7 +61,7 @@ class CheckInViewModel(
         // In-app web results often provide small, compressed thumbnails. Keep
         // stronger review leads distinct, but retain a limited set of weaker
         // real-face candidates so non-Termux searches do not end empty.
-        const val REVIEW_LEAD_SIMILARITY_THRESHOLD = 0.15f
+        const val REVIEW_LEAD_SIMILARITY_THRESHOLD = 0.10f
         const val FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD = 0.001f
     }
 
@@ -83,22 +88,57 @@ class CheckInViewModel(
 
     private val currentLogs = mutableListOf<String>()
     private var latestSourceEmbedding: FloatArray? = null
+    private var currentProgress = 0.1f
 
-    private fun addLog(msg: String) {
+    private fun addLog(msg: String, progress: Float? = null) {
         currentLogs.add(msg)
+        if (progress != null) currentProgress = progress
         Log.e("CheckIn", "CONSOLE_LOG: $msg")
         uiState = when (val previous = uiState) {
             is CheckInUiState.Success -> previous.copy(logs = currentLogs.toList())
             is CheckInUiState.NoMatch -> previous.copy(logs = currentLogs.toList())
             is CheckInUiState.Error -> previous.copy(logs = currentLogs.toList())
             is CheckInUiState.NoFaceDetected -> previous.copy(logs = currentLogs.toList())
-            is CheckInUiState.Loading -> previous.copy(logs = currentLogs.toList())
-            else -> CheckInUiState.Loading(0.3f, currentLogs.toList())
+            is CheckInUiState.Loading -> previous.copy(logs = currentLogs.toList(), progress = currentProgress)
+            else -> CheckInUiState.Loading(currentProgress, currentLogs.toList())
         }
     }
 
     fun onTargetHintChange(newHint: String) {
         targetHint = newHint
+    }
+
+    private var termuxWs: WebSocket? = null
+
+    private fun connectToTermuxWebSocket(baseUrl: String) {
+        try {
+            val wsUrl = baseUrl.removeSuffix("/").replace("http://", "ws://").replace("https://", "wss://")
+            val request = Request.Builder().url(wsUrl).build()
+            val client = OkHttpClient()
+            
+            termuxWs = client.newWebSocket(request, object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    try {
+                        val json = JSONObject(text)
+                        if (json.optString("type") == "progress") {
+                            val msg = json.optString("message")
+                            val progress = json.optDouble("progress", 0.0).toFloat()
+                            viewModelScope.launch {
+                                addLog(msg, progress)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("CheckIn", "WS Message Error: ${e.message}")
+                    }
+                }
+                
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    Log.e("CheckIn", "WS Failure: ${t.message}")
+                }
+            })
+        } catch (e: Exception) {
+            Log.e("CheckIn", "WS Connection Error: ${e.message}")
+        }
     }
 
     fun onBroadenLensCoverageChange(enabled: Boolean) {
@@ -379,19 +419,34 @@ class CheckInViewModel(
         var useTermux = true
 
         addLog("Probing for local Termux backend...")
-        // Increased timeout for parallel discovery
-        val available = withTimeoutOrNull(10000L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
+        // Reduced timeout for faster fallback when Termux is not running
+        val available = withTimeoutOrNull(2000L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
         if (!available) {
             addLog("⚠ No local Termux server detected; results will be limited.")
             addLog("Tip: Start the Termux OSINT helper for 5x deeper coverage.")
             useTermux = false
         } else {
             addLog("Local Termux backend detected; offloading heavy engines.")
+            faceSearchRepository.activeBackend?.let { connectToTermuxWebSocket(it) }
         }
 
         // Execute searches in parallel
         val allRawResults = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
         val blockedEngines = linkedSetOf<String>()
+        
+        var adultSitesScanned = 0
+        val totalAdultSites = com.yourcompany.facesearch.network.AdultSiteConfig.SITES.size
+        
+        fun handleScraperLog(message: String) {
+            if (message.startsWith("✓ ") && (message.contains("found") || message.contains("match"))) {
+                adultSitesScanned++
+                // Progress from 0.4 to 0.9 during adult scan
+                val adultProgress = 0.4f + (adultSitesScanned.toFloat() / totalAdultSites) * 0.5f
+                addLog(message, adultProgress)
+            } else {
+                addLog(message)
+            }
+        }
         // If we're using the local probe URL and there's no network, call the local server's face-search endpoint
         fun isNetworkAvailable(): Boolean {
             val cm = getApplication<Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
@@ -449,6 +504,8 @@ class CheckInViewModel(
                 hasAccessChallenge = false,
                 termuxAvailable = useTermux
             )
+            termuxWs?.close(1000, "Offline fallback")
+            termuxWs = null
             isSearching = false
             return
         }
@@ -462,7 +519,7 @@ class CheckInViewModel(
                         keywordHint = combinedHint,
                         imageUrl = publicUrl,
                         searchMode = effectiveSearchMode.name,
-                        onLog = { message -> addLog(message) }
+                        onLog = { message -> handleScraperLog(message) }
                     )
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e // Don't log cancellation as an error
@@ -475,6 +532,13 @@ class CheckInViewModel(
             val webDeferred = async {
                 delay(500)
                 try {
+                    // If Termux is available, skip the engines it handles to avoid redundant work
+                    val enginesToSkip = if (useTermux) {
+                        setOf("Google", "Bing", "Yandex", "TinEye")
+                    } else {
+                        emptySet()
+                    }
+                    
                     faceSearchRepository.performFaceSearch(
                         bitmap = bitmap,
                         faceBitmap = faceBitmap,
@@ -484,7 +548,8 @@ class CheckInViewModel(
                         searchMode = effectiveSearchMode.name,
                         includeExactLensMatches = broadenLensCoverage,
                         skipVisualEngines = false,
-                        onLog = { message -> addLog(message) }
+                        enginesToSkip = enginesToSkip,
+                        onLog = { message -> handleScraperLog(message) }
                     )
                 } catch (e: Exception) {
                     addLog("⚠ WebView error: ${e.message}")
@@ -550,6 +615,8 @@ class CheckInViewModel(
             if (blockedEngines.isNotEmpty()) {
                 openBlockedEnginesInBrowser(publicUrl, blockedEngines.toList())
             }
+            termuxWs?.close(1000, "No matches")
+            termuxWs = null
             return
         }
 
@@ -587,17 +654,23 @@ class CheckInViewModel(
                 hasAccessChallenge = blockedEngines.isNotEmpty(),
                 termuxAvailable = useTermux
             )
+            termuxWs?.close(1000, "Filtered to zero")
+            termuxWs = null
             return
         }
 
         if (verifiedMatches.isEmpty() && likelyMatches.isEmpty()) {
             addLog("No locally verified or possible face match was found. Showing ${unverifiedLeads.size} review lead(s) and ${fallbackCandidates.size} ranked in-app visual candidate(s).")
             updateResultsLive(retainedVisualCandidates, useTermux)
+            termuxWs?.close(1000, "Leads only")
+            termuxWs = null
             return
         }
 
         updateResultsLive(verifiedMatches + likelyMatches + retainedVisualCandidates, useTermux)
         addLog("Showing ${verifiedMatches.size} verified, ${likelyMatches.size} possible face match(es), ${unverifiedLeads.size} review lead(s), and ${fallbackCandidates.size} ranked visual candidate(s).")
+        termuxWs?.close(1000, "Success")
+        termuxWs = null
     }
 
     private fun updateResultsLive(newResults: List<SerpVisualMatch>, termuxAvailable: Boolean = true) {
@@ -751,12 +824,16 @@ class CheckInViewModel(
     }
 
     private fun isLikelyProductResult(match: SerpVisualMatch): Boolean {
-        // Significantly relaxed for "massive" search expansion
+        // Expanded to filter out clothing retailers and commercial junk
         val productTerms = listOf(
-            "amazon", "ebay", "etsy", "walmart", "shopify"
+            "amazon", "ebay", "etsy", "walmart", "shopify", "asos", "shein", 
+            "zalando", "farfetch", "net-a-porter", "zara", "h&m", "nike", "adidas",
+            "clothing", "fashion", "shopping", "price", "buy", "sale", "stock",
+            "lacoste", "gucci", "prada", "versace", "luxury", "shop", "store"
         )
         val junkTerms = listOf(
-            "watch?v=", "shorts/", "trending"
+            "watch?v=", "shorts/", "trending", "collection", "product", "item",
+            "outfit", "style", "lookbook", "model", "unnamed visual lead"
         )
         val metadata = listOfNotNull(match.title, match.link, match.source)
             .joinToString(" ")

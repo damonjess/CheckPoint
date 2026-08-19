@@ -7,9 +7,9 @@ import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import kotlin.coroutines.resume
 
@@ -142,6 +142,10 @@ class WebViewScraper private constructor(
                     var selectors = [
                         '.CbirItem-Title a', '.serp-item__link', '.iusc', 'a.mimg', 
                         '.G714Sc a', '.iJ41Ze a', '.Vd9M6 a', '.WpHeLc',
+                        'a[href*="instagram.com"]', 'a[href*="facebook.com"]', 'a[href*="twitter.com"]',
+                        'a[href*="x.com"]', 'a[href*="linkedin.com"]', 'a[href*="tiktok.com"]',
+                        'a[href*="onlyfans.com"]', 'a[href*="fansly.com"]', 'a[href*="reddit.com"]',
+                        'a[href*="pinterest.com"]', 'a[href*="youtube.com"]', 'a[href*="threads.net"]',
                         'a[href^="http"]'
                     ];
                     
@@ -285,38 +289,61 @@ class WebViewScraper private constructor(
     /**
      * Performs a 'Dork' search on a specific social site using a search engine.
      */
-    suspend fun scrapeSocialDork(site: String, keyword: String): List<SerpVisualMatch> = scrapeEngine(
+    suspend fun scrapeSocialDork(
+        site: String, 
+        keyword: String,
+        onLog: (String) -> Unit = {}
+    ): List<SerpVisualMatch> = scrapeEngine(
         url = "https://www.bing.com/search?q=site:${site}+%22${java.net.URLEncoder.encode(keyword, "UTF-8")}%22",
         engineName = AdultSiteConfig.labelFor(site),
         delayMs = 3500,
-        extractJs = DORK_EXTRACT_JS
+        extractJs = DORK_EXTRACT_JS,
+        onLog = onLog,
+        passes = 6
     )
 
-    /** Search all 10 adult platforms via in-app WebView — no Termux required. */
-    suspend fun scrapeAdultSites(keyword: String): List<SerpVisualMatch> {
-        val all = mutableListOf<SerpVisualMatch>()
-        for (site in AdultSiteConfig.SITES) {
-            all += scrapeSocialDork(site, keyword)
+    /** Search all adult platforms in parallel with a limited concurrency (Semaphore). */
+    suspend fun scrapeAdultSites(
+        keyword: String,
+        onLog: (String) -> Unit = {}
+    ): List<SerpVisualMatch> = coroutineScope {
+        val all = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
+        val semaphore = Semaphore(3) // Max 3 concurrent WebViews to avoid memory exhaustion
+        
+        val jobs = AdultSiteConfig.SITES.map { site ->
+            async {
+                semaphore.withPermit {
+                    onLog("Starting targeted scan for ${AdultSiteConfig.labelFor(site)}...")
+                    val results = scrapeSocialDork(site, keyword, onLog)
+                    all.addAll(results)
+                    onLog("✓ ${AdultSiteConfig.labelFor(site)} found ${results.size} match(es)")
+                }
+            }
         }
-        return all
+        jobs.awaitAll()
+        all.toList()
     }
 
     private suspend fun scrapeEngine(
         url: String,
         engineName: String,
         delayMs: Long,
-        extractJs: String = EXTRACT_JS
+        extractJs: String = EXTRACT_JS,
+        onLog: (String) -> Unit = {},
+        passes: Int = 12
     ): List<SerpVisualMatch> = withContext(Dispatchers.Main) {
         suspendCancellableCoroutine { continuation ->
             val accumulated = linkedMapOf<String, SerpVisualMatch>()
             var passesDone = 0
-            val totalPasses = 12
+            val totalPasses = passes
             val maxTimeout = 120000L
 
             val timeoutRunnable = Runnable {
                 if (continuation.isActive) continuation.resume(accumulated.values.toList())
             }
             handler.postDelayed(timeoutRunnable, maxTimeout)
+            
+            onLog("Loading $engineName engine...")
 
             val bridge = object {
                 @JavascriptInterface

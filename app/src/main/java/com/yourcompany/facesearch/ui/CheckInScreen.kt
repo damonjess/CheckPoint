@@ -84,78 +84,90 @@ fun CheckInScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
         ) {
             item {
+                val showSettings = !isLoading && (uiState is CheckInUiState.Idle || uiState is CheckInUiState.Error || uiState is CheckInUiState.NoFaceDetected)
+                
                 if (!isLoading) {
                     PhotoPreview(
                         bitmap = capturedBitmap,
                         isScanning = false,
-                        size = if (uiState is CheckInUiState.Success) 100.dp else 180.dp
+                        size = if (uiState is CheckInUiState.Success || uiState is CheckInUiState.NoMatch) 80.dp else 180.dp
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    PhotoCaptureActions(
-                        hasPhoto = capturedBitmap != null,
-                        isLoading = false,
-                        onCapturePhotoClick = onCapturePhotoClick,
-                        onSelectGalleryClick = onSelectGalleryClick
-                    )
-
-                    OutlinedButton(
-                        onClick = onProfileDiscoveryClick,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp)
-                    ) {
-                        Text("Find My Public Profiles", fontWeight = FontWeight.Bold)
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        OsintHintField(
-                            value = targetHint,
-                            onValueChange = onTargetHintChange,
-                            isEnabled = true
+                    if (showSettings) {
+                        PhotoCaptureActions(
+                            hasPhoto = capturedBitmap != null,
+                            isLoading = false,
+                            onCapturePhotoClick = onCapturePhotoClick,
+                            onSelectGalleryClick = onSelectGalleryClick
                         )
 
-                    }
+                        OutlinedButton(
+                            onClick = onProfileDiscoveryClick,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Text("Find My Public Profiles", fontWeight = FontWeight.Bold)
+                        }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Broader Lens coverage", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text(
-                                "Also request exact-image candidates when a SerpApi key is configured. This uses one additional authorized API request.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.DarkGray
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            OsintHintField(
+                                value = targetHint,
+                                onValueChange = onTargetHintChange,
+                                isEnabled = true
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Switch(
-                            checked = broadenLensCoverage,
-                            onCheckedChange = onBroadenLensCoverageChange
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Broader Lens coverage", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(
+                                    "Also request exact-image candidates when a SerpApi key is configured.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.DarkGray
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Switch(
+                                checked = broadenLensCoverage,
+                                onCheckedChange = onBroadenLensCoverageChange
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        SearchModeSelector(
+                            searchMode = searchMode,
+                            sensitivity = sensitivity,
+                            fullFaceMode = fullFaceMode,
+                            debugMode = debugMode,
+                            isLoading = false,
+                            onSearchModeChange = onSearchModeChange,
+                            onSensitivityChange = onSensitivityChange,
+                            onFullFaceModeChange = onFullFaceModeChange,
+                            onDebugModeChange = onDebugModeChange
                         )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                    } else if (uiState is CheckInUiState.Success || uiState is CheckInUiState.NoMatch) {
+                        OutlinedButton(
+                            onClick = onRetryClick,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Text("Adjust Search & Settings", fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    SearchModeSelector(
-                        searchMode = searchMode,
-                        sensitivity = sensitivity,
-                        fullFaceMode = fullFaceMode,
-                        debugMode = debugMode,
-                        isLoading = false,
-                        onSearchModeChange = onSearchModeChange,
-                        onSensitivityChange = onSensitivityChange,
-                        onFullFaceModeChange = onFullFaceModeChange,
-                        onDebugModeChange = onDebugModeChange
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
                 val isFreeMode = searchMode == SearchMode.FREE || 
@@ -163,7 +175,8 @@ fun CheckInScreen(
                                  searchMode == SearchMode.HYPER ||
                                  searchMode == SearchMode.DEEP_CRAWL ||
                                  searchMode == SearchMode.ADULT
-                if ((isFreeMode && capturedBitmap != null) && !isLoading) {
+                
+                if (showSettings && isFreeMode && capturedBitmap != null) {
                     Button(
                         onClick = { onConfirmFreeSearch(capturedBitmap) },
                         modifier = Modifier

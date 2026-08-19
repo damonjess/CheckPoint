@@ -114,8 +114,9 @@ fun SuccessContent(
         uiState.matches.filter { it.isLikelyFaceMatch && !it.isFaceVerified }
             .sortedByDescending { it.score }
     }
-    val hasStrongResults = (verifiedMatches.size + likelyMatches.size) >= 8
-    // Show visual candidates by default unless we already have many strong matches.
+    
+    val hasStrongResults = (verifiedMatches.size + likelyMatches.size) > 0
+    // Show visual candidates by default whenever there are no verified or likely face matches.
     var showReviewLeads by remember(uiState.matches) { mutableStateOf(!hasStrongResults) }
     val visualLeads = remember(uiState.matches) {
         uiState.matches.filterNot { it.isFaceVerified || it.isLikelyFaceMatch }
@@ -213,17 +214,21 @@ fun SuccessContent(
             )
 
             if (!uiState.termuxAvailable) {
+                val tipColor = if (!hasStrongResults) Color(0xFFFFCCBC) else Color(0xFFFFF9C4)
+                val textColor = if (!hasStrongResults) Color(0xFFBF360C) else Color(0xFF5D4037)
+                
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4)),
-                    shape = RoundedCornerShape(8.dp)
+                    colors = CardDefaults.cardColors(containerColor = tipColor),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = if (!hasStrongResults) 4.dp else 0.dp)
                 ) {
                     Text(
                         text = "Tip: Start the Termux OSINT helper for 5x deeper coverage and more verified matches.",
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF5D4037),
-                        fontWeight = FontWeight.Bold
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = textColor,
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
             }
@@ -337,15 +342,16 @@ fun NoMatchContent(
         if (!uiState.termuxAvailable) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4)),
-                shape = RoundedCornerShape(8.dp)
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFCCBC)),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
                 Text(
                     text = "Tip: Results are limited because the Termux OSINT backend is not running. Start it to unlock deep web scanning.",
-                    modifier = Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF5D4037),
-                    fontWeight = FontWeight.Bold
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFBF360C),
+                    fontWeight = FontWeight.ExtraBold
                 )
             }
         }

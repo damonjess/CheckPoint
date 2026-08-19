@@ -1,0 +1,9 @@
+- [x] Upgrade Termux `server.js`
+    - [x] Add Yandex and TinEye engines
+    - [x] Implement parallel execution (limit 2)
+    - [x] Add auto-scrolling and stealth headers
+- [x] Optimize `FaceSearchRepository.kt`
+    - [x] Add `skipEngines` parameter
+    - [x] Implement job filtering
+- [x] Update `CheckInViewModel.kt`
+    - [x] Orchestrate engine offloading when Termux is available

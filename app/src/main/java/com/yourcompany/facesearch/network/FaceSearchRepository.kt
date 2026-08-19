@@ -60,7 +60,8 @@ class FaceSearchRepository(private val context: Context) {
         "http://10.0.2.2:3000/api/search"
     )
 
-    private var activeBackend: String? = null
+    var activeBackend: String? = null
+        private set
 
     private fun mapModeForBackend(mode: String): String = when (mode) {
         "DEEP_CRAWL" -> "DEEP"
@@ -80,6 +81,7 @@ class FaceSearchRepository(private val context: Context) {
         searchMode: String = "PRECISION",
         includeExactLensMatches: Boolean = false,
         skipVisualEngines: Boolean = false,
+        enginesToSkip: Set<String> = emptySet(),
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = searchMutex.withLock {
         withContext(Dispatchers.IO) {
@@ -108,66 +110,68 @@ class FaceSearchRepository(private val context: Context) {
                 // We no longer auto-skip WebView engines just because Termux is available;
                 // the caller (CheckInViewModel) manages the balance between local and offloaded engines.
                 val visualJobs = if (!skipVisualEngines && publicUrl != null) {
-                    val jobs = mutableListOf(
-                        async { 
+                    val jobs = mutableListOf<Deferred<Unit>>()
+                    
+                    if ("Yandex" !in enginesToSkip) {
+                        jobs.add(async { 
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeYandex(publicUrl)
                                 onLog("Yandex found ${matches.size} candidate(s)")
-                                matches.take(50).forEach { match ->
-                                    onLog("  - ${match.title ?: "Candidate"} via Yandex")
-                                }
                                 allResults.addAll(matches)
+                                Unit
                             } finally { s.destroy() }
-                        },
-                        async { 
+                        })
+                    }
+
+                    if ("Bing" !in enginesToSkip) {
+                        jobs.add(async { 
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeBing(publicUrl)
                                 onLog("Bing found ${matches.size} candidate(s)")
-                                matches.take(50).forEach { match ->
-                                    onLog("  - ${match.title ?: "Candidate"} via Bing")
-                                }
                                 allResults.addAll(matches)
+                                Unit
                             } finally { s.destroy() }
-                        },
-                        async { 
+                        })
+                    }
+
+                    if ("Google" !in enginesToSkip) {
+                        jobs.add(async { 
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeGoogle(publicUrl)
                                 onLog("Google found ${matches.size} candidate(s)")
-                                matches.take(50).forEach { match ->
-                                    onLog("  - ${match.title ?: "Candidate"} via Google")
-                                }
                                 allResults.addAll(matches)
+                                Unit
                             } finally { s.destroy() }
-                        },
-                        async { 
+                        })
+                    }
+
+                    if ("Baidu" !in enginesToSkip) {
+                        jobs.add(async { 
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeBaidu(publicUrl)
                                 onLog("Baidu found ${matches.size} candidate(s)")
-                                matches.take(50).forEach { match ->
-                                    onLog("  - ${match.title ?: "Candidate"} via Baidu")
-                                }
                                 allResults.addAll(matches)
+                                Unit
                             } finally { s.destroy() }
-                        },
-                        async {
+                        })
+                    }
+                    
+                    if ("TinEye" !in enginesToSkip) {
+                        jobs.add(async {
                             val s = WebViewScraper.create(context)
                             try {
-                                // TinEye complements similarity engines with an
-                                // exact-image and near-duplicate reverse-image index.
                                 val matches: List<SerpVisualMatch> = s.scrapeTinEye(publicUrl)
                                 onLog("TinEye found ${matches.size} candidate(s)")
-                                matches.take(50).forEach { match ->
-                                    onLog("  - ${match.title ?: "Candidate"} via TinEye")
-                                }
                                 allResults.addAll(matches)
+                                Unit
                             } finally { s.destroy() }
-                        }
-                    )
-                    
+                        })
+                    }
+
                     // Add SerpApi if key is available
                     if (com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
                         jobs.add(async { 
@@ -177,9 +181,10 @@ class FaceSearchRepository(private val context: Context) {
                                 onLog
                             )
                             allResults.addAll(matches)
+                            Unit
                         })
                     }
-                    
+
                     jobs
                 } else {
                     onLog("Termux handling visual engines, skipping local WebView...")
@@ -221,7 +226,9 @@ class FaceSearchRepository(private val context: Context) {
                             try {
                                 val expandedSites = listOf(
                                     "linkedin.com", "x.com", "tiktok.com", "reddit.com",
-                                    "pinterest.com", "threads.net", "youtube.com", "onlyfans.com", "fansly.com"
+                                    "pinterest.com", "threads.net", "youtube.com", "onlyfans.com", 
+                                    "fansly.com", "snapchat.com", "vsco.co", "tumblr.com", 
+                                    "flickr.com", "quora.com", "medium.com"
                                 )
                                 expandedSites.forEach { site ->
                                     allResults.addAll(s.scrapeSocialDork(site, effectiveHint))
@@ -241,7 +248,7 @@ class FaceSearchRepository(private val context: Context) {
                                         "Running expanded public-web and adult-platform coverage for '$effectiveHint'..."
                                     }
                                 )
-                                allResults.addAll(s.scrapeAdultSites(effectiveHint))
+                                allResults.addAll(s.scrapeAdultSites(effectiveHint, onLog))
                             } finally { s.destroy() }
                         })
                     }
@@ -274,7 +281,14 @@ class FaceSearchRepository(private val context: Context) {
         
         // Count word frequencies to find a likely name
         val words = mutableMapOf<String, Int>()
-        val stopWords = setOf("image", "photo", "profile", "picture", "social", "media", "results", "found", "match", "visual")
+        val stopWords = setOf(
+            "image", "photo", "profile", "picture", "social", "media", "results", "found", "match", "visual",
+            "tiktok", "instagram", "facebook", "twitter", "reddit", "youtube", "threads", "linkedin", 
+            "snapchat", "pinterest", "onlyfans", "fansly", "the", "and", "for", "with", "from", "via",
+            "user", "account", "profile", "official", "page", "public", "private", "follow", "subscriber",
+            "yandex", "bing", "google", "lens", "tineye", "baidu", "view", "visit", "lacoste", "asos",
+            "clothing", "fashion", "stock", "model", "portrait", "person", "human", "face"
+        )
         
         candidates.forEach { match ->
             match.title?.split(Regex("\\s+"))?.forEach { word ->

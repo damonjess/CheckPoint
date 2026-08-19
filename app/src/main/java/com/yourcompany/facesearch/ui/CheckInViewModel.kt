@@ -42,7 +42,7 @@ class CheckInViewModel(
 ) : AndroidViewModel(application) {
 
     private companion object {
-        const val MAX_CANDIDATES_TO_VERIFY = 1000
+        const val MAX_CANDIDATES_TO_VERIFY = 10000
         const val VERIFIED_MATCH_BASE_SCORE = 5_000
         const val VERIFIED_MATCH_SIMILARITY_WEIGHT = 1_000
         const val LIKELY_MATCH_BASE_SCORE = 3_000
@@ -52,12 +52,12 @@ class CheckInViewModel(
         const val REVIEW_LEAD_SIMILARITY_WEIGHT = 1_000
         const val FALLBACK_CANDIDATE_BASE_SCORE = 250
         const val FALLBACK_CANDIDATE_SIMILARITY_WEIGHT = 1_000
-        const val MAX_FALLBACK_CANDIDATES = 200
+        const val MAX_FALLBACK_CANDIDATES = 500
         // In-app web results often provide small, compressed thumbnails. Keep
         // stronger review leads distinct, but retain a limited set of weaker
         // real-face candidates so non-Termux searches do not end empty.
         const val REVIEW_LEAD_SIMILARITY_THRESHOLD = 0.15f
-        const val FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD = 0.05f
+        const val FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD = 0.001f
     }
 
     var isSearching by mutableStateOf(value = false)
@@ -554,7 +554,17 @@ class CheckInViewModel(
         }
 
         val candidates = prioritizeCandidates(allRawResults)
-        addLog("Checking ${candidates.size} best visual candidate(s) for a visible face…")
+        addLog("Verification Queue: ${candidates.size} unique candidate(s) after initial filtering.")
+        
+        // Detailed logging of what we're checking
+        candidates.take(15).forEach { match ->
+            val domain = match.link?.let { try { Uri.parse(it).host } catch(_:Exception) { null } } ?: match.source ?: "unknown"
+            addLog("Queueing: ${match.title ?: "Untitled"} [$domain]")
+        }
+        if (candidates.size > 15) {
+            addLog("... and ${candidates.size - 15} more candidates.")
+        }
+
         val review = reviewCandidates(candidates, faceBitmap)
         val verifiedMatches = review.verifiedMatches
         val likelyMatches = review.likelyMatches
@@ -666,7 +676,9 @@ class CheckInViewModel(
                     val other = groupedByUrl[j]
                     val otherEmb = other.faceEmbedding ?: continue
                     
-                    if (com.yourcompany.facesearch.vision.FaceMatcherExt.cosineSimilarity(currentEmb, otherEmb) > 0.99f) {
+                    // Relaxed from 0.99f to 0.999f to only merge near-exact byte-level duplicates.
+                    // This ensures we show "all of them" as requested.
+                    if (com.yourcompany.facesearch.vision.FaceMatcherExt.cosineSimilarity(currentEmb, otherEmb) > 0.999f) {
                         duplicates.add(other)
                         processed.add(j)
                     }
@@ -717,8 +729,13 @@ class CheckInViewModel(
         )
         return results.asSequence()
             .filter { !it.link.isNullOrBlank() }
-            .filterNot { match -> isLikelyProductResult(match) || isIrrelevantVisualResult(match) }
-            .distinctBy { match -> ThumbnailUtils.canonicalKey(match.thumbnail) ?: match.link }
+            // Significantly relaxed filtering to show more "raw" results as requested by user
+            .filterNot { match -> 
+                val metadata = listOfNotNull(match.title, match.link, match.source).joinToString(" ").lowercase()
+                // Only filter the most obvious junk
+                metadata.contains("favicon") || metadata.contains("spacer.gif")
+            }
+            .distinctBy { match -> match.link } // Deduplicate by URL only, not thumbnail
             .sortedByDescending { match ->
                 val thumbnail = ThumbnailUtils.normalize(match.thumbnail)
                 val hasUsableThumbnail = thumbnail != null &&

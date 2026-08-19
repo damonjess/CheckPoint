@@ -203,11 +203,10 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
                 ?: return false
 
             val box = dominant.boundingBox.clampTo(bitmap.width, bitmap.height)
-            val coverage = (box.width().toFloat() * box.height().toFloat()) /
-                (bitmap.width.toFloat() * bitmap.height.toFloat())
-            box.width() >= MIN_CANDIDATE_FACE_PIXELS &&
-                box.height() >= MIN_CANDIDATE_FACE_PIXELS &&
-                coverage >= MIN_CANDIDATE_FACE_COVERAGE
+            
+            // Permissive check: just ensure the face has some minimum size in pixels.
+            // We ignore coverage percentage for candidates to capture background people.
+            box.width() >= 12 && box.height() >= 12
         } catch (_: Exception) {
             false
         }

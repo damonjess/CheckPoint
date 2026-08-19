@@ -114,6 +114,9 @@ class FaceSearchRepository(private val context: Context) {
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeYandex(publicUrl)
                                 onLog("Yandex found ${matches.size} candidate(s)")
+                                matches.take(50).forEach { match ->
+                                    onLog("  - ${match.title ?: "Candidate"} via Yandex")
+                                }
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         },
@@ -122,6 +125,9 @@ class FaceSearchRepository(private val context: Context) {
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeBing(publicUrl)
                                 onLog("Bing found ${matches.size} candidate(s)")
+                                matches.take(50).forEach { match ->
+                                    onLog("  - ${match.title ?: "Candidate"} via Bing")
+                                }
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         },
@@ -130,6 +136,9 @@ class FaceSearchRepository(private val context: Context) {
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeGoogle(publicUrl)
                                 onLog("Google found ${matches.size} candidate(s)")
+                                matches.take(50).forEach { match ->
+                                    onLog("  - ${match.title ?: "Candidate"} via Google")
+                                }
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         },
@@ -138,6 +147,9 @@ class FaceSearchRepository(private val context: Context) {
                             try {
                                 val matches: List<SerpVisualMatch> = s.scrapeBaidu(publicUrl)
                                 onLog("Baidu found ${matches.size} candidate(s)")
+                                matches.take(50).forEach { match ->
+                                    onLog("  - ${match.title ?: "Candidate"} via Baidu")
+                                }
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         },
@@ -148,6 +160,9 @@ class FaceSearchRepository(private val context: Context) {
                                 // exact-image and near-duplicate reverse-image index.
                                 val matches: List<SerpVisualMatch> = s.scrapeTinEye(publicUrl)
                                 onLog("TinEye found ${matches.size} candidate(s)")
+                                matches.take(50).forEach { match ->
+                                    onLog("  - ${match.title ?: "Candidate"} via TinEye")
+                                }
                                 allResults.addAll(matches)
                             } finally { s.destroy() }
                         }

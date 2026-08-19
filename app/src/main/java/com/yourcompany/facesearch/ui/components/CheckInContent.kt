@@ -101,6 +101,11 @@ fun SuccessContent(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val consoleScrollState = rememberScrollState()
+    LaunchedEffect(uiState.logs.size) {
+        consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
+    }
+
     val verifiedMatches = remember(uiState.matches) {
         uiState.matches.filter { it.isFaceVerified }
             .sortedByDescending { it.score }
@@ -251,7 +256,8 @@ fun SuccessContent(
         Spacer(modifier = Modifier.height(8.dp))
         SherlockConsole(
             logs = uiState.logs,
-            modifier = Modifier.fillMaxWidth().height(150.dp)
+            modifier = Modifier.fillMaxWidth().height(150.dp),
+            scrollState = consoleScrollState
         )
     }
 }
@@ -263,6 +269,11 @@ fun NoFaceContent(
     onRetryClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val consoleScrollState = rememberScrollState()
+    LaunchedEffect(logs.size) {
+        consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -285,7 +296,8 @@ fun NoFaceContent(
             )
             SherlockConsole(
                 logs = logs,
-                modifier = Modifier.fillMaxWidth().height(200.dp)
+                modifier = Modifier.fillMaxWidth().height(200.dp),
+                scrollState = consoleScrollState
             )
         }
     }
@@ -303,6 +315,11 @@ fun NoMatchContent(
     val message = uiState.message
     val hasAccessChallenge = uiState.hasAccessChallenge
     val logs = uiState.logs
+    
+    val consoleScrollState = rememberScrollState()
+    LaunchedEffect(logs.size) {
+        consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -350,7 +367,8 @@ fun NoMatchContent(
         Spacer(modifier = Modifier.height(8.dp))
         SherlockConsole(
             logs = logs,
-            modifier = Modifier.fillMaxWidth().height(200.dp)
+            modifier = Modifier.fillMaxWidth().height(200.dp),
+            scrollState = consoleScrollState
         )
         
         Button(
@@ -384,6 +402,11 @@ fun ErrorContent(
     onRetryClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val consoleScrollState = rememberScrollState()
+    LaunchedEffect(logs.size) {
+        consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -400,7 +423,8 @@ fun ErrorContent(
             )
             SherlockConsole(
                 logs = logs,
-                modifier = Modifier.fillMaxWidth().height(200.dp)
+                modifier = Modifier.fillMaxWidth().height(200.dp),
+                scrollState = consoleScrollState
             )
         }
     }

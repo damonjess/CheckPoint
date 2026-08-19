@@ -101,12 +101,6 @@ fun SuccessContent(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val hasStrongerResult = uiState.matches.any {
-        it.isFaceVerified || it.isLikelyFaceMatch || it.confidence >= 0.45f
-    }
-    // If the fallback only found ranked face candidates, show them immediately
-    // instead of presenting a blank or no-match screen.
-    var showReviewLeads by remember(uiState.matches) { mutableStateOf(!hasStrongerResult) }
     val verifiedMatches = remember(uiState.matches) {
         uiState.matches.filter { it.isFaceVerified }
             .sortedByDescending { it.score }
@@ -115,6 +109,9 @@ fun SuccessContent(
         uiState.matches.filter { it.isLikelyFaceMatch && !it.isFaceVerified }
             .sortedByDescending { it.score }
     }
+    val hasStrongResults = (verifiedMatches.size + likelyMatches.size) >= 8
+    // Show visual candidates by default unless we already have many strong matches.
+    var showReviewLeads by remember(uiState.matches) { mutableStateOf(!hasStrongResults) }
     val visualLeads = remember(uiState.matches) {
         uiState.matches.filterNot { it.isFaceVerified || it.isLikelyFaceMatch }
             .sortedWith(compareByDescending<WebMatchDisplay> { it.isSocial }.thenByDescending { it.score })

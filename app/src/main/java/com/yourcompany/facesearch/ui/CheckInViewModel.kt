@@ -42,7 +42,7 @@ class CheckInViewModel(
 ) : AndroidViewModel(application) {
 
     private companion object {
-        const val MAX_CANDIDATES_TO_VERIFY = 250
+        const val MAX_CANDIDATES_TO_VERIFY = 1000
         const val VERIFIED_MATCH_BASE_SCORE = 5_000
         const val VERIFIED_MATCH_SIMILARITY_WEIGHT = 1_000
         const val LIKELY_MATCH_BASE_SCORE = 3_000
@@ -52,12 +52,12 @@ class CheckInViewModel(
         const val REVIEW_LEAD_SIMILARITY_WEIGHT = 1_000
         const val FALLBACK_CANDIDATE_BASE_SCORE = 250
         const val FALLBACK_CANDIDATE_SIMILARITY_WEIGHT = 1_000
-        const val MAX_FALLBACK_CANDIDATES = 100
+        const val MAX_FALLBACK_CANDIDATES = 200
         // In-app web results often provide small, compressed thumbnails. Keep
         // stronger review leads distinct, but retain a limited set of weaker
         // real-face candidates so non-Termux searches do not end empty.
-        const val REVIEW_LEAD_SIMILARITY_THRESHOLD = 0.25f
-        const val FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD = 0.10f
+        const val REVIEW_LEAD_SIMILARITY_THRESHOLD = 0.15f
+        const val FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD = 0.05f
     }
 
     var isSearching by mutableStateOf(value = false)
@@ -736,10 +736,10 @@ class CheckInViewModel(
     private fun isLikelyProductResult(match: SerpVisualMatch): Boolean {
         // Significantly relaxed for "massive" search expansion
         val productTerms = listOf(
-            "shop", "store", "product", "buy", "sale", "amazon", "ebay", "etsy", "walmart", "shopify"
+            "amazon", "ebay", "etsy", "walmart", "shopify"
         )
         val junkTerms = listOf(
-            "watch?v=", "shorts/", "video", "subscribe", "playlist", "trending"
+            "watch?v=", "shorts/", "trending"
         )
         val metadata = listOfNotNull(match.title, match.link, match.source)
             .joinToString(" ")
@@ -761,13 +761,11 @@ class CheckInViewModel(
             .joinToString(" ")
             .lowercase(Locale.US)
         val stockDomains = listOf(
-            "shutterstock.", "istockphoto.", "gettyimages.", "adobestock.",
-            "alamy.", "dreamstime.", "depositphotos.", "freepik.",
-            "vectorstock.", "pngtree.", "123rf."
+            "shutterstock.", "istockphoto.", "gettyimages.", "adobestock."
         )
         val nonPhotographicTerms = listOf(
             "illustration", "vector", "cartoon", "clipart", "line art",
-            "drawing", "anime", "avatar", "emoji", "stock photo", "stock image"
+            "drawing", "anime", "avatar", "emoji"
         )
         return stockDomains.any { metadata.contains(it) } ||
             nonPhotographicTerms.any { term ->

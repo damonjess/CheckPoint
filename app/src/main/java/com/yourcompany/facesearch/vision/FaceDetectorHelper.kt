@@ -403,9 +403,9 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
         const val MIN_CAPTURE_FALLBACK_IMAGE_EDGE = 160
         const val MIN_CAPTURE_FALLBACK_FACE_PIXELS = 64
         const val MIN_CAPTURE_FALLBACK_FACE_COVERAGE = 0.03f
-        const val MIN_CANDIDATE_IMAGE_EDGE = 64
-        const val MIN_CANDIDATE_FACE_PIXELS = 24
-        const val MIN_CANDIDATE_FACE_COVERAGE = 0.015f
+        const val MIN_CANDIDATE_IMAGE_EDGE = 48
+        const val MIN_CANDIDATE_FACE_PIXELS = 16
+        const val MIN_CANDIDATE_FACE_COVERAGE = 0.005f
         const val MIN_DOMINANT_FACE_PIXELS = 64
         const val MIN_DOMINANT_FACE_COVERAGE = 0.03f
         const val DOMINANT_FACE_AREA_RATIO = 2.5

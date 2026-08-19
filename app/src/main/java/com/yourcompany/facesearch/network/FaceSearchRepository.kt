@@ -253,7 +253,7 @@ class FaceSearchRepository(private val context: Context) {
         val candidates = matches
             .filter { !it.title.isNullOrBlank() && it.title != "Visual Match" }
             .filter { it.score > 200 }
-            .take(15)
+            .take(50)
         
         if (candidates.isEmpty()) return null
         

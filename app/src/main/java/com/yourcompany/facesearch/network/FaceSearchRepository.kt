@@ -276,7 +276,7 @@ class FaceSearchRepository(private val context: Context) {
     private fun harvestNamesFromMatches(matches: List<SerpVisualMatch>): String? {
         val candidates = matches
             .filter { !it.title.isNullOrBlank() && it.title != "Visual Match" }
-            .filter { it.score > 200 }
+            .filter { it.score > 100 }
             .take(50)
         
         if (candidates.isEmpty()) return null

@@ -637,7 +637,7 @@ class CheckInViewModel(
             addLog("... and ${candidates.size - 15} more candidates.")
         }
 
-        val review = reviewCandidates(candidates, faceBitmap)
+        val review = reviewCandidates(candidates, faceBitmap, useTermux)
         val verifiedMatches = review.verifiedMatches
         val likelyMatches = review.likelyMatches
         val unverifiedLeads = review.faceBearingLeads
@@ -982,7 +982,8 @@ class CheckInViewModel(
      */
     private suspend fun reviewCandidates(
         results: List<SerpVisualMatch>,
-        sourceFaceBitmap: Bitmap
+        sourceFaceBitmap: Bitmap,
+        isTermuxAvailable: Boolean
     ): CandidateReview = coroutineScope {
         val sourceEmbedding = faceEmbedder.getEmbedding(sourceFaceBitmap)
             ?: return@coroutineScope CandidateReview(
@@ -998,6 +999,11 @@ class CheckInViewModel(
         val fallbackCandidates = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
         val excludedCounter = java.util.concurrent.atomic.AtomicInteger(0)
         val lowRelevanceCounter = java.util.concurrent.atomic.AtomicInteger(0)
+
+        // Dynamic thresholds based on search quality/source
+        val verifiedThreshold = if (isTermuxAvailable) FaceVerifier.VERIFICATION_THRESHOLD else 0.60f
+        val likelyThreshold = if (isTermuxAvailable) LIKELY_MATCH_THRESHOLD else 0.42f
+        val reviewLeadThreshold = if (isTermuxAvailable) REVIEW_LEAD_SIMILARITY_THRESHOLD else 0.05f
 
         // Limit parallelism to avoid overwhelming the device (ML Kit/Embedder)
         val semaphore = kotlinx.coroutines.sync.Semaphore(8)
@@ -1032,21 +1038,21 @@ class CheckInViewModel(
                                     val discoveryBoost = if (similarity in 0.72f..0.94f) 450 else 0
 
                                     when {
-                                        similarity >= FaceVerifier.VERIFICATION_THRESHOLD -> {
+                                        similarity >= verifiedThreshold -> {
                                             verified += faceBearingMatch.copy(
                                                 score = VERIFIED_MATCH_BASE_SCORE +
                                                     (similarity * VERIFIED_MATCH_SIMILARITY_WEIGHT).toInt() +
                                                     discoveryBoost
                                             )
                                         }
-                                        similarity >= LIKELY_MATCH_THRESHOLD -> {
+                                        similarity >= likelyThreshold -> {
                                             likely += faceBearingMatch.copy(
                                                 score = LIKELY_MATCH_BASE_SCORE +
                                                     (similarity * LIKELY_MATCH_SIMILARITY_WEIGHT).toInt() +
                                                     discoveryBoost
                                             )
                                         }
-                                        similarity >= REVIEW_LEAD_SIMILARITY_THRESHOLD -> {
+                                        similarity >= reviewLeadThreshold -> {
                                             faceBearingLeads += faceBearingMatch.copy(
                                                 score = REVIEW_LEAD_BASE_SCORE +
                                                     (similarity * REVIEW_LEAD_SIMILARITY_WEIGHT).toInt()

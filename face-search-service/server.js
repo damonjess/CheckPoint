@@ -352,11 +352,14 @@ app.post('/api/search', async (request, response) => {
       completedEngines += chunk.length;
   }
 
-  const matches = outcomes.flatMap(({ result }) => result.items).map(item => ({
-    ...item,
-    isSocial: isSocialUrl(item.link),
-    score: 100
-  }));
+  const matches = outcomes.flatMap(({ result }) => result.items).map(item => {
+    const isSocial = isSocialUrl(item.link);
+    return {
+      ...item,
+      isSocial,
+      score: (isSocial ? 400 : 150) + (item.thumbnail ? 100 : 0)
+    };
+  });
 
   broadcastProgress(`Scan complete. Found ${matches.length} matches.`, 1.0);
 

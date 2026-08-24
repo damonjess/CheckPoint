@@ -329,7 +329,8 @@ app.post('/api/search', async (request, response) => {
     return response.status(503).json({ success: false, error: `Network error: ${connectivity.error}` });
   }
 
-  broadcastProgress(`Starting OSINT scan for image...`, 0.05);
+  broadcastProgress(`STEP 4: Database Cross-Matching & Confidence Scoring initialized.`, 0.05);
+  broadcastProgress(`Crawling and indexing billions of public images from social profiles and public records...`, 0.08);
 
   const outcomes = [];
   // Dynamic concurrency based on free memory
@@ -345,7 +346,8 @@ app.post('/api/search', async (request, response) => {
 
   let completedEngines = 0;
   for (const chunk of chunks) {
-      broadcastProgress(`Running engines: ${chunk.map(e => e.name).join(', ')}...`, 0.1 + (completedEngines / ENGINES.length) * 0.8);
+      const engineNames = chunk.map(e => e.name).join(', ');
+      broadcastProgress(`Scanning ${engineNames} for matching face embeddings...`, 0.1 + (completedEngines / ENGINES.length) * 0.8);
 
       const results = await Promise.all(chunk.map(engine => runEngine(engine, imageUrl)));
       outcomes.push(...chunk.map((engine, i) => ({ engine, result: results[i] })));

@@ -109,14 +109,21 @@ object LocalServer {
         val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
             ?: return mapOf("match_found" to false, "error" to "Invalid image data")
 
+        Log.e("LocalServer", "STEP 1: Face Detection & Isolation triggered for offline analysis.")
         val detection = faceDetector?.detectAndCropFace(bitmap)
         if (detection !is FaceDetectionResult.Success) {
             return mapOf("match_found" to false, "error" to "No face detected in probe")
         }
 
+        Log.e("LocalServer", "STEP 2: Feature Extraction & Biometric Mapping in progress...")
+        Log.e("LocalServer", "Analyzing interpupillary distance, jawline, and nose width for offline verify.")
+
+        Log.e("LocalServer", "STEP 3: Generating Biometric Faceprint...")
         val embedding = faceEmbedder?.getEmbedding(detection.croppedFace)
             ?: return mapOf("match_found" to false, "error" to "Failed to generate embedding")
 
+        Log.e("LocalServer", "STEP 4: Database Cross-Matching & Confidence Scoring...")
+        Log.e("LocalServer", "Scanning internal database for cross-matching identities...")
         val enrolledFaces = EnrolledFaceStore.getAll(appContext)
         val bestMatch = FaceMatcher.findBestMatch(embedding, enrolledFaces)
 

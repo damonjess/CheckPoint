@@ -146,11 +146,19 @@ private fun PrimaryMatchContent(
                 val confidenceInt = (match.confidence * 100).toInt()
                 Text(
                     text = when {
-                        match.isFaceVerified -> if (confidenceInt >= 99) "100% match" else "$confidenceInt% match"
+                        confidenceInt >= 90 -> "Highly certain match"
+                        confidenceInt >= 70 -> "Confident match"
+                        confidenceInt >= 50 -> "Weak match"
+                        match.isFaceVerified -> "$confidenceInt% match"
                         match.isLikelyFaceMatch -> "Possible match"
                         else -> "Visual lead"
                     },
-                    color = if (match.isFaceVerified && confidenceInt >= 90) Color(0xFF2E7D32) else Color(0xFFF57F17),
+                    color = when {
+                        confidenceInt >= 90 -> Color(0xFF2E7D32) // Green
+                        confidenceInt >= 70 -> Color(0xFF388E3C) // Lighter Green
+                        confidenceInt >= 50 -> Color(0xFFF57F17) // Amber
+                        else -> Color(0xFFF57F17)
+                    },
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = (-0.5).sp
@@ -333,14 +341,20 @@ private fun SecondaryMatchContent(
                     }
                 }
                 
-                // Score Badge
                 Surface(
-                    color = if (match.isFaceVerified) Color(0xFF4CAF50) else Amber,
+                    color = when {
+                        (match.confidence * 100).toInt() >= 90 -> Color(0xFF4CAF50)
+                        (match.confidence * 100).toInt() >= 70 -> Color(0xFF8BC34A)
+                        else -> Amber
+                    },
                     shape = RoundedCornerShape(bottomStart = 8.dp),
                     modifier = Modifier.align(Alignment.TopEnd)
                 ) {
                     Text(
                         text = when {
+                            (match.confidence * 100).toInt() >= 90 -> "CERTAIN"
+                            (match.confidence * 100).toInt() >= 70 -> "CONFIDENT"
+                            (match.confidence * 100).toInt() >= 50 -> "WEAK"
                             match.isFaceVerified -> "${(match.confidence * 100).toInt()}%"
                             match.isLikelyFaceMatch -> "POSSIBLE"
                             else -> "LEAD"

@@ -57,7 +57,7 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-            .setMinFaceSize(0.10f)
+            .setMinFaceSize(0.05f)
             .build()
     )
 
@@ -206,7 +206,7 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
             
             // Permissive check: just ensure the face has some minimum size in pixels.
             // We ignore coverage percentage for candidates to capture background people.
-            box.width() >= 12 && box.height() >= 12
+            box.width() >= 8 && box.height() >= 8
         } catch (_: Exception) {
             false
         }
@@ -305,11 +305,11 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
 
     private fun cropAndAlign(source: Bitmap, face: Face): Bitmap {
         val box = face.boundingBox.clampTo(source.width, source.height)
-        val width = min(source.width, max(box.width(), (box.width() * 1.55f).toInt()))
-        val height = min(source.height, max(box.height(), (box.height() * 1.85f).toInt()))
+        val width = min(source.width, max(box.width(), (box.width() * 1.75f).toInt()))
+        val height = min(source.height, max(box.height(), (box.height() * 2.15f).toInt()))
         val centerX = box.centerX()
         // Shift slightly upward to retain forehead and the full jawline.
-        val centerY = (box.centerY() - box.height() * 0.04f).toInt()
+        val centerY = (box.centerY() - box.height() * 0.05f).toInt()
         val left = (centerX - width / 2).coerceIn(0, source.width - width)
         val top = (centerY - height / 2).coerceIn(0, source.height - height)
         val crop = Bitmap.createBitmap(source, left, top, width, height)
@@ -402,22 +402,22 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
         const val MIN_CAPTURE_FALLBACK_IMAGE_EDGE = 160
         const val MIN_CAPTURE_FALLBACK_FACE_PIXELS = 64
         const val MIN_CAPTURE_FALLBACK_FACE_COVERAGE = 0.03f
-        const val MIN_CANDIDATE_IMAGE_EDGE = 48
-        const val MIN_CANDIDATE_FACE_PIXELS = 16
-        const val MIN_CANDIDATE_FACE_COVERAGE = 0.005f
+        const val MIN_CANDIDATE_IMAGE_EDGE = 32
+        const val MIN_CANDIDATE_FACE_PIXELS = 8
+        const val MIN_CANDIDATE_FACE_COVERAGE = 0.002f
         const val MIN_DOMINANT_FACE_PIXELS = 64
         const val MIN_DOMINANT_FACE_COVERAGE = 0.03f
-        const val DOMINANT_FACE_AREA_RATIO = 2.5
-        const val MAX_YAW_DEGREES = 32f
-        const val MAX_PITCH_DEGREES = 25f
-        const val MAX_ROLL_DEGREES = 22f
-        const val MIN_LUMINANCE = 40f
-        const val MAX_LUMINANCE = 230f
-        const val MIN_SHARPNESS = 25f
-        const val MIN_CAPTURE_FALLBACK_LUMINANCE = 25f
-        const val MAX_CAPTURE_FALLBACK_LUMINANCE = 240f
-        const val MIN_CAPTURE_FALLBACK_SHARPNESS = 10f
-        const val MIN_EYE_OPEN_PROBABILITY = 0.30f
+        const val DOMINANT_FACE_AREA_RATIO = 1.5
+        const val MAX_YAW_DEGREES = 45f
+        const val MAX_PITCH_DEGREES = 35f
+        const val MAX_ROLL_DEGREES = 30f
+        const val MIN_LUMINANCE = 30f
+        const val MAX_LUMINANCE = 240f
+        const val MIN_SHARPNESS = 12f
+        const val MIN_CAPTURE_FALLBACK_LUMINANCE = 20f
+        const val MAX_CAPTURE_FALLBACK_LUMINANCE = 245f
+        const val MIN_CAPTURE_FALLBACK_SHARPNESS = 8f
+        const val MIN_EYE_OPEN_PROBABILITY = 0.20f
         const val SHARPNESS_SAMPLE_SIZE = 128
     }
 }

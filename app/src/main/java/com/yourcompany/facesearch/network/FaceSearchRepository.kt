@@ -46,8 +46,8 @@ class FaceSearchRepository(private val context: Context) {
 
     // Faster client for local discovery
     private val fastClient = client.newBuilder()
-        .connectTimeout(2, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
     private val freeHost = FreeImageHost()
@@ -57,7 +57,9 @@ class FaceSearchRepository(private val context: Context) {
     private val potentialBackends: List<String> = listOf(
         "http://127.0.0.1:3000/api/search",
         "http://localhost:3000/api/search",
-        "http://10.0.2.2:3000/api/search"
+        "http://10.0.2.2:3000/api/search", // Default Emulator Bridge
+        "http://10.0.3.2:3000/api/search", // Genymotion
+        "http://[::1]:3000/api/search"     // IPv6 Loopback
     )
 
     var activeBackend: String? = null
@@ -396,7 +398,7 @@ class FaceSearchRepository(private val context: Context) {
 
     suspend fun isLocalBackendAvailable(): Boolean = withContext(Dispatchers.IO) {
         val backends = potentialBackends
-        Log.e("CheckIn", "DEBUG: Probing ${backends.size} backends in parallel...")
+        Log.e("CheckIn", "DEBUG: Probing ${backends.size} backends for Termux helper...")
         
         val jobs = backends.map { backend ->
             async {
@@ -409,13 +411,15 @@ class FaceSearchRepository(private val context: Context) {
                     val req = Request.Builder().url(pingUrl).build()
                     fastClient.newCall(req).execute().use { resp ->
                         if (resp.isSuccessful) {
-                            Log.e("CheckIn", "✓ Found Termux at $backend")
+                            Log.e("CheckIn", "✓ Found Termux backend at $backend")
                             activeBackend = backend.removeSuffix("/api/search")
                             return@async true
+                        } else {
+                            Log.w("CheckIn", "✗ Backend at $backend returned code ${resp.code}")
                         }
                     }
                 } catch (e: Exception) {
-                    // Log.v("CheckIn", "Probe failed for $backend: ${e.message}")
+                    Log.v("CheckIn", "✗ Probe failed for $backend: ${e.message}")
                 }
                 false
             }

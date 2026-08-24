@@ -419,14 +419,19 @@ class CheckInViewModel(
         var useTermux = true
 
         addLog("Probing for local Termux backend...")
-        // Reduced timeout for faster fallback when Termux is not running
-        val available = withTimeoutOrNull(2000L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
+        // Increased timeout to ensure reliable detection on slower networks/emulators
+        val available = withTimeoutOrNull(10000L) { faceSearchRepository.isLocalBackendAvailable() } ?: false
         if (!available) {
-            addLog("⚠ No local Termux server detected; results will be limited.")
-            addLog("Tip: Start the Termux OSINT helper for 5x deeper coverage.")
+            addLog("⚠ No local Termux server detected at any expected endpoint after 10s.")
+            addLog("Tip: Ensure the OSINT helper is running in Termux with 'npm start'.")
+            if (!android.os.Build.MODEL.contains("sdk", ignoreCase = true) && 
+                !android.os.Build.MODEL.contains("emulator", ignoreCase = true)) {
+                addLog("Tip: On physical devices, run 'adb reverse tcp:3000 tcp:3000' in your terminal.")
+            }
             useTermux = false
         } else {
-            addLog("Local Termux backend detected; offloading heavy engines.")
+            val backend = faceSearchRepository.activeBackend ?: "127.0.0.1"
+            addLog("✓ Local Termux backend detected at $backend.")
             faceSearchRepository.activeBackend?.let { connectToTermuxWebSocket(it) }
         }
 

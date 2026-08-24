@@ -373,8 +373,8 @@ app.post('/api/search', async (request, response) => {
   });
 });
 
-server.listen(PORT, '127.0.0.1', async () => {
-  console.log(`[Sherlock OSINT] Running on http://127.0.0.1:${PORT}`);
+server.listen(PORT, '0.0.0.0', async () => {
+  console.log(`[Sherlock OSINT] Running on http://0.0.0.0:${PORT}`);
   console.log(`[Status] Runtime: ${isTermux() ? 'Termux' : 'Desktop'}`);
 
   const connectivity = await checkConnectivity();

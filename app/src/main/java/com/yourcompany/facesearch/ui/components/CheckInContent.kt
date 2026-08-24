@@ -3,12 +3,15 @@ package com.yourcompany.facesearch.ui.components
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -329,74 +332,144 @@ fun NoMatchContent(
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        ErrorState(
+        EmptyState(
             title = if (hasAccessChallenge) "Search Needs Your Action" else "No Confirmed Face Match",
             message = message.ifBlank {
                 "No locally verified face match was found for \"$targetHint\"."
             },
+            icon = if (hasAccessChallenge) Icons.Default.Info else Icons.Default.SearchOff,
             onRetry = onRetryClick
         )
 
+        Spacer(modifier = Modifier.height(8.dp))
+
         if (!uiState.termuxAvailable) {
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFFFCCBC)),
                 shape = RoundedCornerShape(12.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Text(
-                    text = "Tip: Results are limited because the Termux OSINT backend is not running. Start it to unlock deep web scanning.",
+                Row(
                     modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFBF360C),
-                    fontWeight = FontWeight.ExtraBold
-                )
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFBF360C))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Tip: Results are limited because the Termux OSINT backend is not running. Start it to unlock deep web scanning.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFFBF360C),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
+            Spacer(modifier = Modifier.height(24.dp))
         }
 
         if (hasAccessChallenge) {
-            Text(
-                text = "A search provider requested an access check. Use the TinEye exact-image check below, or complete any provider prompt yourself; this app will not automate access checks.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.DarkGray
-            )
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    text = "A search provider requested an access check. Use the TinEye exact-image check below, or complete any provider prompt yourself; this app will not automate access checks.",
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(24.dp))
         }
+
+        SearchTipsSection()
+        
+        Spacer(modifier = Modifier.height(24.dp))
 
         Text(
             "SHERLOCK OSINT CONSOLE",
             style = MaterialTheme.typography.labelSmall,
             color = Amber,
-            modifier = Modifier.align(Alignment.Start)
+            modifier = Modifier.align(Alignment.Start).padding(horizontal = 16.dp)
         )
         Spacer(modifier = Modifier.height(8.dp))
         SherlockConsole(
             logs = logs,
-            modifier = Modifier.fillMaxWidth().height(200.dp),
+            modifier = Modifier.fillMaxWidth().height(200.dp).padding(horizontal = 16.dp),
             scrollState = consoleScrollState
         )
         
-        Button(
-            onClick = onTinEyeExactSearch,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-            shape = RoundedCornerShape(12.dp)
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = Color.White)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Open TinEye Exact-Image Check", color = Color.White, fontWeight = FontWeight.Bold)
-        }
+            Button(
+                onClick = onTinEyeExactSearch,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = Color.White)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Open TinEye Exact-Image Check", color = Color.White, fontWeight = FontWeight.Bold)
+            }
 
-        OutlinedButton(
-            onClick = onConfirmFreeSearch,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            border = BorderStroke(1.dp, Color(0xFF4CAF50)),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF2E7D32))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Share Photo to Another Search App", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+            OutlinedButton(
+                onClick = onConfirmFreeSearch,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                border = BorderStroke(1.dp, Color(0xFF4CAF50)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF2E7D32))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Share Photo to Another Search App", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun SearchTipsSection() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
+        Text(
+            text = "WHY NO MATCHES?",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = Color.Gray
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        val tips = listOf(
+            "Lighting & Angle" to "Ensure the face is well-lit and facing forward.",
+            "Database Coverage" to "The person may not have a public digital footprint.",
+            "Image Quality" to "Low-resolution images can hinder facial recognition."
+        )
+        
+        tips.forEach { (title, desc) ->
+            Row(modifier = Modifier.padding(bottom = 8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .size(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Amber)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(text = title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                    Text(text = desc, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                }
+            }
         }
     }
 }

@@ -46,7 +46,7 @@ fun LoadingContent(
             contentAlignment = Alignment.Center
         ) {
             SocialOrbitSearchScreen(
-                faceBitmap = capturedBitmap,
+                faceBitmap = uiState.isolatedFace ?: capturedBitmap,
                 modifier = Modifier.fillMaxSize()
             )
 

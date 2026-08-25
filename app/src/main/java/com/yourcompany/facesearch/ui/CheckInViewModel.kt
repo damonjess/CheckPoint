@@ -708,10 +708,17 @@ class CheckInViewModel(
             existingMatches + newResults.map(::mapToDisplay)
         ).sortedByDescending { it.score }
 
+        val isolatedFace = when (val s = uiState) {
+            is CheckInUiState.Loading -> s.isolatedFace
+            is CheckInUiState.Success -> s.isolatedFace
+            else -> null
+        }
+
         uiState = CheckInUiState.Success(
             matches = allMatches,
             logs = currentLogs.toList(),
-            termuxAvailable = termuxAvailable
+            termuxAvailable = termuxAvailable,
+            isolatedFace = isolatedFace
         )
         // Ensure scanning state is cleared when results are displayed
         isSearching = false

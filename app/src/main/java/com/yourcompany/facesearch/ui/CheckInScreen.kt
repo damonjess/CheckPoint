@@ -87,8 +87,12 @@ fun CheckInScreen(
                 val showSettings = !isLoading && (uiState is CheckInUiState.Idle || uiState is CheckInUiState.Error || uiState is CheckInUiState.NoFaceDetected)
                 
                 if (!isLoading) {
+                    val displayBitmap = when (uiState) {
+                        is CheckInUiState.Success -> uiState.isolatedFace ?: capturedBitmap
+                        else -> capturedBitmap
+                    }
                     PhotoPreview(
-                        bitmap = capturedBitmap,
+                        bitmap = displayBitmap,
                         isScanning = false,
                         size = if (uiState is CheckInUiState.Success || uiState is CheckInUiState.NoMatch) 80.dp else 180.dp
                     )

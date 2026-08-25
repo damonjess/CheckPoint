@@ -305,11 +305,13 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
 
     private fun cropAndAlign(source: Bitmap, face: Face): Bitmap {
         val box = face.boundingBox.clampTo(source.width, source.height)
-        val width = min(source.width, max(box.width(), (box.width() * 1.75f).toInt()))
-        val height = min(source.height, max(box.height(), (box.height() * 2.15f).toInt()))
+        // Tightened isolation: focus strictly on the head.
+        // Reduced from 1.75f/2.15f to 1.25x/1.55x to ignore clothing and background.
+        val width = min(source.width, max(box.width(), (box.width() * 1.25f).toInt()))
+        val height = min(source.height, max(box.height(), (box.height() * 1.55f).toInt()))
         val centerX = box.centerX()
-        // Shift slightly upward to retain forehead and the full jawline.
-        val centerY = (box.centerY() - box.height() * 0.05f).toInt()
+        // Shift slightly upward to center the face and exclude shoulders.
+        val centerY = (box.centerY() - box.height() * 0.08f).toInt()
         val left = (centerX - width / 2).coerceIn(0, source.width - width)
         val top = (centerY - height / 2).coerceIn(0, source.height - height)
         val crop = Bitmap.createBitmap(source, left, top, width, height)

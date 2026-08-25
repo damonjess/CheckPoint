@@ -7,12 +7,14 @@ sealed class CheckInUiState {
     object Idle : CheckInUiState()
     data class Loading(
         val progress: Float = 0f,
-        val logs: List<String> = emptyList()
+        val logs: List<String> = emptyList(),
+        val isolatedFace: Bitmap? = null
     ) : CheckInUiState()
     data class Success(
         val matches: List<WebMatchDisplay>,
         val logs: List<String> = emptyList(),
-        val termuxAvailable: Boolean = true
+        val termuxAvailable: Boolean = true,
+        val isolatedFace: Bitmap? = null
     ) : CheckInUiState()
     data class Confirming(val faceBitmap: Bitmap) : CheckInUiState()
     data class NoFaceDetected(

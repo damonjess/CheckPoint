@@ -137,6 +137,43 @@ const ENGINES = [
   }
 ];
 
+const CORE_SOCIAL_SITES = ['instagram.com', 'facebook.com', 'tiktok.com', 'linkedin.com', 'x.com', 'reddit.com'];
+const EXPANDED_SOCIAL_SITES = [
+  ...CORE_SOCIAL_SITES,
+  'youtube.com', 'pinterest.com', 'threads.net', 'tumblr.com', 'flickr.com',
+  'vk.com', 'ok.ru', 'medium.com', 'quora.com'
+];
+
+function createSocialEngine(site, hint) {
+  return {
+    name: `Social: ${site}`,
+    urlFor: () => `https://www.bing.com/search?q=${encodeURIComponent(`site:${site} "${hint.trim()}"`)}`,
+    selectors: 'li.b_algo, .b_algo, .result, .result__body, .g, a[href^="http"]',
+    site
+  };
+}
+
+function deriveSearchHints(items) {
+  const ignored = new Set(['visual', 'candidate', 'match', 'image', 'photo', 'profile', 'public', 'result']);
+  const hints = [];
+  for (const item of items) {
+    const title = String(item.title || '').replace(/\s+/g, ' ').trim();
+    const usefulTitle = title.length >= 3 && title.length <= 80 &&
+      title.toLowerCase().split(/\s+/).some(word => !ignored.has(word));
+    if (usefulTitle) hints.push(title);
+
+    try {
+      const url = new URL(item.link);
+      const parts = url.pathname.split('/').filter(Boolean);
+      const profilePart = parts.find(part => part.startsWith('@')) || parts[0];
+      if (profilePart && profilePart.length >= 3 && !ignored.has(profilePart.toLowerCase())) {
+        hints.push(profilePart.replace(/^@/, '').replace(/[-_]/g, ' '));
+      }
+    } catch (_) { }
+  }
+  return [...new Set(hints)].slice(0, 4);
+}
+
 let browserInstance = null;
 let browserLaunch = null;
 let pageCount = 0;
@@ -231,11 +268,12 @@ async function extractCandidates(page, engine) {
 
       const isEngineLink = /(^|\.)google\.|(^|\.)bing\.com|(^|\.)microsoft\.com|(^|\.)gstatic\.com|(^|\.)yandex\./.test(new URL(link).hostname);
       if (isEngineLink || seen.has(link)) continue;
+      if (engine.site && !new URL(link).hostname.endsWith(engine.site)) continue;
       seen.add(link);
 
       const image = anchor.querySelector('img') || node.querySelector('img');
       const thumbnail = image?.currentSrc || image?.src || null;
-      const title = (anchor.innerText || anchor.getAttribute('aria-label') || anchor.title || 'Visual candidate').trim();
+      const title = (anchor.innerText || node.innerText || anchor.getAttribute('aria-label') || anchor.title || 'Public result').trim();
 
       candidates.push({
           title: title.slice(0, 150) || 'Visual candidate',
@@ -318,6 +356,8 @@ app.get('/api/ping', async (_request, response) => {
 app.post('/api/search', async (request, response) => {
   const startedAt = Date.now();
   const imageUrl = request.body?.imageUrl || request.body?.localFaceUrl;
+  const keywordHint = typeof request.body?.keywordHint === 'string' ? request.body.keywordHint.trim() : '';
+  const searchMode = String(request.body?.searchMode || 'PRECISION').toUpperCase();
 
   if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) {
     return response.status(400).json({ success: false, error: 'Invalid image URL.' });
@@ -352,6 +392,21 @@ app.post('/api/search', async (request, response) => {
       const results = await Promise.all(chunk.map(engine => runEngine(engine, imageUrl)));
       outcomes.push(...chunk.map((engine, i) => ({ engine, result: results[i] })));
       completedEngines += chunk.length;
+  }
+
+  // Visual engines find copies; public social discovery finds the pages that
+  // search engines associate with the returned names/usernames. Run it only
+  // when a hint exists, including hints harvested from visual results.
+  const visualItems = outcomes.flatMap(({ result }) => result.items);
+  const socialHints = keywordHint ? [keywordHint] : deriveSearchHints(visualItems);
+  if (socialHints.length) {
+    const sites = ['SOCIAL', 'DEEP', 'HYPER', 'AGGRESSIVE', 'ADULT'].includes(searchMode)
+      ? EXPANDED_SOCIAL_SITES
+      : CORE_SOCIAL_SITES;
+    broadcastProgress(`Searching public social pages for ${socialHints.length} identity hint(s)...`, 0.92);
+    const socialEngines = socialHints.flatMap(hint => sites.map(site => createSocialEngine(site, hint)));
+    const socialResults = await Promise.all(socialEngines.map(engine => runEngine(engine, imageUrl)));
+    outcomes.push(...socialEngines.map((engine, i) => ({ engine, result: socialResults[i] })));
   }
 
   const matches = outcomes.flatMap(({ result }) => result.items).map(item => {

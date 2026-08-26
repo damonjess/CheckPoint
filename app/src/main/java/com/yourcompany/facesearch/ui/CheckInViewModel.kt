@@ -934,11 +934,16 @@ class CheckInViewModel(
         val finalSource = if (platform.name != "Web") platform.name else (match.source ?: "Free Engine")
         val finalScore = match.score + platform.baseScore
 
-        val isVerified = finalScore >= VERIFIED_MATCH_BASE_SCORE
-        val isLikely = !isVerified && finalScore >= LIKELY_MATCH_BASE_SCORE
-        val isReviewLead = !isVerified && !isLikely && finalScore >= REVIEW_LEAD_BASE_SCORE
+        val isVerified = match.faceSimilarity?.let { it >= FaceVerifier.VERIFICATION_THRESHOLD }
+            ?: (finalScore >= VERIFIED_MATCH_BASE_SCORE)
+        val isLikely = !isVerified && (match.faceSimilarity?.let { it >= LIKELY_MATCH_THRESHOLD }
+            ?: (finalScore >= LIKELY_MATCH_BASE_SCORE))
+        val isReviewLead = !isVerified && !isLikely && (match.faceSimilarity?.let {
+            it >= REVIEW_LEAD_SIMILARITY_THRESHOLD
+        } ?: (finalScore >= REVIEW_LEAD_BASE_SCORE))
         val isFallbackCandidate = !isVerified && !isLikely && !isReviewLead &&
-            finalScore >= FALLBACK_CANDIDATE_BASE_SCORE
+            (match.faceSimilarity?.let { it >= FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD }
+                ?: (finalScore >= FALLBACK_CANDIDATE_BASE_SCORE))
         val sourceLabel = when {
             isVerified -> "✓ $finalSource"
             isLikely -> "≈ $finalSource"
@@ -950,9 +955,24 @@ class CheckInViewModel(
             source = sourceLabel,
             profileUrl = match.link ?: "",
             score = finalScore,
-            imageUrl = thumb,
+            imageUrl = match.faceCrop ?: thumb,
             isSocial = isSocial,
-            confidence = when {
+            confidence = match.faceSimilarity?.let { similarity ->
+                when {
+                    similarity >= FaceVerifier.VERIFICATION_THRESHOLD ->
+                        (0.90f + ((similarity - FaceVerifier.VERIFICATION_THRESHOLD) /
+                            (1f - FaceVerifier.VERIFICATION_THRESHOLD)) * 0.10f).coerceIn(0.90f, 1f)
+                    similarity >= LIKELY_MATCH_THRESHOLD ->
+                        (0.70f + ((similarity - LIKELY_MATCH_THRESHOLD) /
+                            (FaceVerifier.VERIFICATION_THRESHOLD - LIKELY_MATCH_THRESHOLD)) * 0.19f)
+                            .coerceIn(0.70f, 0.89f)
+                    similarity >= REVIEW_LEAD_SIMILARITY_THRESHOLD ->
+                        (0.50f + ((similarity - REVIEW_LEAD_SIMILARITY_THRESHOLD) /
+                            (LIKELY_MATCH_THRESHOLD - REVIEW_LEAD_SIMILARITY_THRESHOLD)) * 0.19f)
+                            .coerceIn(0.50f, 0.69f)
+                    else -> 0f
+                }
+            } ?: when {
                 isVerified -> calculateConfidence(finalScore)
                 isLikely -> calculatePossibleConfidence(finalScore)
                 isReviewLead -> calculateReviewLeadConfidence(finalScore)
@@ -1045,6 +1065,11 @@ class CheckInViewModel(
                             if (thumbnail == null || !captureDetector.hasSingleCandidateFace(thumbnail)) {
                                 excludedCounter.incrementAndGet()
                             } else {
+                                val faceCrop = nativeFaceCropper.cropAndAlignFace(thumbnail, fullJawline = false)
+                                if (faceCrop == null) {
+                                    excludedCounter.incrementAndGet()
+                                    return@withPermit
+                                }
                                 val result = faceVerifier.calculateSimilarityAndEmbedding(thumbnail, sourceEmbedding)
                                 if (result == null) {
                                     excludedCounter.incrementAndGet()
@@ -1052,7 +1077,9 @@ class CheckInViewModel(
                                     val (similarity, embedding) = result
                                     val faceBearingMatch = match.copy(
                                         thumbnail = thumbnailUrl,
-                                        embedding = embedding
+                                        embedding = embedding,
+                                        faceSimilarity = similarity,
+                                        faceCrop = faceCrop
                                     )
                                     
                                     // Discovery/Variety Boost: Give a small rank boost to high-confidence

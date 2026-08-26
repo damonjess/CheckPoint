@@ -4,6 +4,7 @@ import com.google.gson.*
 import com.google.gson.annotations.JsonAdapter
 import com.google.gson.annotations.SerializedName
 import java.lang.reflect.Type
+import android.graphics.Bitmap
 
 /**
  * Visual Match model used by WebView Scraper and Termux backend.
@@ -23,7 +24,9 @@ data class SerpVisualMatch(
     val thumbnail: String?, // The image profile link
 
     val score: Int = 0,
-    val embedding: FloatArray? = null
+    val embedding: FloatArray? = null,
+    val faceSimilarity: Float? = null,
+    @Transient val faceCrop: Bitmap? = null
 )
 
 /**

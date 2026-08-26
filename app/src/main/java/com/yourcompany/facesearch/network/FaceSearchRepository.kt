@@ -197,11 +197,11 @@ class FaceSearchRepository(private val context: Context) {
                 visualJobs.awaitAll()
                 
                 // If keywordHint is missing, try to harvest names from visual matches for a follow-up social scan
-                val harvestedHint = if (keywordHint.isNullOrBlank()) {
-                    harvestNamesFromMatches(allResults.toList())
-                } else null
-                
-                val effectiveHint = keywordHint ?: harvestedHint
+                val harvestedHints = if (keywordHint.isNullOrBlank()) {
+                    harvestSearchHints(allResults.toList())
+                } else emptyList()
+
+                val effectiveHint = keywordHint ?: harvestedHints.firstOrNull()
 
                 // Dorking & Social Scan (Parallel)
                 val dorkJobs = mutableListOf<Deferred<*>>()
@@ -216,6 +216,24 @@ class FaceSearchRepository(private val context: Context) {
                                 allResults.addAll(s.scrapeSocialDork("twitter.com", effectiveHint))
                             } finally { s.destroy() }
                         })
+                    }
+
+                    // A reverse-image engine often exposes several spellings of a
+                    // person's name or username. Query the additional hints too;
+                    // otherwise the no-name flow stops after the first weak lead.
+                    if (keywordHint.isNullOrBlank()) {
+                        harvestedHints.drop(1).forEach { additionalHint ->
+                            dorkJobs.add(async {
+                                onLog("Checking another public identity hint: '$additionalHint'...")
+                                val s = WebViewScraper.create(context)
+                                try {
+                                    allResults.addAll(s.scrapeSocialDork("instagram.com", additionalHint))
+                                    allResults.addAll(s.scrapeSocialDork("facebook.com", additionalHint))
+                                    allResults.addAll(s.scrapeSocialDork("tiktok.com", additionalHint))
+                                    allResults.addAll(s.scrapeSocialDork("linkedin.com", additionalHint))
+                                } finally { s.destroy() }
+                            })
+                        }
                     }
 
                     val expandedSocialMode = searchMode in setOf(
@@ -273,13 +291,13 @@ class FaceSearchRepository(private val context: Context) {
      * This allows the "social" search to function even when the user
      * provides no initial name hint.
      */
-    private fun harvestNamesFromMatches(matches: List<SerpVisualMatch>): String? {
+    private fun harvestSearchHints(matches: List<SerpVisualMatch>): List<String> {
         val candidates = matches
             .filter { !it.title.isNullOrBlank() && it.title != "Visual Match" }
             .filter { it.score > 100 }
             .take(50)
-        
-        if (candidates.isEmpty()) return null
+
+        if (candidates.isEmpty()) return emptyList()
         
         // Count word frequencies to find a likely name
         val words = mutableMapOf<String, Int>()
@@ -293,7 +311,13 @@ class FaceSearchRepository(private val context: Context) {
         )
         
         candidates.forEach { match ->
-            match.title?.split(Regex("\\s+"))?.forEach { word ->
+            val urlWords = match.link?.let { link ->
+                runCatching {
+                    android.net.Uri.parse(link).path.orEmpty()
+                        .split('/', '-', '_', '.', '?')
+                }.getOrDefault(emptyList())
+            }.orEmpty()
+            (match.title?.split(Regex("\\s+")).orEmpty() + urlWords).forEach { word ->
                 val clean = word.lowercase().trim().replace(Regex("[^a-z]"), "")
                 if (clean.length > 2 && clean !in stopWords) {
                     words[clean] = (words[clean] ?: 0) + 1
@@ -301,12 +325,13 @@ class FaceSearchRepository(private val context: Context) {
             }
         }
         
-        // Take the top two words as a likely name
+        // Return several strong hints so social discovery can recover from a
+        // single noisy title or an engine-specific username spelling.
         return words.entries
             .sortedByDescending { it.value }
-            .take(2)
-            .joinToString(" ") { it.key.replaceFirstChar { c -> c.uppercase() } }
-            .ifBlank { null }
+            .take(6)
+            .map { it.key.replaceFirstChar { c -> c.uppercase() } }
+            .distinct()
     }
 
     suspend fun performLocalServerSearch(

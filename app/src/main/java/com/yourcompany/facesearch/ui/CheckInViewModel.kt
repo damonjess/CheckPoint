@@ -561,6 +561,9 @@ class CheckInViewModel(
                         emptySet()
                     }
                     
+                    addLog("Executing recursive identity discovery...")
+                    addLog("Harvesting names and usernames from visual hits to expand coverage.")
+                    
                     faceSearchRepository.performFaceSearch(
                         bitmap = bitmap,
                         faceBitmap = faceBitmap,

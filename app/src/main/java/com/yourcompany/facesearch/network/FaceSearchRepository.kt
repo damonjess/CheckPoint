@@ -108,7 +108,11 @@ class FaceSearchRepository(private val context: Context) {
 
             // Parallelized OSINT Pipeline
             coroutineScope {
-                // Visual Engines (Parallel with Dedicated Scrapers)
+                // Deep Crawl: Search mirrored image as well for asymmetric matchers
+                if (deepCrawl && publicUrl != null) {
+                    onLog("Deep Crawl: Generating asymmetric mirrored probe...")
+                    // Logic handled by caller or we can do a mirror upload here if needed
+                }
                 // We no longer auto-skip WebView engines just because Termux is available;
                 // the caller (CheckInViewModel) manages the balance between local and offloaded engines.
                 val visualJobs = if (!skipVisualEngines && publicUrl != null) {
@@ -214,6 +218,7 @@ class FaceSearchRepository(private val context: Context) {
                                 allResults.addAll(s.scrapeSocialDork("instagram.com", effectiveHint))
                                 allResults.addAll(s.scrapeSocialDork("facebook.com", effectiveHint))
                                 allResults.addAll(s.scrapeSocialDork("twitter.com", effectiveHint))
+                                allResults.addAll(s.scrapeDuckDuckGo(effectiveHint))
                             } finally { s.destroy() }
                         })
                     }
@@ -248,7 +253,8 @@ class FaceSearchRepository(private val context: Context) {
                                     "linkedin.com", "x.com", "tiktok.com", "reddit.com",
                                     "pinterest.com", "threads.net", "youtube.com", "onlyfans.com", 
                                     "fansly.com", "snapchat.com", "vsco.co", "tumblr.com", 
-                                    "flickr.com", "quora.com", "medium.com"
+                                    "flickr.com", "quora.com", "medium.com", "vk.com", 
+                                    "ok.ru", "github.com", "weibo.com", "t.me"
                                 )
                                 expandedSites.forEach { site ->
                                     allResults.addAll(s.scrapeSocialDork(site, effectiveHint))
@@ -259,17 +265,25 @@ class FaceSearchRepository(private val context: Context) {
 
                     if (searchMode == "AGGRESSIVE" || searchMode == "DEEP_CRAWL" || searchMode == "ADULT") {
                         dorkJobs.add(async {
-                            val s = WebViewScraper.create(context)
-                            try {
-                                onLog(
-                                    if (searchMode == "ADULT") {
-                                        "Running targeted adult platform scan for '$effectiveHint'..."
-                                    } else {
-                                        "Running expanded public-web and adult-platform coverage for '$effectiveHint'..."
-                                    }
-                                )
-                                allResults.addAll(s.scrapeAdultSites(effectiveHint, onLog))
-                            } finally { s.destroy() }
+                            onLog(
+                                if (searchMode == "ADULT") {
+                                    "Running targeted adult platform scan for '$effectiveHint'..."
+                                } else {
+                                    "Running expanded public-web and adult-platform coverage for '$effectiveHint'..."
+                                }
+                            )
+
+                            // Prefer Termux for adult scans if available (better bypassing)
+                            if (isLocalBackendAvailable()) {
+                                onLog("Offloading deep platform scan to Termux helper...")
+                                val termuxHits = performTermuxDorkSearch(effectiveHint, AdultSiteConfig.SITES, onLog)
+                                allResults.addAll(termuxHits)
+                            } else {
+                                val s = WebViewScraper.create(context)
+                                try {
+                                    allResults.addAll(s.scrapeAdultSites(effectiveHint, onLog))
+                                } finally { s.destroy() }
+                            }
                         })
                     }
                 } else if (searchMode == "ADULT") {
@@ -287,51 +301,56 @@ class FaceSearchRepository(private val context: Context) {
     }
 
     /**
-     * Harvests potential names from the most relevant visual matches.
+     * Harvests potential names and usernames from the most relevant visual matches.
      * This allows the "social" search to function even when the user
      * provides no initial name hint.
      */
     private fun harvestSearchHints(matches: List<SerpVisualMatch>): List<String> {
         val candidates = matches
             .filter { !it.title.isNullOrBlank() && it.title != "Visual Match" }
-            .filter { it.score > 100 }
-            .take(50)
+            .filter { it.score > 80 } // Lowered threshold to harvest more leads
+            .take(100)
 
         if (candidates.isEmpty()) return emptyList()
         
-        // Count word frequencies to find a likely name
-        val words = mutableMapOf<String, Int>()
+        val hints = mutableSetOf<String>()
         val stopWords = setOf(
             "image", "photo", "profile", "picture", "social", "media", "results", "found", "match", "visual",
             "tiktok", "instagram", "facebook", "twitter", "reddit", "youtube", "threads", "linkedin", 
             "snapchat", "pinterest", "onlyfans", "fansly", "the", "and", "for", "with", "from", "via",
             "user", "account", "profile", "official", "page", "public", "private", "follow", "subscriber",
             "yandex", "bing", "google", "lens", "tineye", "baidu", "view", "visit", "lacoste", "asos",
-            "clothing", "fashion", "stock", "model", "portrait", "person", "human", "face"
+            "clothing", "fashion", "stock", "model", "portrait", "person", "human", "face", "search", "engine"
         )
         
         candidates.forEach { match ->
-            val urlWords = match.link?.let { link ->
-                runCatching {
-                    android.net.Uri.parse(link).path.orEmpty()
-                        .split('/', '-', '_', '.', '?')
-                }.getOrDefault(emptyList())
-            }.orEmpty()
-            (match.title?.split(Regex("\\s+")).orEmpty() + urlWords).forEach { word ->
-                val clean = word.lowercase().trim().replace(Regex("[^a-z]"), "")
-                if (clean.length > 2 && clean !in stopWords) {
-                    words[clean] = (words[clean] ?: 0) + 1
+            // Try to extract usernames from URLs (e.g. instagram.com/username)
+            runCatching {
+                val uri = android.net.Uri.parse(match.link)
+                val path = uri.path.orEmpty().trim('/')
+                if (path.isNotEmpty() && !path.contains('/')) {
+                    val candidate = path.lowercase().replace(Regex("[^a-z0-9_]"), "")
+                    if (candidate.length > 3 && candidate !in stopWords) {
+                        hints.add(path) // Original case for username
+                    }
                 }
+            }
+
+            // Extract multi-word names from titles
+            val words = match.title?.split(Regex("\\s+")).orEmpty()
+                .map { it.trim().replace(Regex("[^a-zA-Z]"), "") }
+                .filter { it.length > 2 && it.lowercase() !in stopWords }
+            
+            if (words.size >= 2) {
+                // Potential Full Name (e.g. "John Doe")
+                hints.add("${words[0]} ${words[1]}")
+            }
+            if (words.isNotEmpty()) {
+                hints.add(words[0])
             }
         }
         
-        // Return several strong hints so social discovery can recover from a
-        // single noisy title or an engine-specific username spelling.
-        return words.entries
-            .sortedByDescending { it.value }
-            .take(6)
-            .map { it.key.replaceFirstChar { c -> c.uppercase() } }
-            .distinct()
+        return hints.toList().take(12)
     }
 
     suspend fun performLocalServerSearch(

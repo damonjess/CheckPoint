@@ -286,6 +286,13 @@ class WebViewScraper private constructor(
         delayMs = 4000
     )
 
+    suspend fun scrapeDuckDuckGo(keyword: String): List<SerpVisualMatch> = scrapeEngine(
+        url = "https://duckduckgo.com/?q=${java.net.URLEncoder.encode(keyword, "UTF-8")}&ia=images&iax=images",
+        engineName = "DuckDuckGo",
+        delayMs = 3000,
+        passes = 8
+    )
+
     /**
      * Performs a 'Dork' search on a specific social site using a search engine.
      */

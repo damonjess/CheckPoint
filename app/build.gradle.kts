@@ -56,6 +56,10 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = false
+            pickFirsts.add("lib/arm64-v8a/libface_detector_v2_jni.so")
+            pickFirsts.add("lib/armeabi-v7a/libface_detector_v2_jni.so")
+            pickFirsts.add("lib/x86/libface_detector_v2_jni.so")
+            pickFirsts.add("lib/x86_64/libface_detector_v2_jni.so")
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

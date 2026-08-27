@@ -144,6 +144,24 @@ private fun PrimaryMatchContent(
             // Match Percentage
             Column(horizontalAlignment = Alignment.End) {
                 val confidenceInt = (match.confidence * 100).toInt()
+                
+                if (match.isFaceVerified) {
+                    Surface(
+                        color = Color(0xFFE8F5E9),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.Default.Verified, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("HIGH ACCURACY", color = Color(0xFF2E7D32), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
                 Text(
                     text = when {
                         confidenceInt >= 90 -> "Highly certain match"
@@ -190,17 +208,17 @@ private fun PrimaryMatchContent(
                 .size(160.dp)
                 .scale(pulseScale)
                 .shadow(
-                    elevation = (20 * pulseScale).dp, 
+                    elevation = (24 * pulseScale).dp, 
                     shape = CircleShape, 
-                    ambientColor = style.color, 
-                    spotColor = style.color
+                    ambientColor = style.color.copy(alpha = 0.8f), 
+                    spotColor = style.color.copy(alpha = 0.8f)
                 ),
             contentAlignment = Alignment.Center
         ) {
             Surface(
-                modifier = Modifier.fillMaxSize().padding(4.dp),
+                modifier = Modifier.fillMaxSize().padding(2.dp),
                 shape = CircleShape,
-                border = BorderStroke(3.dp, Color(0xFF4CAF50)),
+                border = BorderStroke(4.dp, Brush.linearGradient(listOf(Color(0xFF4CAF50), Color(0xFF81C784)))),
                 color = Color.LightGray
             ) {
                 if (match.imageUrl != null) {

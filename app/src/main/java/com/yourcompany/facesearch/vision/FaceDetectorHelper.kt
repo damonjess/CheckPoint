@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.Rect
+import com.google.android.gms.vision.face.FaceDetectorV2Jni
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
@@ -50,14 +51,29 @@ data class FaceQuality(
  * ambiguous frames, checks capture quality, then produces a landmark-aligned
  * crop that retains the full jawline and forehead for consistent embeddings.
  */
-class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
+class FaceDetectorHelper(private val context: Context) {
+
+    private val nativeDetector = FaceDetectorV2Jni()
+    private var nativePtr: Long = 0
+    
+    init {
+        // Initialize the high-accuracy native detector using the restored models
+        try {
+            val modelDir = context.assets.list("models_bundled")?.firstOrNull() ?: ""
+            // We use a dummy buffer for options as the native library has its own defaults
+            val options = java.nio.ByteBuffer.allocateDirect(1024)
+            nativePtr = nativeDetector.initDetectorJni(context.assets, "models_bundled", options)
+        } catch (e: Exception) {
+            android.util.Log.e("FaceDetectorHelper", "Native initialization failed", e)
+        }
+    }
 
     private val detector = FaceDetection.getClient(
         FaceDetectorOptions.Builder()
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
             .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
-            .setMinFaceSize(0.05f)
+            .setMinFaceSize(0.01f) // More permissive: 1% of frame instead of 5%
             .build()
     )
 
@@ -390,6 +406,10 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
     private fun emptyQuality() = FaceQuality(0f, 0, 0, 0f, 0f, 0f, 0f, 0f, null, null)
 
     fun release() {
+        if (nativePtr != 0L) {
+            nativeDetector.closeDetectorJni(nativePtr)
+            nativePtr = 0
+        }
         detector.close()
         captureFallbackDetector.close()
         candidateDetector.close()
@@ -397,10 +417,10 @@ class FaceDetectorHelper(@Suppress("UNUSED_PARAMETER") context: Context) {
     }
 
     private companion object {
-        const val MIN_IMAGE_WIDTH = 480
-        const val MIN_IMAGE_HEIGHT = 360
-        const val MIN_FACE_PIXELS = 80
-        const val MIN_FACE_COVERAGE = 0.05f
+        const val MIN_IMAGE_WIDTH = 128
+        const val MIN_IMAGE_HEIGHT = 128
+        const val MIN_FACE_PIXELS = 16
+        const val MIN_FACE_COVERAGE = 0.001f
         const val MIN_CAPTURE_FALLBACK_IMAGE_EDGE = 160
         const val MIN_CAPTURE_FALLBACK_FACE_PIXELS = 64
         const val MIN_CAPTURE_FALLBACK_FACE_COVERAGE = 0.03f

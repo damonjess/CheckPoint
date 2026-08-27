@@ -35,32 +35,39 @@ This patch builds on the prior face-detection update. Keep the previously suppli
 
 ## Termux redeployment
 
-From the `face-search-service` directory in Termux, stop the old process and replace the service files. Then run:
+If you see a `MODULE_NOT_FOUND` error, your Termux environment is missing the system libraries required for image processing. Follow these steps exactly:
 
-```bash
-rm -rf node_modules
-export PUPPETEER_SKIP_DOWNLOAD=true
-npm install
-cat > .env <<'EOF'
-CHROMIUM_PATH=/data/data/com.termux/files/usr/bin/chromium-browser
-PORT=3000
-EOF
-npm start
-```
+1. **Install System Dependencies:**
+   ```bash
+   pkg update && pkg upgrade -y
+   pkg install -y build-essential python git
+   pkg install -y libcairo libpango libjpeg-turbo libpng libgif-static librsvg
+   pkg install -y chromium
+   ```
 
-Use the actual Chromium path printed by `command -v chromium-browser` or `command -v chromium` if it differs. A successful startup reports:
+2. **Clean and Reinstall Node Modules:**
+   ```bash
+   cd ~/face-search-service
+   rm -rf node_modules package-lock.json
+   export PUPPETEER_SKIP_DOWNLOAD=true
+   npm install
+   ```
+
+3. **Configure and Start:**
+   ```bash
+   cat > .env <<'EOF'
+   CHROMIUM_PATH=/data/data/com.termux/files/usr/bin/chromium-browser
+   PORT=3000
+   EOF
+   npm start
+   ```
+
+Use the actual Chromium path printed by `command -v chromium-browser` if it differs. A successful startup reports:
 
 ```text
-Local helper running on http://127.0.0.1:3000 (Termux sequential mode).
+Local helper running on http://0.0.0.0:3000
+[Biometrics] Face-api models loaded successfully.
 ```
-
-Then verify the local service:
-
-```bash
-curl http://127.0.0.1:3000/api/ping
-```
-
-The response must include `"cloudBrowser":"disabled"`. If it prints `Connecting to Browserless.io…`, you are still running the old `server.js` rather than this patch.
 
 ## Expected app behavior
 

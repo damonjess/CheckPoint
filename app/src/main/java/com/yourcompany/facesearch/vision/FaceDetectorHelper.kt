@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.Rect
-import com.google.android.gms.vision.face.FaceDetectorV2Jni
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
@@ -53,19 +52,10 @@ data class FaceQuality(
  */
 class FaceDetectorHelper(private val context: Context) {
 
-    private val nativeDetector = FaceDetectorV2Jni()
-    private var nativePtr: Long = 0
-    
     init {
-        // Initialize the high-accuracy native detector using the restored models
-        try {
-            val modelDir = context.assets.list("models_bundled")?.firstOrNull() ?: ""
-            // We use a dummy buffer for options as the native library has its own defaults
-            val options = java.nio.ByteBuffer.allocateDirect(1024)
-            nativePtr = nativeDetector.initDetectorJni(context.assets, "models_bundled", options)
-        } catch (e: Exception) {
-            android.util.Log.e("FaceDetectorHelper", "Native initialization failed", e)
-        }
+        // High-accuracy models have been restored to assets.
+        // ML Kit's bundled detector will automatically load libface_detector_v2_jni.so
+        // from jniLibs and look for models in the assets root.
     }
 
     private val detector = FaceDetection.getClient(
@@ -406,10 +396,6 @@ class FaceDetectorHelper(private val context: Context) {
     private fun emptyQuality() = FaceQuality(0f, 0, 0, 0f, 0f, 0f, 0f, 0f, null, null)
 
     fun release() {
-        if (nativePtr != 0L) {
-            nativeDetector.closeDetectorJni(nativePtr)
-            nativePtr = 0
-        }
         detector.close()
         captureFallbackDetector.close()
         candidateDetector.close()

@@ -79,7 +79,12 @@ private fun CameraPreviewWithCapture(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    val cameraExecutor: Executor = remember { Executors.newSingleThreadExecutor() }
+    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraExecutor.shutdown()
+        }
+    }
     val imageCapture = remember { ImageCapture.Builder().build() }
     var isCapturing by remember { mutableStateOf(false) }
     var captureError by remember { mutableStateOf<String?>(null) }

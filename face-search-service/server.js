@@ -1,17 +1,81 @@
 require('dotenv').config();
 
+const util = require('util');
+if (typeof global.TextEncoder === 'undefined') {
+  global.TextEncoder = util.TextEncoder;
+}
+if (typeof global.TextDecoder === 'undefined') {
+  global.TextDecoder = util.TextDecoder;
+}
+
 const dns = require('dns').promises;
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+
+// Termux Fix: Alias tfjs-node to tfjs because tfjs-node is not supported on Android/Termux
+if (process.platform === 'android' || (process.env.PREFIX && process.env.PREFIX.includes('com.termux'))) {
+  try {
+    const tf = require('@tensorflow/tfjs');
+    const tfPath = require.resolve('@tensorflow/tfjs-node');
+    require.cache[tfPath] = {
+      id: tfPath,
+      filename: tfPath,
+      loaded: true,
+      exports: tf
+    };
+    console.log('[Termux Fix] Aliased @tensorflow/tfjs-node to @tensorflow/tfjs');
+  } catch (e) {
+    // If resolve fails, we can't easily inject into cache without the path.
+    // However, if we're in Termux, we can mock the require entirely.
+    const Module = require('module');
+    const originalRequire = Module.prototype.require;
+    Module.prototype.require = function(name) {
+      if (name === '@tensorflow/tfjs-node') {
+        return originalRequire.apply(this, ['@tensorflow/tfjs']);
+      }
+      return originalRequire.apply(this, arguments);
+    };
+    console.log('[Termux Fix] Injected @tensorflow/tfjs-node redirection via Module.prototype.require');
+  }
+}
+
 const http = require('http');
 const WebSocket = require('ws');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const AdblockerPlugin = require('puppeteer-extra-plugin-adblocker');
 
-// Activate Stealth Plugin
+let faceapi, Canvas, Image, loadImage;
+
+try {
+  faceapi = require('@vladmandic/face-api');
+  const canvas = require('canvas');
+  Canvas = canvas.Canvas;
+  Image = canvas.Image;
+  loadImage = canvas.loadImage;
+
+  // Configure face-api to use canvas
+  faceapi.env.monkeyPatch({ Canvas, Image, loadImage });
+} catch (error) {
+  console.error('\n[FATAL ERROR] Failed to load biometrics engine.');
+  console.error('Error Details:', error.message);
+
+  if (error.code === 'MODULE_NOT_FOUND' || error.message.includes('cannot find module')) {
+    console.log('\n[REMEDY] This usually means native dependencies are missing in Termux.');
+    console.log('Run the following commands in your Termux terminal:');
+    console.log('  pkg install -y build-essential python git');
+    console.log('  pkg install -y libcairo libpango libjpeg-turbo libpng libgif-static librsvg');
+    console.log('  rm -rf node_modules package-lock.json');
+    console.log('  npm install');
+  }
+  process.exit(1);
+}
+
+// Activate Plugins
 puppeteer.use(StealthPlugin());
+puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
 
 const app = express();
 const server = http.createServer(app);
@@ -23,12 +87,26 @@ const PORT = Number(process.env.PORT || 3000);
 const TERMUX_ENGINE_TIMEOUT_MS = 35_000;
 const DESKTOP_ENGINE_TIMEOUT_MS = 45_000;
 const COOLDOWN_MS = 15 * 60 * 1000;
-const MAX_BROWSER_PAGES = 8;
+const MAX_BROWSER_PAGES = isTermux() ? 3 : 12;
 const profileDirectory = path.join(__dirname, 'chromium_profile');
+const modelsDirectory = path.join(__dirname, 'models');
 const engineCooldowns = new Map();
 
 if (!fs.existsSync(profileDirectory)) {
   fs.mkdirSync(profileDirectory, { recursive: true });
+}
+
+// Load face-api models
+async function loadModels() {
+  try {
+    await faceapi.nets.ssdMobilenetv1.loadFromDisk(modelsDirectory);
+    await faceapi.nets.faceLandmark68Net.loadFromDisk(modelsDirectory);
+    await faceapi.nets.faceRecognitionNet.loadFromDisk(modelsDirectory);
+    console.log('[Biometrics] Face-api models loaded successfully.');
+  } catch (error) {
+    console.error('[Biometrics] Error loading models:', error.message);
+    console.log('[Tip] Ensure face-api models are in the ./models directory.');
+  }
 }
 
 const isTermux = () => {
@@ -92,18 +170,22 @@ function isBlockedPage(content, title = '') {
   return [
     'access denied', 'unusual traffic', 'verify you are human', 'security check',
     'captcha', 'hcaptcha', 'recaptcha', 'cloudflare', 'automated access',
-    'bot detection', 'robot check', 'blocked by your organization'
+    'bot detection', 'robot check', 'blocked by your organization',
+    'please wait while we verify', 'complete a security challenge', 'ip has been flagged'
   ].some((phrase) => value.includes(phrase));
 }
 
 function isSocialUrl(value) {
   try {
     const host = new URL(value).hostname.toLowerCase();
-    return [
+    const socialDomains = [
       'instagram.com', 'facebook.com', 'linkedin.com', 'x.com', 'twitter.com',
       'tiktok.com', 'youtube.com', 'reddit.com', 'onlyfans.com', 'fansly.com',
-      't.me', 'vk.com', 'ok.ru', 'pinterest.com'
-    ].some((domain) => host === domain || host.endsWith(`.${domain}`));
+      't.me', 'vk.com', 'ok.ru', 'pinterest.com', 'threads.net', 'bluesky.social',
+      'mastodon.social', 'discord.com', 'twitch.tv', 'github.com', 'behance.net',
+      'dribbble.com', 'medium.com', 'quora.com', 'tumblr.com', 'flickr.com'
+    ];
+    return socialDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));
   } catch (_) {
     return false;
   }
@@ -126,52 +208,98 @@ const ENGINES = [
     selectors: '.imgpt a, .iusc, .visual_search_results a, .vsc_link, .vsc_title a, .is-vsc-link'
   },
   {
-    name: 'TinEye',
-    urlFor: (imageUrl) => `https://tineye.com/search?url=${encodeURIComponent(imageUrl)}`,
-    selectors: '.match a[href^="http"], .match-details a'
+    name: 'Sogou',
+    urlFor: (imageUrl) => `https://pic.sogou.com/ris?query=${encodeURIComponent(imageUrl)}&flag=1`,
+    selectors: '.item a, .ris-result-item a, .result-item a'
   },
   {
     name: 'Pinterest',
     urlFor: (imageUrl) => `https://www.pinterest.com/search/visual/?image_url=${encodeURIComponent(imageUrl)}`,
     selectors: '[data-test-id="pin"] a, .GrowthUnauthVisualSearch__pin a'
+  },
+  {
+    name: 'PimEyes (Public Link Index)',
+    urlFor: (imageUrl) => `https://www.bing.com/search?q=${encodeURIComponent(`site:pimeyes.com "${imageUrl.split('/').pop()}"`)}`,
+    selectors: '.b_algo a, .result a'
+  },
+  {
+    name: 'FaceCheck (Public Link Index)',
+    urlFor: (imageUrl) => `https://duckduckgo.com/?q=${encodeURIComponent(`site:facecheck.id "${imageUrl.split('/').pop()}"`)}`,
+    selectors: 'a.result__a'
   }
 ];
 
-const CORE_SOCIAL_SITES = ['instagram.com', 'facebook.com', 'tiktok.com', 'linkedin.com', 'x.com', 'reddit.com'];
+const CORE_SOCIAL_SITES = ['instagram.com', 'facebook.com', 'tiktok.com', 'linkedin.com', 'x.com', 'reddit.com', 't.me', 'linktr.ee'];
 const EXPANDED_SOCIAL_SITES = [
   ...CORE_SOCIAL_SITES,
   'youtube.com', 'pinterest.com', 'threads.net', 'tumblr.com', 'flickr.com',
-  'vk.com', 'ok.ru', 'medium.com', 'quora.com'
+  'vk.com', 'ok.ru', 'medium.com', 'quora.com', 'github.com', 'behance.net',
+  'dribbble.com', 'onlyfans.com', 'fansly.com', 'linktree.com', 'bio.link', 'peekyou.com'
 ];
 
-function createSocialEngine(site, hint) {
-  return {
-    name: `Social: ${site}`,
-    urlFor: () => `https://www.bing.com/search?q=${encodeURIComponent(`site:${site} "${hint.trim()}"`)}`,
-    selectors: 'li.b_algo, .b_algo, .result, .result__body, .g, a[href^="http"]',
-    site
-  };
+function createSocialEngine(provider, site, hint) {
+  const query = `site:${site} "${hint.trim()}"`;
+  if (provider === 'Bing') {
+    return {
+      name: `Bing: ${site}`,
+      urlFor: () => `https://www.bing.com/search?q=${encodeURIComponent(query)}`,
+      selectors: 'li.b_algo, .b_algo, .result, .result__body, .g, a[href^="http"]',
+      site
+    };
+  } else {
+    return {
+      name: `DDG: ${site}`,
+      urlFor: () => `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
+      selectors: 'a.result__a, .result__body, .g, a[href^="http"]',
+      site
+    };
+  }
 }
 
 function deriveSearchHints(items) {
-  const ignored = new Set(['visual', 'candidate', 'match', 'image', 'photo', 'profile', 'public', 'result']);
+  const ignored = new Set(['visual', 'candidate', 'match', 'image', 'photo', 'profile', 'public', 'result', 'unknown', 'search', 'find', 'person', 'human', 'face', 'portrait']);
   const hints = [];
+
+  // Pattern for handles like @username
+  const handleRegex = /@([a-z0-9._]{3,20})/gi;
+  // Pattern for names like First Last
+  const nameRegex = /([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)/g;
+
   for (const item of items) {
+    const text = `${item.title} ${item.description || ''}`;
+
+    // Extract @handles
+    let match;
+    while ((match = handleRegex.exec(text)) !== null) {
+        hints.push(match[1].toLowerCase());
+    }
+
+    // Extract Proper Names
+    while ((match = nameRegex.exec(text)) !== null) {
+        const name = match[1].trim();
+        if (name.length > 5 && !ignored.has(name.toLowerCase())) hints.push(name);
+    }
+
     const title = String(item.title || '').replace(/\s+/g, ' ').trim();
-    const usefulTitle = title.length >= 3 && title.length <= 80 &&
-      title.toLowerCase().split(/\s+/).some(word => !ignored.has(word));
-    if (usefulTitle) hints.push(title);
+    if (title.length >= 4 && title.length <= 50 && !ignored.has(title.toLowerCase())) {
+      hints.push(title);
+    }
 
     try {
       const url = new URL(item.link);
       const parts = url.pathname.split('/').filter(Boolean);
-      const profilePart = parts.find(part => part.startsWith('@')) || parts[0];
-      if (profilePart && profilePart.length >= 3 && !ignored.has(profilePart.toLowerCase())) {
-        hints.push(profilePart.replace(/^@/, '').replace(/[-_]/g, ' '));
+      // Look for common profile patterns
+      const profilePart = parts.find(part => part.startsWith('@') || /^[a-z0-9._]{4,20}$/i.test(part));
+      if (profilePart && !ignored.has(profilePart.toLowerCase())) {
+        hints.push(profilePart.replace(/^@/, '').replace(/[._-]/g, ' '));
       }
     } catch (_) { }
   }
-  return [...new Set(hints)].slice(0, 4);
+
+  // Prioritize shorter, handle-like strings and proper names
+  return [...new Set(hints)]
+    .sort((a, b) => a.length - b.length)
+    .slice(0, 10);
 }
 
 let browserInstance = null;
@@ -251,6 +379,32 @@ async function acceptConsent(page) {
   }
 }
 
+async function getFaceEmbedding(imageUrl) {
+  try {
+    const img = await loadImage(imageUrl);
+    const detection = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+    return detection ? detection.descriptor : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function compareBiometrics(sourceEmbedding, targetUrl) {
+  if (!sourceEmbedding || !targetUrl) return 0;
+  try {
+    const img = await loadImage(targetUrl);
+    const detection = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+    if (!detection) return 0;
+
+    // Calculate distance (0 is perfect match, 1 is total difference)
+    const distance = faceapi.euclideanDistance(sourceEmbedding, detection.descriptor);
+    // Convert to 0-1 confidence score
+    return Math.max(0, 1 - (distance / 0.6));
+  } catch (e) {
+    return 0;
+  }
+}
+
 async function extractCandidates(page, engine) {
   return page.evaluate(({ selector, source }) => {
     const candidates = [];
@@ -266,23 +420,32 @@ async function extractCandidates(page, engine) {
         try { link = new URL(link).searchParams.get('q') || link; } catch (_) {}
       }
 
-      const isEngineLink = /(^|\.)google\.|(^|\.)bing\.com|(^|\.)microsoft\.com|(^|\.)gstatic\.com|(^|\.)yandex\./.test(new URL(link).hostname);
+      const hostname = new URL(link).hostname;
+      const isEngineLink = /(^|\.)google\.|(^|\.)bing\.com|(^|\.)microsoft\.com|(^|\.)gstatic\.com|(^|\.)yandex\.|(^|\.)baidu\.com/.test(hostname);
       if (isEngineLink || seen.has(link)) continue;
-      if (engine.site && !new URL(link).hostname.endsWith(engine.site)) continue;
+      if (engine.site && !hostname.endsWith(engine.site)) continue;
       seen.add(link);
 
       const image = anchor.querySelector('img') || node.querySelector('img');
       const thumbnail = image?.currentSrc || image?.src || null;
       const title = (anchor.innerText || node.innerText || anchor.getAttribute('aria-label') || anchor.title || 'Public result').trim();
 
+      // Attempt to find a description/snippet near the link
+      let description = '';
+      const snippetParent = node.closest('li, div.g, div.result, div.b_algo');
+      if (snippetParent) {
+          description = (snippetParent.innerText.replace(title, '').replace(/\n+/g, ' ').trim()).slice(0, 200);
+      }
+
       candidates.push({
           title: title.slice(0, 150) || 'Visual candidate',
           link,
           thumbnail,
+          description,
           source
       });
     }
-    return candidates.slice(0, 30);
+    return candidates.slice(0, 35);
   }, { selector: engine.selectors, source: engine.name });
 }
 
@@ -296,29 +459,37 @@ async function runEngine(engine, imageUrl) {
   let page = null;
   try {
     const browser = await getBrowser();
-    // Incognito isolation
     context = await browser.createIncognitoBrowserContext();
     page = await context.newPage();
     pageCount += 1;
 
-    // Randomize User-Agent
+    // Advanced Stealth Headers & User-Agent Rotation
     const uas = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Edge/120.0.0.0',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0'
     ];
     await page.setUserAgent(uas[Math.floor(Math.random() * uas.length)]);
-    await page.setViewport({ width: 1280, height: 900 });
+    await page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Sec-Ch-Ua': '"Not(A:Brand";v="24", "Chromium";v="122"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Upgrade-Insecure-Requests': '1'
+    });
+    await page.setViewport({ width: 1440, height: 900 });
 
     const timeout = isTermux() ? TERMUX_ENGINE_TIMEOUT_MS : DESKTOP_ENGINE_TIMEOUT_MS;
     await page.goto(engine.urlFor(imageUrl), { waitUntil: 'domcontentloaded', timeout });
 
-    // Scroll to trigger lazy loading
-    await delay(2000);
-    await page.evaluate(() => window.scrollBy(0, 800));
-    await delay(1200);
-    await page.evaluate(() => window.scrollBy(0, 800));
-    await delay(1200);
+    // Handle Infinite Scroll/Lazy Load
+    await delay(1500);
+    await page.evaluate(() => window.scrollBy(0, 1000));
+    await delay(1000);
+    await page.evaluate(() => window.scrollBy(0, 1000));
+    await delay(1000);
 
     const title = await page.title().catch(() => '');
     const content = await page.content().catch(() => '');
@@ -373,11 +544,12 @@ app.post('/api/search', async (request, response) => {
   broadcastProgress(`Crawling and indexing billions of public images from social profiles and public records...`, 0.08);
 
   const outcomes = [];
-  // Dynamic concurrency based on free memory
+  // Dynamic concurrency based on environment and memory
   const freeMemMB = os.freemem() / 1024 / 1024;
-  const parallelLimit = isTermux() ? (freeMemMB > 800 ? 2 : 1) : 4;
+  let parallelLimit = isTermux() ? (freeMemMB > 800 ? 2 : 1) : 6;
+  if (searchMode === 'DEEP' || searchMode === 'AGGRESSIVE') parallelLimit = Math.max(parallelLimit, 8);
 
-  console.log(`[OSINT] Concurrency limit: ${parallelLimit} (Free RAM: ${Math.round(freeMemMB)}MB)`);
+  console.log(`[OSINT] Mode: ${searchMode}, Concurrency: ${parallelLimit} (Free RAM: ${Math.round(freeMemMB)}MB)`);
 
   const chunks = [];
   for (let i = 0; i < ENGINES.length; i += parallelLimit) {
@@ -398,31 +570,91 @@ app.post('/api/search', async (request, response) => {
   // search engines associate with the returned names/usernames. Run it only
   // when a hint exists, including hints harvested from visual results.
   const visualItems = outcomes.flatMap(({ result }) => result.items);
-  const socialHints = keywordHint ? [keywordHint] : deriveSearchHints(visualItems);
+
+  // BIOMETRIC VERIFICATION STAGE
+  broadcastProgress(`Performing biometric analysis on ${visualItems.length} visual matches...`, 0.85);
+  const sourceEmbedding = await getFaceEmbedding(imageUrl);
+
+  const matches = [];
+  const biometricBatchSize = isTermux() ? 2 : 5;
+
+  for (let i = 0; i < visualItems.length; i += biometricBatchSize) {
+    const batch = visualItems.slice(i, i + biometricBatchSize);
+    const results = await Promise.all(batch.map(async (item) => {
+      const isSocial = isSocialUrl(item.link);
+      const isVisualSource = ['Google Lens', 'Yandex', 'Bing Visual Search', 'Pinterest'].includes(item.source);
+
+      let bioScore = 0;
+      if (item.thumbnail && sourceEmbedding) {
+         bioScore = await compareBiometrics(sourceEmbedding, item.thumbnail);
+      }
+
+      // Advanced confidence scoring
+      let score = (isSocial ? 400 : 150);
+      score += (item.thumbnail ? 120 : 0);
+      if (isVisualSource) score += 100;
+      score += Math.round(bioScore * 500); // Massive boost for biometric match
+
+      return {
+          ...item,
+          isSocial,
+          score,
+          biometricMatch: bioScore > 0.65,
+          confidence: Math.round(bioScore * 100) + '%'
+      };
+    }));
+    matches.push(...results);
+  }
+
+  const socialHints = keywordHint ? [keywordHint] : deriveSearchHints(matches.filter(m => m.biometricMatch || m.score > 500));
+
   if (socialHints.length) {
     const sites = ['SOCIAL', 'DEEP', 'HYPER', 'AGGRESSIVE', 'ADULT'].includes(searchMode)
       ? EXPANDED_SOCIAL_SITES
       : CORE_SOCIAL_SITES;
+
     broadcastProgress(`Searching public social pages for ${socialHints.length} identity hint(s)...`, 0.92);
-    const socialEngines = socialHints.flatMap(hint => sites.map(site => createSocialEngine(site, hint)));
-    const socialResults = await Promise.all(socialEngines.map(engine => runEngine(engine, imageUrl)));
-    outcomes.push(...socialEngines.map((engine, i) => ({ engine, result: socialResults[i] })));
+
+    // Multi-provider social search (Bing + DuckDuckGo)
+    const socialEngines = socialHints.flatMap(hint =>
+      sites.flatMap(site => [
+        createSocialEngine('Bing', site, hint),
+        createSocialEngine('DuckDuckGo', site, hint)
+      ])
+    );
+
+    // Dynamic social concurrency
+    const socialParallelLimit = isTermux() ? 1 : 3;
+    for (let i = 0; i < socialEngines.length; i += socialParallelLimit) {
+      const chunk = socialEngines.slice(i, i + socialParallelLimit);
+      const socialResults = await Promise.all(chunk.map(engine => runEngine(engine, imageUrl)));
+      outcomes.push(...chunk.map((engine, i) => ({ engine, result: socialResults[i] })));
+    }
   }
 
-  const matches = outcomes.flatMap(({ result }) => result.items).map(item => {
+  // Final scoring for results that didn't go through the biometric stage (social results)
+  const finalMatches = outcomes.flatMap(({ result }) => {
+      // If result was already processed in the biometric loop, skip it
+      return result.items.filter(item => !matches.some(m => m.link === item.link));
+  }).map(item => {
     const isSocial = isSocialUrl(item.link);
-    return {
-      ...item,
-      isSocial,
-      score: (isSocial ? 400 : 150) + (item.thumbnail ? 100 : 0)
-    };
+    const titleMatch = socialHints.some(hint => item.title.toLowerCase().includes(hint.toLowerCase()));
+
+    let score = (isSocial ? 400 : 150);
+    score += (item.thumbnail ? 120 : 0);
+    score += (titleMatch ? 250 : 0);
+
+    return { ...item, isSocial, score };
   });
 
-  broadcastProgress(`Scan complete. Found ${matches.length} matches.`, 1.0);
+  const allMatches = [...matches, ...finalMatches];
+  allMatches.sort((a, b) => b.score - a.score);
+
+  broadcastProgress(`Scan complete. Found ${allMatches.length} matches.`, 1.0);
 
   response.json({
     success: true,
-    matches,
+    matches: allMatches,
     meta: {
       engines: Object.fromEntries(outcomes.map(({ engine, result }) => [engine.name, { count: result.items.length, ms: result.ms, error: result.error }])),
       blockedEngines: outcomes.filter(({ result }) => result.blocked).map(({ engine }) => engine.name),
@@ -436,6 +668,8 @@ app.post('/api/search', async (request, response) => {
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`[Sherlock OSINT] Running on http://0.0.0.0:${PORT}`);
   console.log(`[Status] Runtime: ${isTermux() ? 'Termux' : 'Desktop'}`);
+
+  await loadModels();
 
   const connectivity = await checkConnectivity();
   if (!connectivity.ok) {

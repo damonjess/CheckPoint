@@ -52,15 +52,6 @@ class FaceSearchRepository(private val context: Context) {
 
     private val freeHost = FreeImageHost()
 
-    // The helper binds to loopback only. The emulator bridge is retained for
-    // Android-emulator development; physical devices use localhost/127.0.0.1.
-    private val potentialBackends: List<String> = listOf(
-        "http://127.0.0.1:3000/api/search",
-        "http://localhost:3000/api/search",
-        "http://10.0.2.2:3000/api/search", // Default Emulator Bridge
-        "http://10.0.3.2:3000/api/search", // Genymotion
-        "http://[::1]:3000/api/search"     // IPv6 Loopback
-    )
 
     var activeBackend: String? = null
         private set
@@ -441,40 +432,29 @@ class FaceSearchRepository(private val context: Context) {
     }
 
     suspend fun isLocalBackendAvailable(): Boolean = withContext(Dispatchers.IO) {
-        val backends = potentialBackends
-        Log.e("CheckIn", "DEBUG: Probing ${backends.size} backends for Termux helper...")
-        
-        val jobs = backends.map { backend ->
-            async {
-                try {
-                    val pingUrl = if (backend.endsWith("/api/search"))
-                        backend.replace("/api/search", "/api/ping")
-                    else
-                        backend
+        val backendBase = "http://127.0.0.1:3000"
+        val pingUrl = "$backendBase/api/ping"
 
-                    val req = Request.Builder().url(pingUrl).build()
-                    fastClient.newCall(req).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            Log.e("CheckIn", "✓ Found Termux backend at $backend")
-                            activeBackend = backend.removeSuffix("/api/search")
-                            return@async true
-                        } else {
-                            Log.w("CheckIn", "✗ Backend at $backend returned code ${resp.code}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.v("CheckIn", "✗ Probe failed for $backend: ${e.message}")
+        try {
+            val request = Request.Builder()
+                .url(pingUrl)
+                .get()
+                .build()
+
+            fastClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    activeBackend = backendBase
+                    Log.e("CheckIn", "✓ Found Termux backend at $backendBase")
+                    return@withContext true
                 }
-                false
+
+                Log.w("CheckIn", "✗ Termux ping returned HTTP ${response.code}")
             }
+        } catch (e: Exception) {
+            Log.e("CheckIn", "✗ Termux probe failed: ${e.message}", e)
         }
-        
-        val results = awaitAll(*jobs.toTypedArray())
-        val found = results.any { it }
-        if (!found) {
-            Log.e("CheckIn", "✗ No Termux found after probing ${backends.size} endpoints")
-        }
-        found
+
+        false
     }
 
     suspend fun extractHighResMedia(url: String): String? = withContext(Dispatchers.IO) {

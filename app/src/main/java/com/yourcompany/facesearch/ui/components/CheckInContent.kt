@@ -226,13 +226,24 @@ fun SuccessContent(
                     shape = RoundedCornerShape(12.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = if (!hasStrongResults) 4.dp else 0.dp)
                 ) {
-                    Text(
-                        text = "Tip: Start the Termux OSINT helper for 5x deeper coverage and more verified matches.",
+                    Row(
                         modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = textColor,
-                        fontWeight = FontWeight.ExtraBold
-                    )
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = null,
+                            tint = textColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Tip: Start the Termux OSINT helper for 5x deeper coverage and more verified matches.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = textColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 

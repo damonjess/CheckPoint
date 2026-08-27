@@ -301,8 +301,8 @@ private fun SecondaryMatchContent(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 20.dp),
+        verticalAlignment = Alignment.Top
     ) {
         // Social Icon
         Surface(
@@ -325,7 +325,7 @@ private fun SecondaryMatchContent(
         Spacer(modifier = Modifier.width(24.dp))
 
         // Image with Badge
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Box(
                 modifier = Modifier
                     .size(110.dp)

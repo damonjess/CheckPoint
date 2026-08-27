@@ -18,6 +18,10 @@ const os = require('os');
 if (process.platform === 'android' || (process.env.PREFIX && process.env.PREFIX.includes('com.termux'))) {
   try {
     const tf = require('@tensorflow/tfjs');
+    // Force CPU backend and wait for it to be ready
+    tf.setBackend('cpu');
+    console.log('[Termux Fix] Forced TensorFlow CPU backend');
+
     const tfPath = require.resolve('@tensorflow/tfjs-node');
     require.cache[tfPath] = {
       id: tfPath,
@@ -33,7 +37,9 @@ if (process.platform === 'android' || (process.env.PREFIX && process.env.PREFIX.
     const originalRequire = Module.prototype.require;
     Module.prototype.require = function(name) {
       if (name === '@tensorflow/tfjs-node') {
-        return originalRequire.apply(this, ['@tensorflow/tfjs']);
+        const tf = originalRequire.apply(this, ['@tensorflow/tfjs']);
+        tf.setBackend('cpu');
+        return tf;
       }
       return originalRequire.apply(this, arguments);
     };
@@ -84,9 +90,17 @@ const wss = new WebSocket.Server({ server });
 app.use(express.json({ limit: '10mb' }));
 
 const PORT = Number(process.env.PORT || 3000);
-const TERMUX_ENGINE_TIMEOUT_MS = 35_000;
+const TERMUX_ENGINE_TIMEOUT_MS = 60_000;
 const DESKTOP_ENGINE_TIMEOUT_MS = 45_000;
 const COOLDOWN_MS = 15 * 60 * 1000;
+
+const isTermux = () => {
+  const prefix = process.env.PREFIX || '';
+  return process.platform === 'android' ||
+    prefix.includes('/data/data/com.termux/') ||
+    prefix.includes('com.termux');
+};
+
 const MAX_BROWSER_PAGES = isTermux() ? 3 : 12;
 const profileDirectory = path.join(__dirname, 'chromium_profile');
 const modelsDirectory = path.join(__dirname, 'models');
@@ -108,13 +122,6 @@ async function loadModels() {
     console.log('[Tip] Ensure face-api models are in the ./models directory.');
   }
 }
-
-const isTermux = () => {
-  const prefix = process.env.PREFIX || '';
-  return process.platform === 'android' ||
-    prefix.includes('/data/data/com.termux/') ||
-    fs.existsSync('/data/data/com.termux/files/usr/bin/pkg');
-};
 
 const getChromiumPath = () => {
   if (process.env.CHROMIUM_PATH && fs.existsSync(process.env.CHROMIUM_PATH)) {
@@ -379,30 +386,64 @@ async function acceptConsent(page) {
   }
 }
 
-async function getFaceEmbedding(imageUrl) {
-  try {
-    const img = await loadImage(imageUrl);
-    const detection = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
-    return detection ? detection.descriptor : null;
-  } catch (e) {
+function getImageDimensions(image) {
+  return {
+    width: Number(image?.naturalWidth || image?.width || 0),
+    height: Number(image?.naturalHeight || image?.height || 0)
+  };
+}
+
+async function getFaceEmbedding(imageUrl, label = 'image') {
+  if (typeof imageUrl !== 'string' || !imageUrl.startsWith('http' )) {
+    console.warn(`[Biometrics] Skipping ${label}: invalid image URL`);
     return null;
+  }
+
+  let scopeStarted = false;
+
+  try {
+    const tf = require('@tensorflow/tfjs');
+    const image = await loadImage(imageUrl);
+    const { width, height } = getImageDimensions(image);
+
+    // Never pass an unloaded, invalid, or zero-size image to TensorFlow.
+    if (width < 2 || height < 2) {
+      console.warn(
+        `[Biometrics] Skipping ${label}: image dimensions are ${width}x${height}`
+      );
+      return null;
+    }
+
+    tf.engine().startScope();
+    scopeStarted = true;
+
+    const detection = await faceapi
+      .detectSingleFace(image)
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+
+    // Copy the descriptor before closing the TensorFlow scope.
+    return detection?.descriptor
+      ? Float32Array.from(detection.descriptor)
+      : null;
+  } catch (error) {
+    console.warn(`[Biometrics] Skipping ${label}: ${error.message}`);
+    return null;
+  } finally {
+    if (scopeStarted) {
+      tf.engine().endScope();
+    }
   }
 }
 
 async function compareBiometrics(sourceEmbedding, targetUrl) {
   if (!sourceEmbedding || !targetUrl) return 0;
-  try {
-    const img = await loadImage(targetUrl);
-    const detection = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
-    if (!detection) return 0;
 
-    // Calculate distance (0 is perfect match, 1 is total difference)
-    const distance = faceapi.euclideanDistance(sourceEmbedding, detection.descriptor);
-    // Convert to 0-1 confidence score
-    return Math.max(0, 1 - (distance / 0.6));
-  } catch (e) {
-    return 0;
-  }
+  const targetEmbedding = await getFaceEmbedding(targetUrl, 'candidate thumbnail');
+  if (!targetEmbedding) return 0;
+
+  const distance = faceapi.euclideanDistance(sourceEmbedding, targetEmbedding);
+  return Math.max(0, 1 - distance / 0.6);
 }
 
 async function extractCandidates(page, engine) {
@@ -509,24 +550,18 @@ async function runEngine(engine, imageUrl) {
   }
 }
 
-app.get('/api/ping', async (_request, response) => {
-  const connectivity = await checkConnectivity();
-  response.json({
+app.get('/api/ping', (_request, response ) => {
+  response.status(200).json({
     status: 'pong',
-    runtime: isTermux() ? 'termux' : 'desktop',
-    engines: ENGINES.map(e => e.name),
-    capabilities: ['parallel', 'scrolling', 'stealth', 'incognito', 'websockets'],
-    network: connectivity.ok ? 'online' : `offline (${connectivity.error})`,
-    memory: {
-        free: Math.round(os.freemem() / 1024 / 1024) + 'MB',
-        total: Math.round(os.totalmem() / 1024 / 1024) + 'MB'
-    }
+    runtime: isTermux() ? 'termux' : 'desktop'
   });
 });
 
 app.post('/api/search', async (request, response) => {
   const startedAt = Date.now();
   const imageUrl = request.body?.imageUrl || request.body?.localFaceUrl;
+  console.log(`[Request] Incoming search for: ${imageUrl}`);
+
   const keywordHint = typeof request.body?.keywordHint === 'string' ? request.body.keywordHint.trim() : '';
   const searchMode = String(request.body?.searchMode || 'PRECISION').toUpperCase();
 
@@ -573,10 +608,12 @@ app.post('/api/search', async (request, response) => {
 
   // BIOMETRIC VERIFICATION STAGE
   broadcastProgress(`Performing biometric analysis on ${visualItems.length} visual matches...`, 0.85);
-  const sourceEmbedding = await getFaceEmbedding(imageUrl);
+  const sourceEmbedding = visualItems.length > 0
+    ? await getFaceEmbedding(imageUrl, 'source image')
+    : null;
 
   const matches = [];
-  const biometricBatchSize = isTermux() ? 2 : 5;
+  const biometricBatchSize = isTermux() ? 1 : 5;
 
   for (let i = 0; i < visualItems.length; i += biometricBatchSize) {
     const batch = visualItems.slice(i, i + biometricBatchSize);

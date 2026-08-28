@@ -25,7 +25,7 @@ class FreeImageHost {
 
     suspend fun upload(bitmap: Bitmap, onLog: (String) -> Unit): String? {
         val bytes = ByteArrayOutputStream().apply {
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, this)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, this)
         }.toByteArray()
 
         onLog("PROBE READY: ${bytes.size / 1024} KB")

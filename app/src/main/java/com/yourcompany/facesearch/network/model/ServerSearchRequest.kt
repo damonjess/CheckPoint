@@ -6,6 +6,7 @@ data class ServerSearchRequest(
     val searchMode: String = "HYPER",
     val localBypassUrl: String? = null,
     val localFaceUrl: String? = null,
+    val sceneUrl: String? = null,
     val searchTarget: String? = null
 )
 

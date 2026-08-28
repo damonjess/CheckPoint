@@ -28,6 +28,7 @@ import com.yourcompany.facesearch.vision.FaceEmbedder
 import com.yourcompany.facesearch.vision.FaceVerifier
 import com.yourcompany.facesearch.vision.FreeFaceSearchHelper
 import com.yourcompany.facesearch.vision.NativeFaceCropper
+import com.yourcompany.facesearch.vision.SearchProbeManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.withPermit
 import java.io.ByteArrayInputStream
@@ -75,11 +76,14 @@ class CheckInViewModel(
     private val faceVerifier = FaceVerifier(application)
     private val freeImageHost = FreeImageHost()
     private val freeSearchHelper = FreeFaceSearchHelper(getApplication())
+    private val searchProbeManager = SearchProbeManager(getApplication())
     var uiState by mutableStateOf<CheckInUiState>(CheckInUiState.Idle)
         private set
 
     var capturedBitmap by mutableStateOf<Bitmap?>(null)
         private set
+
+    private var originalFullResBitmap: Bitmap? = null
 
     var targetHint by mutableStateOf("")
 
@@ -150,20 +154,27 @@ class CheckInViewModel(
         private set
     var debugMode by mutableStateOf(false)
 
-    fun onPhotoCaptured(bitmap: Bitmap) {
+    fun onPhotoCaptured(bitmap: Bitmap, uri: Uri? = null) {
         Log.e("CheckIn", "!!! CRITICAL LOG !!! onPhotoCaptured triggered. Mode: ${searchMode.name}")
         if (isSearching) {
             Log.e("CheckIn", "Already searching, ignoring capture.")
             return
         }
-        capturedBitmap = bitmap
+
+        val validation = searchProbeManager.validateImage(bitmap)
+        if (validation is SearchProbeManager.ValidationResult.Failure) {
+            uiState = CheckInUiState.Error(validation.reason)
+            return
+        }
+
+        val probeResult = searchProbeManager.prepareProbes(bitmap, uri)
+        originalFullResBitmap = probeResult.original
+        capturedBitmap = probeResult.searchDerivative
         
         isSearching = true
         viewModelScope.launch {
             try {
-                // Keep an unmodified, size-normalized copy for reverse-image search.
-                // The aligned face crop is used only for local verification.
-                val searchPhoto = normalizeReverseImageProbe(bitmap)
+                val searchPhoto = probeResult.searchDerivative
                 LocalServer.stageProbe(searchPhoto, isFaceCrop = false)
 
                 when (val detection = captureDetector.detectAndCropFace(
@@ -191,11 +202,11 @@ class CheckInViewModel(
                         addLog("Spatial geometries translated into a mathematically compressed embedding string.")
                         
                         LocalServer.stageProbe(detection.croppedFace, isFaceCrop = true)
-                        // Both the Termux helper and the in-app fallback must search
-                        // the same isolated face. Previously the fallback received the
-                        // full scene through `probeBitmap`, making provider-side face
-                        // selection fail or report that no face was detected.
-                        performSearchPipeline(searchPhoto, detection.croppedFace, detection.croppedFace)
+                        performSearchPipeline(
+                            sceneBitmap = searchPhoto,
+                            faceBitmap = detection.croppedFace,
+                            fullResSceneBitmap = originalFullResBitmap
+                        )
                     }
                     is FaceDetectionResult.MultipleFacesFound -> {
                         uiState = CheckInUiState.NoFaceDetected(
@@ -234,6 +245,7 @@ class CheckInViewModel(
     fun onRetry() {
         uiState = CheckInUiState.Idle
         capturedBitmap = null
+        originalFullResBitmap = null
         isSearching = false
     }
 
@@ -330,7 +342,8 @@ class CheckInViewModel(
     }
 
     fun onConfirmFreeSearch(bitmap: Bitmap) {
-        freeSearchHelper.launchDirectSearch(bitmap, targetHint)
+        val toSearch = originalFullResBitmap ?: bitmap
+        freeSearchHelper.launchDirectSearch(toSearch, targetHint)
     }
 
     /**
@@ -342,7 +355,8 @@ class CheckInViewModel(
         if (isSearching) return
         viewModelScope.launch {
             addLog("Preparing TinEye exact-image check...")
-            val publicUrl = freeImageHost.upload(bitmap) { message -> addLog(message) }
+            val toUpload = originalFullResBitmap ?: bitmap
+            val publicUrl = freeImageHost.upload(toUpload) { message -> addLog(message) }
             if (publicUrl == null) {
                 addLog("TinEye needs a public image URL; opening its upload page instead.")
             } else {
@@ -387,38 +401,48 @@ class CheckInViewModel(
     }
 
     private suspend fun performSearchPipeline(
-        bitmap: Bitmap,
+        sceneBitmap: Bitmap,
         faceBitmap: Bitmap,
-        visualProbeBitmap: Bitmap
+        fullResSceneBitmap: Bitmap? = null
     ) {
         Log.e("CheckIn", "!!! CRITICAL LOG !!! Starting performSearchPipeline in mode: ${searchMode.name}")
         currentLogs.clear()
         addLog("Initializing consent-based reverse-image search...")
         val effectiveSearchMode = searchMode
 
-        uiState = CheckInUiState.Loading(0.1f, currentLogs.toList())
+        uiState = CheckInUiState.Loading(0.1f, currentLogs.toList(), isolatedFace = faceBitmap)
 
-        // Try to upload probe to free hosting
-        addLog("Uploading probe to free hosting...")
-        var publicUrl = freeImageHost.upload(visualProbeBitmap) { message -> addLog(message) }
+        // Try to upload probes in parallel
+        addLog("Uploading search probes for comprehensive visual matching...")
+        
+        val faceUrl = freeImageHost.upload(faceBitmap) { message -> addLog(message) }
+        val sceneUrl = if (sceneBitmap != faceBitmap) {
+            freeImageHost.upload(fullResSceneBitmap ?: sceneBitmap) { message -> addLog(message) }
+        } else {
+            faceUrl
+        }
+
+        var publicUrl = faceUrl
+        var publicSceneUrl = sceneUrl
 
         if (publicUrl == null) {
-            addLog("✗ All free hosts failed. Falling back to local probe.")
+            addLog("✗ All free hosts failed for face probe. Falling back to local probe.")
             try {
                 LocalServer.start(getApplication())
                 publicUrl = "http://127.0.0.1:8080/face.jpg"
-                addLog("✓ Using local probe: $publicUrl")
+                publicSceneUrl = "http://127.0.0.1:8080/probe.jpg"
+                addLog("✓ Using local probes.")
             } catch (e: Exception) {
                 addLog("✗ Failed to start LocalServer: ${e.message}")
                 uiState = CheckInUiState.Error("No free image host available and local probe failed.", currentLogs.toList())
                 return
             }
         } else {
-            addLog("✓ Probe hosted: ${publicUrl.take(35)}...")
+            addLog("✓ Probes hosted successfully.")
         }
 
         // Upgrade 5: EXIF Metadata Extraction
-        val exifHints = extractExifHints(bitmap)
+        val exifHints = extractExifHints(sceneBitmap)
         val combinedHint = listOf(targetHint, exifHints)
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -536,10 +560,11 @@ class CheckInViewModel(
                 if (!useTermux) return@async null
                 try {
                     faceSearchRepository.performLocalServerSearch(
-                        bitmap = bitmap,
+                        bitmap = sceneBitmap,
                         faceBitmap = faceBitmap,
                         keywordHint = combinedHint,
                         imageUrl = publicUrl,
+                        sceneUrl = publicSceneUrl,
                         searchMode = effectiveSearchMode.name,
                         onLog = { message -> handleScraperLog(message) }
                     )
@@ -565,10 +590,11 @@ class CheckInViewModel(
                     addLog("Harvesting names and usernames from visual hits to expand coverage.")
                     
                     faceSearchRepository.performFaceSearch(
-                        bitmap = bitmap,
+                        bitmap = sceneBitmap,
                         faceBitmap = faceBitmap,
                         keywordHint = combinedHint,
                         imageUrl = publicUrl,
+                        sceneUrl = publicSceneUrl,
                         deepCrawl = false,
                         searchMode = effectiveSearchMode.name,
                         includeExactLensMatches = broadenLensCoverage,
@@ -1171,26 +1197,7 @@ class CheckInViewModel(
         }
     }
 
-    /**
-     * Creates a software bitmap capped at a practical upload size. It preserves
-     * the captured photograph and does not synthesize, mirror, or distort it.
-     */
-    private fun normalizeReverseImageProbe(source: Bitmap): Bitmap {
-        val safeSource = if (source.config == Bitmap.Config.HARDWARE || source.config == null) {
-            source.copy(Bitmap.Config.ARGB_8888, false)
-        } else {
-            source
-        }
-        val longestEdge = maxOf(safeSource.width, safeSource.height)
-        if (longestEdge <= 1600) return safeSource
-        val scale = 1600f / longestEdge.toFloat()
-        return Bitmap.createScaledBitmap(
-            safeSource,
-            (safeSource.width * scale).toInt().coerceAtLeast(1),
-            (safeSource.height * scale).toInt().coerceAtLeast(1),
-            true
-        )
-    }
+
 
     private suspend fun loadThumbnailBitmap(url: String?): Bitmap? = withContext(Dispatchers.IO) {
         if (url.isNullOrBlank()) return@withContext null

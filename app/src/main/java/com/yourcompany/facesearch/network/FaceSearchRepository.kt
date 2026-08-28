@@ -70,6 +70,7 @@ class FaceSearchRepository(private val context: Context) {
         faceBitmap: android.graphics.Bitmap? = null,
         keywordHint: String? = null,
         imageUrl: String? = null,
+        sceneUrl: String? = null,
         deepCrawl: Boolean = false,
         searchMode: String = "PRECISION",
         includeExactLensMatches: Boolean = false,
@@ -80,41 +81,54 @@ class FaceSearchRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             val allResults = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
 
-            // STEP 1: HOST IMAGE (if not already hosted)
-            val visualProbe = faceBitmap ?: bitmap
-            val publicUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
+            // STEP 1: HOST IMAGES
+            val faceUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
                 imageUrl
             } else {
-                onLog("Uploading face probe to free hosting...")
-                freeHost.upload(visualProbe, onLog)
+                onLog("Uploading face probe...")
+                freeHost.upload(faceBitmap ?: bitmap, onLog)
             }
 
-            if (publicUrl == null) {
-                onLog("✗ All free hosts failed. Visual search will be skipped.")
+            val finalSceneUrl = if (sceneUrl != null && sceneUrl.startsWith("http")) {
+                sceneUrl
+            } else if (faceBitmap != null) {
+                onLog("Uploading full scene for context...")
+                freeHost.upload(bitmap, onLog)
             } else {
-                if (imageUrl == null || imageUrl != publicUrl) {
-                    onLog("✓ Probe live: ${publicUrl.take(45)}...")
+                faceUrl
+            }
+
+            if (faceUrl == null) {
+                onLog("✗ Face probe upload failed. Visual search will be limited.")
+            } else {
+                if (imageUrl == null || imageUrl != faceUrl) {
+                    onLog("✓ Face probe live: ${faceUrl.take(35)}...")
                 }
+            }
+            
+            if (finalSceneUrl != null && finalSceneUrl != faceUrl) {
+                onLog("✓ Scene probe live: ${finalSceneUrl.take(35)}...")
             }
 
             // Parallelized OSINT Pipeline
             coroutineScope {
                 // Deep Crawl: Search mirrored image as well for asymmetric matchers
-                if (deepCrawl && publicUrl != null) {
+                if (deepCrawl && faceUrl != null) {
                     onLog("Deep Crawl: Generating asymmetric mirrored probe...")
                     // Logic handled by caller or we can do a mirror upload here if needed
                 }
-                // We no longer auto-skip WebView engines just because Termux is available;
-                // the caller (CheckInViewModel) manages the balance between local and offloaded engines.
-                val visualJobs = if (!skipVisualEngines && publicUrl != null) {
+                
+                val visualJobs = if (!skipVisualEngines && faceUrl != null) {
                     val jobs = mutableListOf<Deferred<Unit>>()
                     
-                    if ("Yandex" !in enginesToSkip) {
+                    // Engines that benefit from context (Scene)
+                    if ("Google" !in enginesToSkip) {
                         jobs.add(async { 
                             val s = WebViewScraper.create(context)
                             try {
-                                val matches: List<SerpVisualMatch> = s.scrapeYandex(publicUrl)
-                                onLog("Yandex found ${matches.size} candidate(s)")
+                                val urlToUse = finalSceneUrl ?: faceUrl
+                                val matches: List<SerpVisualMatch> = s.scrapeGoogle(urlToUse)
+                                onLog("Google found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
@@ -125,7 +139,8 @@ class FaceSearchRepository(private val context: Context) {
                         jobs.add(async { 
                             val s = WebViewScraper.create(context)
                             try {
-                                val matches: List<SerpVisualMatch> = s.scrapeBing(publicUrl)
+                                val urlToUse = finalSceneUrl ?: faceUrl
+                                val matches: List<SerpVisualMatch> = s.scrapeBing(urlToUse)
                                 onLog("Bing found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                                 Unit
@@ -133,12 +148,13 @@ class FaceSearchRepository(private val context: Context) {
                         })
                     }
 
-                    if ("Google" !in enginesToSkip) {
+                    // Engines that prefer isolation (Face)
+                    if ("Yandex" !in enginesToSkip) {
                         jobs.add(async { 
                             val s = WebViewScraper.create(context)
                             try {
-                                val matches: List<SerpVisualMatch> = s.scrapeGoogle(publicUrl)
-                                onLog("Google found ${matches.size} candidate(s)")
+                                val matches: List<SerpVisualMatch> = s.scrapeYandex(faceUrl)
+                                onLog("Yandex found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
@@ -149,7 +165,7 @@ class FaceSearchRepository(private val context: Context) {
                         jobs.add(async { 
                             val s = WebViewScraper.create(context)
                             try {
-                                val matches: List<SerpVisualMatch> = s.scrapeBaidu(publicUrl)
+                                val matches: List<SerpVisualMatch> = s.scrapeBaidu(faceUrl)
                                 onLog("Baidu found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                                 Unit
@@ -161,7 +177,7 @@ class FaceSearchRepository(private val context: Context) {
                         jobs.add(async {
                             val s = WebViewScraper.create(context)
                             try {
-                                val matches: List<SerpVisualMatch> = s.scrapeTinEye(publicUrl)
+                                val matches: List<SerpVisualMatch> = s.scrapeTinEye(faceUrl)
                                 onLog("TinEye found ${matches.size} candidate(s)")
                                 allResults.addAll(matches)
                                 Unit
@@ -172,8 +188,9 @@ class FaceSearchRepository(private val context: Context) {
                     // Add SerpApi if key is available
                     if (com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
                         jobs.add(async { 
+                            val urlToUse = finalSceneUrl ?: faceUrl
                             val matches: List<SerpVisualMatch> = performSerpApiSearch(
-                                publicUrl,
+                                urlToUse,
                                 includeExactLensMatches,
                                 onLog
                             )
@@ -349,45 +366,49 @@ class FaceSearchRepository(private val context: Context) {
         faceBitmap: android.graphics.Bitmap? = null,
         keywordHint: String? = null,
         imageUrl: String? = null,
+        sceneUrl: String? = null,
         searchMode: String = "PRECISION",
         onLog: (String) -> Unit = {}
     ): ServerSearchResponse {
         Log.e("CheckIn", "!!! REPO LOG !!! performLocalServerSearch started. Mode: $searchMode")
 
-        // 1. Use existing URL or upload the FACE image if possible, otherwise full
-        val publicUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
+        // 1. Prepare URLs
+        val faceUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
             imageUrl
         } else {
-            val probe = faceBitmap ?: bitmap
             onLog("Uploading face probe to Termux host...")
-            freeHost.upload(probe) { log ->
-                onLog(log)
-                Log.e("CheckIn", "REPO_UPLOAD_LOG: $log")
-            }
+            freeHost.upload(faceBitmap ?: bitmap, onLog)
         }
 
-        if (publicUrl == null) {
-            onLog("⚠ Public upload failed. Termux will use internal loopback probe.")
-            Log.e("CheckIn", "Public upload failed - will rely on localFaceUrl")
-        } else if (imageUrl == null || imageUrl != publicUrl) {
-            onLog("✓ Hosted: ${publicUrl.take(30)}...")
+        val finalSceneUrl = if (sceneUrl != null && sceneUrl.startsWith("http")) {
+            sceneUrl
+        } else if (faceBitmap != null) {
+            onLog("Uploading full scene for context...")
+            freeHost.upload(bitmap, onLog)
+        } else {
+            faceUrl
         }
-        Log.e("CheckIn", "REPO LOG: Image ready: $publicUrl. Calling Termux...")
+
+        if (faceUrl == null) {
+            onLog("⚠ Public upload failed. Termux will use internal loopback probe.")
+        } else if (imageUrl == null || imageUrl != faceUrl) {
+            onLog("✓ Hosted: ${faceUrl.take(30)}...")
+        }
 
         // 2. Determine the correct backend URL
         val backendBase = activeBackend ?: "http://127.0.0.1:3000"
         onLog("Connecting to Termux at $backendBase...")
-        Log.e("CheckIn", "Using Termux backend: $backendBase")
 
         val backendMode = mapModeForBackend(searchMode)
         onLog("Starting local helper search ($backendMode)...")
 
         val request = ServerSearchRequest(
-            imageUrl = publicUrl ?: "http://127.0.0.1:8080/face.jpg",
+            imageUrl = faceUrl ?: "http://127.0.0.1:8080/face.jpg",
             keywordHint = keywordHint,
             searchMode = backendMode,
             localBypassUrl = "http://127.0.0.1:8080/probe.jpg",
             localFaceUrl = "http://127.0.0.1:8080/face.jpg",
+            sceneUrl = finalSceneUrl,
             searchTarget = "FACE"
         )
 

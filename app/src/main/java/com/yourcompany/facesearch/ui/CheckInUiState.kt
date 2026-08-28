@@ -12,6 +12,7 @@ sealed class CheckInUiState {
     ) : CheckInUiState()
     data class Success(
         val matches: List<WebMatchDisplay>,
+        val tinEyeMatches: List<WebMatchDisplay> = emptyList(),
         val logs: List<String> = emptyList(),
         val termuxAvailable: Boolean = true,
         val isolatedFace: Bitmap? = null

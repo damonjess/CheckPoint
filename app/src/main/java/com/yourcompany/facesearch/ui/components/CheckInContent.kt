@@ -144,10 +144,11 @@ fun SuccessContent(
             )
 
             IconButton(onClick = {
-                val summary = uiState.matches.take(10).joinToString("\n\n") {
+                val summary = (uiState.matches + uiState.tinEyeMatches).take(10).joinToString("\n\n") {
                     "${when {
                         it.isFaceVerified -> "Verified face match"
                         it.isLikelyFaceMatch -> "Possible face match — review manually"
+                        it.source.contains("TinEye", ignoreCase = true) -> "Exact image occurrence — TinEye"
                         else -> "Unverified visual lead"
                     }}: ${it.displayName} (${it.source})\n${it.profileUrl}"
                 }
@@ -202,8 +203,38 @@ fun SuccessContent(
             }
         }
 
+        if (uiState.tinEyeMatches.isNotEmpty()) {
+            if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            Text(
+                text = "EXACT IMAGE OCCURRENCES — TINEYE",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = Amber
+            )
+            Text(
+                text = "The image or a related image was found on these webpages. These results are not filtered by local face similarity.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.DarkGray
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            uiState.tinEyeMatches.forEach { match ->
+                MatchCard(
+                    match = match,
+                    isPrimary = false,
+                    debugMode = debugMode,
+                    onLoadHighRes = { onLoadHighRes(match) },
+                    onClick = { onMatchClick(match) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+
         if (visualLeads.isNotEmpty()) {
-            if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty()) Spacer(modifier = Modifier.height(12.dp))
+            if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty() || uiState.tinEyeMatches.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+            }
             Text(
                 text = "IN-APP VISUAL CANDIDATES (${visualLeads.size})",
                 style = MaterialTheme.typography.labelSmall,

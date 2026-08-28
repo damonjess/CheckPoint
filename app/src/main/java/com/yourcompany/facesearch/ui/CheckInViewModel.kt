@@ -400,6 +400,14 @@ class CheckInViewModel(
         }
     }
 
+    private fun isTinEyeResult(match: SerpVisualMatch): Boolean {
+        val metadata = listOfNotNull(match.source, match.link)
+            .joinToString(" ")
+            .lowercase(Locale.US)
+
+        return metadata.contains("tineye")
+    }
+
     private suspend fun performSearchPipeline(
         sceneBitmap: Bitmap,
         faceBitmap: Bitmap,
@@ -651,7 +659,32 @@ class CheckInViewModel(
             allRawResults.addAll(webResults)
         }
 
-        if (allRawResults.isEmpty()) {
+        // Correct TinEye fix: Identify and retain external TinEye results separately
+        val tinEyeRawCount = allRawResults.count(::isTinEyeResult)
+        val tinEyeOccurrences = allRawResults
+            .filter(::isTinEyeResult)
+            .filter { !it.link.isNullOrBlank() }
+            .filterNot { match ->
+                val host = try {
+                    Uri.parse(match.link).host.orEmpty().lowercase(Locale.US)
+                } catch (_: Exception) {
+                    ""
+                }
+
+                // Exclude TinEye's own navigation/help pages.
+                host == "tineye.com" || host.endsWith(".tineye.com")
+            }
+            .distinctBy { it.link }
+            .take(50)
+
+        if (tinEyeRawCount > 0) {
+            addLog("TinEye returned $tinEyeRawCount raw links; ${tinEyeOccurrences.size} were usable external image-occurrence pages.")
+        }
+
+        // Remove TinEye results from the pool that goes through face verification
+        val filteredRawResults = allRawResults.filterNot(::isTinEyeResult)
+
+        if (filteredRawResults.isEmpty() && tinEyeOccurrences.isEmpty()) {
             val message = if (blockedEngines.isNotEmpty()) {
                 "${blockedEngines.joinToString()} requested an access check and returned no candidates. Open your photo in Lens to continue manually."
             } else {
@@ -671,7 +704,7 @@ class CheckInViewModel(
             return
         }
 
-        val candidates = prioritizeCandidates(allRawResults)
+        val candidates = prioritizeCandidates(filteredRawResults)
         addLog("Verification Queue: ${candidates.size} unique candidate(s) after initial filtering.")
         
         // Detailed logging of what we're checking
@@ -697,7 +730,14 @@ class CheckInViewModel(
             addLog("Excluded ${review.excludedLowRelevance} visible-face candidate(s) with insufficient local face similarity.")
         }
 
-        if (verifiedMatches.isEmpty() && likelyMatches.isEmpty() && retainedVisualCandidates.isEmpty()) {
+        val tinEyeDisplayMatches = tinEyeOccurrences.map { match ->
+            mapToDisplay(match).copy(
+                source = "TinEye Occurrence",
+                score = 500 // Generic score for TinEye results
+            )
+        }
+
+        if (verifiedMatches.isEmpty() && likelyMatches.isEmpty() && retainedVisualCandidates.isEmpty() && tinEyeDisplayMatches.isEmpty()) {
             addLog("No candidate with one visible face remained after local filtering.")
             uiState = CheckInUiState.NoMatch(
                 logs = currentLogs.toList(),
@@ -710,22 +750,34 @@ class CheckInViewModel(
             return
         }
 
+        if (verifiedMatches.isEmpty() && likelyMatches.isEmpty() && retainedVisualCandidates.isEmpty() && tinEyeDisplayMatches.isNotEmpty()) {
+            addLog("No locally verified face match was found, but ${tinEyeDisplayMatches.size} TinEye occurrence(s) were identified.")
+            updateResultsLive(emptyList(), useTermux, tinEyeDisplayMatches)
+            termuxWs?.close(1000, "TinEye only")
+            termuxWs = null
+            return
+        }
+
         if (verifiedMatches.isEmpty() && likelyMatches.isEmpty()) {
-            addLog("No locally verified or possible face match was found. Showing ${unverifiedLeads.size} review lead(s) and ${fallbackCandidates.size} ranked in-app visual candidate(s).")
-            updateResultsLive(retainedVisualCandidates, useTermux)
+            addLog("No locally verified or possible face match was found. Showing ${unverifiedLeads.size} review lead(s), ${fallbackCandidates.size} visual candidate(s), and ${tinEyeDisplayMatches.size} TinEye occurrence(s).")
+            updateResultsLive(retainedVisualCandidates, useTermux, tinEyeDisplayMatches)
             termuxWs?.close(1000, "Leads only")
             termuxWs = null
             return
         }
 
-        updateResultsLive(verifiedMatches + likelyMatches + retainedVisualCandidates, useTermux)
-        addLog("Showing ${verifiedMatches.size} verified, ${likelyMatches.size} possible face match(es), ${unverifiedLeads.size} review lead(s), and ${fallbackCandidates.size} ranked visual candidate(s).")
+        updateResultsLive(verifiedMatches + likelyMatches + retainedVisualCandidates, useTermux, tinEyeDisplayMatches)
+        addLog("Showing ${verifiedMatches.size} verified, ${likelyMatches.size} possible face match(es), ${unverifiedLeads.size} review lead(s), ${fallbackCandidates.size} visual candidate(s), and ${tinEyeDisplayMatches.size} TinEye occurrence(s).")
         termuxWs?.close(1000, "Success")
         termuxWs = null
     }
 
-    private fun updateResultsLive(newResults: List<SerpVisualMatch>, termuxAvailable: Boolean = true) {
-        Log.e("CheckIn", "CONSOLE_LOG: updateResultsLive called with ${newResults.size} new results")
+    private fun updateResultsLive(
+        newResults: List<SerpVisualMatch>,
+        termuxAvailable: Boolean = true,
+        tinEyeMatches: List<WebMatchDisplay> = emptyList()
+    ) {
+        Log.e("CheckIn", "CONSOLE_LOG: updateResultsLive called with ${newResults.size} new results and ${tinEyeMatches.size} TinEye matches")
         val currentState = uiState
         val existingMatches = if (currentState is CheckInUiState.Success) {
             currentState.matches
@@ -745,17 +797,13 @@ class CheckInViewModel(
 
         uiState = CheckInUiState.Success(
             matches = allMatches,
+            tinEyeMatches = (if (currentState is CheckInUiState.Success) currentState.tinEyeMatches else emptyList()) + tinEyeMatches,
             logs = currentLogs.toList(),
             termuxAvailable = termuxAvailable,
             isolatedFace = isolatedFace
         )
         // Ensure scanning state is cleared when results are displayed
         isSearching = false
-        
-        // Start/restart background verification for the combined list
-        // Note: we don't use the full bitmap here to save memory, just the results
-        // The background verification loop in performSearchPipeline was launching separate jobs,
-        // here we just ensure verification eventually runs.
     }
 
     /**

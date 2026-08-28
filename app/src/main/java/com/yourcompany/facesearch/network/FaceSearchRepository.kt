@@ -418,13 +418,23 @@ class FaceSearchRepository(private val context: Context) {
             val response = api.searchByImage(request)
 
             val total = response.matches?.size ?: 0
-            val allZeroEngines = response.meta?.engines?.values?.all { it.count == 0 } ?: false
-            if (response.success && total == 0 && allZeroEngines) {
+            val engineResults = response.meta?.engines.orEmpty()
+            val failedEngines = engineResults
+                .filterValues { !it.error.isNullOrBlank() }
+                .map { (name, info) -> "$name: ${info.error}" }
+
+            if (response.success && total == 0) {
                 val blocked = response.meta?.blockedEngines.orEmpty()
-                if (blocked.isNotEmpty()) {
-                    onLog("⚠ ${blocked.joinToString()} requested an access challenge.")
-                } else {
-                    onLog("No visual candidates were returned by the local helper.")
+                when {
+                    blocked.isNotEmpty() -> {
+                        onLog("⚠ ${blocked.joinToString()} requested an access challenge.")
+                    }
+                    failedEngines.isNotEmpty() -> {
+                        onLog("⚠ Some Termux providers failed: ${failedEngines.joinToString(" | ")}")
+                    }
+                    engineResults.isNotEmpty() -> {
+                        onLog("No visual candidates were returned by responding local providers.")
+                    }
                 }
                 return response
             }

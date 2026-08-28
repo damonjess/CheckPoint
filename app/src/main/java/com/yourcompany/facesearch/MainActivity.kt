@@ -73,10 +73,35 @@ class MainActivity : ComponentActivity() {
                         try {
                             val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                                 val source = ImageDecoder.createSource(contentResolver, it)
-                                ImageDecoder.decodeBitmap(source)
+                                ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                                    val longEdge = maxOf(info.size.width, info.size.height)
+                                    val sampleSize = kotlin.math.ceil(longEdge / 2048.0)
+                                        .toInt()
+                                        .coerceAtLeast(1)
+                                    
+                                    decoder.setTargetSampleSize(sampleSize)
+                                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                                }
                             } else {
-                                @Suppress("DEPRECATION")
-                                MediaStore.Images.Media.getBitmap(contentResolver, it)
+                                // Downsample for legacy versions too
+                                val options = android.graphics.BitmapFactory.Options().apply {
+                                    inJustDecodeBounds = true
+                                }
+                                contentResolver.openInputStream(it)?.use { stream ->
+                                    android.graphics.BitmapFactory.decodeStream(stream, null, options)
+                                }
+                                
+                                val longEdge = maxOf(options.outWidth, options.outHeight)
+                                val sampleSize = kotlin.math.ceil(longEdge / 2048.0)
+                                    .toInt()
+                                    .coerceAtLeast(1)
+                                    
+                                val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+                                    inSampleSize = sampleSize
+                                }
+                                contentResolver.openInputStream(it)?.use { stream ->
+                                    android.graphics.BitmapFactory.decodeStream(stream, null, decodeOptions)
+                                } ?: throw Exception("Failed to open stream")
                             }
                             checkInViewModel.onPhotoCaptured(bitmap, it)
                         } catch (e: Exception) {

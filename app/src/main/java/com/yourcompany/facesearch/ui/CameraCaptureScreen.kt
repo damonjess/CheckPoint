@@ -85,7 +85,12 @@ private fun CameraPreviewWithCapture(
             cameraExecutor.shutdown()
         }
     }
-    val imageCapture = remember { ImageCapture.Builder().build() }
+    val imageCapture = remember {
+        ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setTargetResolution(android.util.Size(2048, 2048))
+            .build()
+    }
     var isCapturing by remember { mutableStateOf(false) }
     var captureError by remember { mutableStateOf<String?>(null) }
     

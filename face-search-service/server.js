@@ -92,7 +92,24 @@ app.use(express.json({ limit: '10mb' }));
 const PORT = Number(process.env.PORT || 3000);
 const TERMUX_ENGINE_TIMEOUT_MS = 60_000;
 const DESKTOP_ENGINE_TIMEOUT_MS = 45_000;
-const COOLDOWN_MS = 15 * 60 * 1000;
+const COOLDOWN_MS = 2 * 60 * 1000; // Reduced from 15m to 2m for faster recovery
+
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:128.0) Gecko/20100101 Firefox/128.0'
+];
+
+let sequentialBlockCount = 0;
+const VIEWPORTS = [
+  { width: 1280, height: 800 },
+  { width: 1366, height: 768 },
+  { width: 1440, height: 900 },
+  { width: 1536, height: 864 },
+  { width: 1920, height: 1080 }
+];
 
 const isTermux = () => {
   const prefix = process.env.PREFIX || '';
@@ -139,6 +156,7 @@ const getChromiumPath = () => {
 };
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const randomDelay = (min, max) => delay(Math.floor(Math.random() * (max - min + 1) + min));
 
 async function checkConnectivity() {
   try {
@@ -178,7 +196,9 @@ function isBlockedPage(content, title = '') {
     'access denied', 'unusual traffic', 'verify you are human', 'security check',
     'captcha', 'hcaptcha', 'recaptcha', 'cloudflare', 'automated access',
     'bot detection', 'robot check', 'blocked by your organization',
-    'please wait while we verify', 'complete a security challenge', 'ip has been flagged'
+    'please wait while we verify', 'complete a security challenge', 'ip has been flagged',
+    'suspicious activity', 'checking your browser', 'access was denied',
+    'our systems have detected', 'pardon our interruption'
   ].some((phrase) => value.includes(phrase));
 }
 
@@ -344,7 +364,9 @@ async function getBrowser() {
       '--disable-blink-features=AutomationControlled'
     ];
     if (isTermux()) {
-      args.push('--disable-gpu', '--single-process', '--no-zygote', '--disable-software-rasterizer');
+      // Keep the safe rendering flags, but do not force Chromium into
+      // single-process/no-zygote mode: it can close when Puppeteer creates a page.
+      args.push('--disable-gpu', '--disable-software-rasterizer');
     }
 
     const browser = await puppeteer.launch({
@@ -373,14 +395,16 @@ async function getBrowser() {
 async function acceptConsent(page) {
   const selectors = [
     'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]', '#L2AGLb',
-    '#accept-all', '#onetrust-accept-btn-handler', '.close-button', '.t-close'
+    '#accept-all', '#onetrust-accept-btn-handler', '.close-button', '.t-close',
+    'button[aria-label*="Reject all"]', 'button[aria-label*="Decline"]'
   ];
   for (const selector of selectors) {
     try {
         const button = await page.$(selector);
         if (button) {
+            await randomDelay(400, 900);
             await button.click();
-            await delay(800);
+            await randomDelay(800, 1500);
         }
     } catch (_) {}
   }
@@ -496,57 +520,97 @@ async function runEngine(engine, imageUrl) {
     return { items: [], blocked: true, ms: 0, error: 'Engine cooling down.' };
   }
 
-  let context = null;
   let page = null;
+  let pageAllocated = false;
+
   try {
     const browser = await getBrowser();
-    context = await browser.createIncognitoBrowserContext();
-    page = await context.newPage();
+
+    // Termux Chromium is more stable with a normal page in the default
+    // context than a newly-created incognito browser context per provider.
+    page = await browser.newPage();
+    pageAllocated = true;
     pageCount += 1;
 
-    // Advanced Stealth Headers & User-Agent Rotation
-    const uas = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Edge/120.0.0.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0'
-    ];
-    await page.setUserAgent(uas[Math.floor(Math.random() * uas.length)]);
+    // Rotate User-Agent
+    const ua = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+    await page.setUserAgent(ua);
+
+    // Use browser defaults for headers to maintain protocol consistency.
     await page.setExtraHTTPHeaders({
         'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Ch-Ua': '"Not(A:Brand";v="24", "Chromium";v="122"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Upgrade-Insecure-Requests': '1'
+        'Referer': 'https://www.google.com/'
     });
-    await page.setViewport({ width: 1440, height: 900 });
+
+    // Randomize viewport to avoid fingerprint consistency flags
+    const viewport = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
+    await page.setViewport(viewport);
+
+    // Behavioral stealth: small random mouse movement
+    await page.mouse.move(Math.floor(Math.random() * 100), Math.floor(Math.random() * 100));
 
     const timeout = isTermux() ? TERMUX_ENGINE_TIMEOUT_MS : DESKTOP_ENGINE_TIMEOUT_MS;
-    await page.goto(engine.urlFor(imageUrl), { waitUntil: 'domcontentloaded', timeout });
+    const response = await page.goto(engine.urlFor(imageUrl), { waitUntil: 'domcontentloaded', timeout });
 
-    // Handle Infinite Scroll/Lazy Load
-    await delay(1500);
-    await page.evaluate(() => window.scrollBy(0, 1000));
-    await delay(1000);
-    await page.evaluate(() => window.scrollBy(0, 1000));
-    await delay(1000);
+    // Handle HTTP status codes indicating blocks
+    if (response && (response.status() === 403 || response.status() === 429)) {
+      markBlocked(engine.name);
+      sequentialBlockCount++;
+      return { items: [], blocked: true, ms: Date.now() - startedAt, error: `HTTP ${response.status()}: Access Forbidden/Limited.` };
+    }
+
+    // Handle Infinite Scroll/Lazy Load with Human-like Jitter
+    await randomDelay(2000, 4500); // Increased initial delay
+    const scrollY = 800 + Math.floor(Math.random() * 500);
+    await page.evaluate((y) => window.scrollBy(0, y), scrollY);
+    await randomDelay(1500, 3000);
+    await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 200)));
+    await randomDelay(800, 1500);
 
     const title = await page.title().catch(() => '');
     const content = await page.content().catch(() => '');
     if (isBlockedPage(content, title) || /captcha|verification|sorry\//i.test(page.url())) {
       markBlocked(engine.name);
+      sequentialBlockCount++;
+
+      // If multiple engines are blocked in a row, the browser instance might be flagged
+      if (sequentialBlockCount >= 3) {
+          console.log('[Stealth] Consecutive blocks detected. Recycling browser instance...');
+          await browserInstance?.close().catch(() => {});
+          browserInstance = null;
+          browserLaunch = null;
+          pageCount = 0;
+          sequentialBlockCount = 0;
+      }
+
       return { items: [], blocked: true, ms: Date.now() - startedAt, error: 'Access challenge.' };
     }
 
     await acceptConsent(page);
     const items = await extractCandidates(page, engine);
+    sequentialBlockCount = 0; // Reset on success
     return { items, blocked: false, ms: Date.now() - startedAt, error: null };
   } catch (error) {
-    return { items: [], blocked: false, ms: Date.now() - startedAt, error: error.message };
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[${engine.name}] provider execution failed: ${message}`);
+
+    // A closed browser should not be reused for the next provider.
+    if (/target closed|session closed|browser has disconnected/i.test(message)) {
+      await browserInstance?.close().catch(() => {});
+      browserInstance = null;
+      browserLaunch = null;
+      pageCount = 0;
+    }
+
+    return {
+      items: [],
+      blocked: false,
+      ms: Date.now() - startedAt,
+      error: message
+    };
   } finally {
     if (page) await page.close().catch(() => {});
-    if (context) await context.close().catch(() => {});
+    if (pageAllocated) pageCount = Math.max(0, pageCount - 1);
   }
 }
 
@@ -559,7 +623,13 @@ app.get('/api/ping', (_request, response ) => {
 
 app.post('/api/search', async (request, response) => {
   const startedAt = Date.now();
-  const imageUrl = request.body?.imageUrl || request.body?.localFaceUrl;
+
+  // Prefer sceneUrl for visual search signals
+  const imageUrl =
+    request.body?.sceneUrl ||
+    request.body?.imageUrl ||
+    request.body?.localFaceUrl;
+
   console.log(`[Request] Incoming search for: ${imageUrl}`);
 
   const keywordHint = typeof request.body?.keywordHint === 'string' ? request.body.keywordHint.trim() : '';
@@ -581,8 +651,10 @@ app.post('/api/search', async (request, response) => {
   const outcomes = [];
   // Dynamic concurrency based on environment and memory
   const freeMemMB = os.freemem() / 1024 / 1024;
-  let parallelLimit = isTermux() ? (freeMemMB > 800 ? 2 : 1) : 6;
-  if (searchMode === 'DEEP' || searchMode === 'AGGRESSIVE') parallelLimit = Math.max(parallelLimit, 8);
+  let parallelLimit = isTermux() ? 1 : 6;
+  if (!isTermux() && (searchMode === 'DEEP' || searchMode === 'AGGRESSIVE')) {
+    parallelLimit = Math.max(parallelLimit, 8);
+  }
 
   console.log(`[OSINT] Mode: ${searchMode}, Concurrency: ${parallelLimit} (Free RAM: ${Math.round(freeMemMB)}MB)`);
 

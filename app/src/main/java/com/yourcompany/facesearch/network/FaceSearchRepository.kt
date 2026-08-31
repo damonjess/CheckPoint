@@ -186,7 +186,6 @@ class FaceSearchRepository(private val context: Context) {
 
         val hints = mutableSetOf<String>()
         
-        // Expanded to completely block weird extractions like "Page 294: Celebrity"
         val stopWords = setOf(
             "image", "photo", "picture", "wallpaper", "visual", "match", "stock", "vector",
             "search", "engine", "google", "bing", "yandex", "lens", "the", "and", "for", "with",
@@ -197,21 +196,27 @@ class FaceSearchRepository(private val context: Context) {
             "dating", "outfit", "dress", "makeup", "look", "looks", "page", "celebrity", "gallery",
             "index", "collection", "album", "download", "free", "video", "videos", "clip", "watch",
             "movie", "movies", "actor", "actress", "model", "star", "birthday", "celebrates", "today",
-            "tiktok", "instagram", "facebook", "reddit", "twitter", "shein", "ebay"
+            "tiktok", "instagram", "facebook", "reddit", "twitter", "shein", "ebay", 
+            "news", "breaking", "update", "hurricane", "storm", "weather", "live", "report" // NEW: News blockers
         )
 
         candidates.forEach { match ->
-            // Aggressively strip anything after a dash, pipe, colon, or bracket to isolate the name
+            // Strip anything after common separators
             val cleanTitle = match.title.orEmpty()
                 .replace(Regex("(?i)[|\\-–—:(\\[].*"), "") 
                 .trim()
 
-            // Names don't typically have numbers in them. Discard instantly.
+            // Remove numbers
             if (cleanTitle.any { it.isDigit() }) return@forEach
 
             val words = cleanTitle.split(Regex("\\s+")).filter { it.isNotBlank() }
+            
+            // STRICT NAME RULE: Must be exactly 2 or 3 words. 
+            // "Hurricane Dorian" is 2 words, so the stopWords list catches it.
             if (words.size in 2..3 && words.none { it.lowercase() in stopWords }) {
-                hints.add(cleanTitle)
+                // Only take the first two words (First Name + Last Name)
+                val possibleName = words.take(2).joinToString(" ")
+                hints.add(possibleName)
             }
         }
         return hints.toList().take(3)

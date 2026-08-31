@@ -56,8 +56,9 @@ class NativeFaceCropper {
         val source = bitmap.asSoftwareBitmap()
         val face = findLargestFace(source) ?: return null
         val box = face.boundingBox.clampTo(source.width, source.height)
-        val paddingX = (box.width() * 0.08f).toInt()
-        val paddingY = (box.height() * 0.08f).toInt()
+        // FIX: Reduced padding from 0.08f to 0.02f to eliminate clothing
+        val paddingX = (box.width() * 0.02f).toInt()
+        val paddingY = (box.height() * 0.02f).toInt()
         return cropAround(
             source = source,
             centerX = box.centerX(),
@@ -75,13 +76,14 @@ class NativeFaceCropper {
         val source = bitmap.asSoftwareBitmap()
         val face = findLargestFace(source) ?: return null
         val box = face.boundingBox.clampTo(source.width, source.height)
-        // Tightened isolation: focus strictly on the head to ignore background and clothing.
-        val widthScale = 1.25f
-        val heightScale = if (fullJawline) 1.55f else 1.40f
+        // FIX: Scaled down to remove neck and shoulders completely
+        val widthScale = 1.15f // Was 1.25f
+        val heightScale = 1.25f // Was 1.55f
+        
         val crop = cropAround(
             source = source,
             centerX = box.centerX(),
-            centerY = (box.centerY() - box.height() * 0.08f).toInt(),
+            centerY = (box.centerY() - box.height() * 0.05f).toInt(),
             width = max(box.width(), (box.width() * widthScale).toInt()),
             height = max(box.height(), (box.height() * heightScale).toInt())
         )

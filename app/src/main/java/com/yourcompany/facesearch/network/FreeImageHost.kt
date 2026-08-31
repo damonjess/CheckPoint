@@ -1,6 +1,8 @@
 package com.yourcompany.facesearch.network
 
 import android.graphics.Bitmap
+import com.google.gson.Gson
+import com.yourcompany.facesearch.network.model.ImgbbResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -11,50 +13,119 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
-/**
- * 100% free image hosting. No API keys required.
- * Chain: Telegra.ph → Catbox.moe → Imgur Anonymous → Postimages
- */
 class FreeImageHost {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(35, TimeUnit.SECONDS)
         .build()
 
-    private val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    private val gson = Gson()
+    private val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
 
     suspend fun upload(bitmap: Bitmap, onLog: (String) -> Unit): String? {
         val bytes = ByteArrayOutputStream().apply {
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, this)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, this)
         }.toByteArray()
 
         onLog("PROBE READY: ${bytes.size / 1024} KB")
 
-        // Shuffle hosts to distribute load and bypass IP blocks
+        // We must use highly reliable hosts. 
+        // Freeimage.host is currently the most stable.
         val hosts = listOf(
-            ::telegraph,
-            ::catbox,
-            ::imgur,
-            ::postimages
-        ).shuffled()
+            ::imgbb,
+            ::freeimageHost,
+            ::fileCoffee
+        )
 
         for (hostFunc in hosts) {
             val result = hostFunc(bytes, onLog)
             if (result != null) return result
         }
 
-        onLog("✗ ALL FREE HOSTS FAILED. Using local probe only.")
+        onLog("✗ ALL PUBLIC HOSTS FAILED. Engines will not be able to fetch the image.")
         return null
     }
 
-    private suspend fun telegraph(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
+    private suspend fun imgbb(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
+        val apiKey = com.yourcompany.facesearch.BuildConfig.IMGBB_API_KEY.ifBlank { "752a049b4efdbb31dc4a517ee2da39f8" }
+        
+        // Try Binary upload first
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
-            .addFormDataPart("file", "probe.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
+            .addFormDataPart("image", "probe.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
             .build()
 
         val req = Request.Builder()
-            .url("https://telegra.ph/upload")
+            .url("https://api.imgbb.com/1/upload?key=$apiKey&expiration=600")
+            .post(body)
+            .build()
+
+        try {
+            client.newCall(req).execute().use { res ->
+                val json = res.body?.string() ?: ""
+                val response = gson.fromJson(json, ImgbbResponse::class.java)
+                
+                if (res.isSuccessful && response?.success == true) {
+                    val url = response.data?.url
+                    if (url != null) {
+                        onLog("✓ ImgBB Active (Binary)")
+                        return@withContext url
+                    }
+                } else if (res.code == 400) {
+                    onLog("⚠ ImgBB Binary Rejected (400). Attempting Base64 fallback...")
+                    return@withContext imgbbBase64(bytes, apiKey, onLog)
+                } else {
+                    onLog("⚠️ ImgBB Rejected: ${res.code}")
+                }
+            }
+        } catch (e: Exception) { onLog("⚠️ ImgBB Error: ${e.message}") }
+        null
+    }
+
+    private suspend fun imgbbBase64(bytes: ByteArray, apiKey: String, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
+        val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        
+        val body = okhttp3.FormBody.Builder()
+            .add("image", base64)
+            .build()
+
+        val req = Request.Builder()
+            .url("https://api.imgbb.com/1/upload?key=$apiKey&expiration=600")
+            .post(body)
+            .build()
+
+        try {
+            client.newCall(req).execute().use { res ->
+                val json = res.body?.string() ?: ""
+                val response = gson.fromJson(json, ImgbbResponse::class.java)
+                
+                if (res.isSuccessful && response?.success == true) {
+                    val url = response.data?.url
+                    if (url != null) {
+                        onLog("✓ ImgBB Active (Base64)")
+                        return@withContext url
+                    }
+                } else {
+                    onLog("⚠️ ImgBB Base64 Rejected: ${res.code}")
+                }
+            }
+        } catch (e: Exception) { onLog("⚠️ ImgBB Base64 Error: ${e.message}") }
+        null
+    }
+
+    private suspend fun freeimageHost(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
+        // Public API key for freeimage.host
+        val apiKey = "6d207e02198a847aa98d0a2a901485a5" 
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("key", apiKey)
+            .addFormDataPart("action", "upload")
+            .addFormDataPart("source", "probe.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
+            .addFormDataPart("format", "json")
+            .build()
+
+        val req = Request.Builder()
+            .url("https://freeimage.host/api/1/upload")
             .header("User-Agent", ua)
             .post(body)
             .build()
@@ -62,79 +133,27 @@ class FreeImageHost {
         try {
             client.newCall(req).execute().use { res ->
                 val json = res.body?.string() ?: ""
-                if (res.isSuccessful && json.contains("src")) {
-                    val m = "\"src\":\"([^\"]+)\"".toRegex().find(json)
-                    val path = m?.groups?.get(1)?.value
-                    if (path != null) {
-                        onLog("✓ Telegra.ph Active")
-                        return@withContext "https://telegra.ph$path"
+                if (res.isSuccessful && json.contains("\"url\"")) {
+                    val m = "\"url\":\"([^\"]+)\"".toRegex().find(json)
+                    val url = m?.groups?.get(1)?.value?.replace("\\/", "/")
+                    if (url != null) {
+                        onLog("✓ FreeImage.host Active")
+                        return@withContext url
                     }
                 }
             }
-        } catch (e: Exception) { onLog("⚠️ Telegra.ph: ${e.message}") }
+        } catch (e: Exception) { onLog("⚠️ FreeImage.host Error: ${e.message}") }
         null
     }
 
-    private suspend fun catbox(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
-        val body = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart("reqtype", "fileupload")
-            .addFormDataPart("fileToUpload", "probe.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
-            .build()
-
-        val req = Request.Builder()
-            .url("https://catbox.moe/user/api.php")
-            .header("User-Agent", ua)
-            .post(body)
-            .build()
-
-        try {
-            client.newCall(req).execute().use { res ->
-                val txt = res.body?.string()?.trim() ?: ""
-                if (res.isSuccessful && txt.startsWith("http")) {
-                    onLog("✓ Catbox Active")
-                    return@withContext txt
-                }
-            }
-        } catch (e: Exception) { onLog("⚠️ Catbox: ${e.message}") }
-        null
-    }
-
-    private suspend fun imgur(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
-        val body = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart("image", android.util.Base64.encodeToString(bytes, android.util.Base64.DEFAULT))
-            .build()
-
-        val req = Request.Builder()
-            .url("https://api.imgur.com/3/image")
-            .header("Authorization", "Client-ID 546c25a59c58ad7")
-            .header("User-Agent", ua)
-            .post(body)
-            .build()
-
-        try {
-            client.newCall(req).execute().use { res ->
-                val json = res.body?.string() ?: ""
-                val m = "\"link\":\"([^\"]+)\"".toRegex().find(json)
-                val url = m?.groups?.get(1)?.value
-                if (url != null) {
-                    onLog("✓ Imgur Anonymous Active")
-                    return@withContext url
-                }
-            }
-        } catch (e: Exception) { onLog("⚠️ Imgur: ${e.message}") }
-        null
-    }
-
-    private suspend fun postimages(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
+    private suspend fun fileCoffee(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("file", "probe.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
             .build()
 
         val req = Request.Builder()
-            .url("https://postimages.org/json/rr")
+            .url("https://file.coffee/api/file/upload")
             .header("User-Agent", ua)
             .post(body)
             .build()
@@ -142,17 +161,16 @@ class FreeImageHost {
         try {
             client.newCall(req).execute().use { res ->
                 val json = res.body?.string() ?: ""
-                val m = "\"url\":\"([^\"]+)\"".toRegex().find(json)
-                val url = m?.groups?.get(1)?.value
-                if (url != null) {
-                    onLog("✓ Postimages Active")
-                    return@withContext url
+                if (res.isSuccessful && json.contains("\"url\"")) {
+                    val m = "\"url\":\"([^\"]+)\"".toRegex().find(json)
+                    val url = m?.groups?.get(1)?.value?.replace("\\/", "/")
+                    if (url != null) {
+                        onLog("✓ File.coffee Active")
+                        return@withContext url
+                    }
                 }
             }
-        } catch (e: Exception) { onLog("⚠️ Postimages: ${e.message}") }
+        } catch (e: Exception) { onLog("⚠️ File.coffee Error: ${e.message}") }
         null
     }
 }
-
-
-

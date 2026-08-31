@@ -466,14 +466,7 @@ private fun SecondaryMatchContent(
 @Composable
 private fun rememberHandle(match: WebMatchDisplay): String {
     return remember(match.username, match.displayName, match.profileUrl) {
-        // 1. Real username from URL path (best)
-        match.username?.let { "@$it" }
-        // 2. First 2 words of cleaned title
-            ?: match.displayName.split(" ").take(2).joinToString(" ").let { name ->
-                val compact = name.lowercase().replace(" ", "")
-                if (compact.length > 3 && !compact.contains("match")) "@$compact" else null
-            }
-        // 3. Do not fabricate an account label from a result score.
-            ?: "Unnamed visual lead"
+        // FIX: Only show a handle if the URL genuinely contains a real username path
+        match.username?.let { "@$it" } ?: "Unnamed visual lead"
     }
 }

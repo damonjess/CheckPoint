@@ -565,10 +565,9 @@ class CheckInViewModel(
             return
         }
         coroutineScope {
-            // Keep the structured SerpApi path independent from Termux Chromium.
-            // This restores the old fallback when Termux providers are blocked or unavailable.
+            // Independent SerpApi path - should run regardless of Termux if key is configured
             val serpApiFallbackDeferred = async {
-                if (useTermux && com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
+                if (com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
                     val serpProbeUrl = publicSceneUrl ?: publicUrl
                     if (!serpProbeUrl.isNullOrBlank()) {
                         try {
@@ -1159,9 +1158,13 @@ class CheckInViewModel(
         val lowRelevanceCounter = java.util.concurrent.atomic.AtomicInteger(0)
 
         // Dynamic thresholds scaled by the sensitivity floor
-        val verifiedThreshold = max(minimumThreshold, if (isTermuxAvailable) FaceVerifier.VERIFICATION_THRESHOLD else 0.65f)
-        val likelyThreshold = max(minimumThreshold, if (isTermuxAvailable) LIKELY_MATCH_THRESHOLD else 0.60f)
-        val reviewLeadThreshold = max(minimumThreshold, if (isTermuxAvailable) REVIEW_LEAD_SIMILARITY_THRESHOLD else 0.40f)
+        // Verified and Likely matches are still strictly controlled by the sensitivity slider.
+        val verifiedThreshold = max(minimumThreshold, if (isTermuxAvailable) FaceVerifier.VERIFICATION_THRESHOLD else 0.60f)
+        val likelyThreshold = max(minimumThreshold, if (isTermuxAvailable) LIKELY_MATCH_THRESHOLD else 0.55f)
+        
+        // Review Leads and Fallback Candidates are now decoupled from the sensitivity slider 
+        // to ensure potential matches are always surfaced for user review.
+        val reviewLeadThreshold = if (isTermuxAvailable) REVIEW_LEAD_SIMILARITY_THRESHOLD else 0.35f
 
         // Limit parallelism to avoid overwhelming the device (ML Kit/Embedder)
         val semaphore = kotlinx.coroutines.sync.Semaphore(8)
@@ -1223,8 +1226,8 @@ class CheckInViewModel(
                                                     (similarity * REVIEW_LEAD_SIMILARITY_WEIGHT).toInt()
                                             )
                                         }
-                                        // Use the sensitivity slider as the hard floor for all displayed matches
-                                        similarity >= minimumThreshold && similarity >= FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD -> {
+                                        // Surface fallback candidates regardless of sensitivity floor
+                                        similarity >= FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD -> {
                                             fallbackCandidates += faceBearingMatch.copy(
                                                 score = FALLBACK_CANDIDATE_BASE_SCORE +
                                                     (similarity * FALLBACK_CANDIDATE_SIMILARITY_WEIGHT).toInt()

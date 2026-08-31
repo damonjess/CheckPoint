@@ -186,10 +186,9 @@ class FaceDetectorHelper(private val context: Context) {
         return try {
             val bitmap = sourceBitmap.asSoftwareBitmap()
             
-            // NEW: Texture / Sharpness check to discard flat silhouettes and vectors
-            // Real faces have texture. Silhouettes score below 5f.
+            // Texture check calibrated for scaled/compressed thumbnails (drops solid silhouettes < 3f)
             val variance = laplacianVariance(bitmap)
-            if (variance < 15f) return false 
+            if (variance < 3.0f) return false 
 
             val primaryFaces = detector.process(InputImage.fromBitmap(bitmap, 0)).await()
             val candidateFaces = if (primaryFaces.isEmpty()) {
@@ -214,9 +213,7 @@ class FaceDetectorHelper(private val context: Context) {
                 ?: return false
 
             val box = dominant.boundingBox.clampTo(bitmap.width, bitmap.height)
-            
-            // NEW: Relaxed size requirement to 16px to capture distant web faces
-            box.width() >= 16 && box.height() >= 16
+            box.width() >= 12 && box.height() >= 12
         } catch (_: Exception) {
             false
         }

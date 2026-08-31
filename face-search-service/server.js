@@ -4,13 +4,11 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const fs = require('fs');
-const path = require('path');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const AdblockerPlugin = require('puppeteer-extra-plugin-adblocker');
 
+// Remove AdBlocker - It was blocking search engine image CDNs!
 puppeteer.use(StealthPlugin());
-puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
 
 const app = express();
 const server = http.createServer(app);
@@ -35,7 +33,6 @@ const getChromiumPath = () => {
     '/data/data/com.termux/files/usr/bin/chromium-browser',
     '/data/data/com.termux/files/usr/bin/chromium',
     '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
     '/usr/bin/google-chrome'
   ];
   return candidates.find(fs.existsSync);
@@ -59,13 +56,12 @@ async function getBrowser() {
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
-    '--disable-extensions',
-    '--no-first-run',
-    '--window-size=1280,800'
+    '--disable-blink-features=AutomationControlled',
+    '--window-size=1920,1080'
   ];
 
   browserInstance = await puppeteer.launch({
-    headless: 'new',
+    headless: true, // Revert to standard headless to avoid 'new' headless detection
     executablePath: chromiumPath,
     args,
     ignoreHTTPSErrors: true
@@ -78,75 +74,137 @@ const ENGINES = [
   {
     name: 'Google Lens',
     urlFor: (url) => `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(url)}`,
-    selectors: 'a.Luz2Q, a.G714Sc, a.iJ41Ze, .V6bBh a, [data-action-url] a, div.g a'
+    extractJs: `
+      var items = [], seen = new Set();
+      document.querySelectorAll('a.V6bBh, a.Luz2Q, a.G714Sc, .uaqyqd a, .G6S96 a, a.cspn0c').forEach(function(a) {
+          var href = a.href;
+          if (!href || href.indexOf('http') !== 0 || href.indexOf('google.') >= 0 || seen.has(href)) return;
+          var img = a.querySelector('img') || a.closest('div')?.querySelector('img');
+          var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
+          if (!imgSrc || imgSrc.length < 15) return;
+          seen.add(href);
+          items.push({
+              title: (a.innerText || a.getAttribute('aria-label') || 'Google Lens Match').replace(/\\s+/g,' ').trim().slice(0, 100),
+              link: href,
+              thumbnail: imgSrc,
+              source: 'Google Lens',
+              score: 100
+          });
+      });
+      return items;
+    `
   },
   {
     name: 'Bing Visual',
-    urlFor: (url) => `https://www.bing.com/visualsearch/Microsoft/Result?imgurl=${encodeURIComponent(url)}`,
-    selectors: '.imgpt a, .iusc, .visual_search_results a, a.mimg'
+    urlFor: (url) => `https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${encodeURIComponent(url)}`,
+    extractJs: `
+      var items = [], seen = new Set();
+      document.querySelectorAll('.imgpt a, .iusc, .visual_search_results a, .richImgLnk, .infopt a').forEach(function(a) {
+          var href = a.href || a.getAttribute('m');
+          if (href && href.indexOf('{') === 0) {
+              try { var m = JSON.parse(href); href = m.purl || m.murl; } catch(e){}
+          }
+          if (!href || href.indexOf('http') !== 0 || href.indexOf('bing.com') >= 0 || seen.has(href)) return;
+          var img = a.querySelector('img') || a.closest('.imgpt, .img_cont, .dg_u, div')?.querySelector('img');
+          var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
+          if (!imgSrc || imgSrc.length < 15) return;
+          seen.add(href);
+          items.push({
+              title: (a.innerText || a.getAttribute('aria-label') || 'Bing Match').replace(/\\s+/g,' ').trim().slice(0, 100),
+              link: href,
+              thumbnail: imgSrc,
+              source: 'Bing Visual',
+              score: 100
+          });
+      });
+      return items;
+    `
   },
   {
     name: 'Yandex',
     urlFor: (url) => `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(url)}`,
-    selectors: '.CbirItem-Title a, .serp-item__link, .iusc'
+    extractJs: `
+      var items = [], seen = new Set();
+      document.querySelectorAll('.CbirItem-Title a, .serp-item__link, .CbirSites-ItemTitle a, .CbirItem-TitleLink').forEach(function(a) {
+          var href = a.href;
+          if (!href || href.indexOf('http') !== 0 || href.indexOf('yandex.') >= 0 || seen.has(href)) return;
+          var img = a.closest('.CbirItem, .serp-item, .CbirSites-Item, div')?.querySelector('img');
+          var imgSrc = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
+          if (!imgSrc || imgSrc.length < 15) return;
+          seen.add(href);
+          items.push({
+              title: (a.innerText || 'Yandex Match').replace(/\\s+/g,' ').trim().slice(0, 100),
+              link: href,
+              thumbnail: imgSrc,
+              source: 'Yandex',
+              score: 100
+          });
+      });
+      return items;
+    `
   },
   {
-    name: 'DuckDuckGo',
-    urlFor: (url, hint) => `https://duckduckgo.com/?q=${encodeURIComponent(hint || 'person')}&ia=images&iax=images`,
-    selectors: 'a.result__a, .result__body a, .tile--img a'
+    name: 'TinEye',
+    urlFor: (url) => `https://tineye.com/search?url=${encodeURIComponent(url)}`,
+    extractJs: `
+      var items = [], seen = new Set();
+      document.querySelectorAll('.match-row, .match, .result-row').forEach(function(row) {
+          var linkEl = row.querySelector('h4 a, p a, .match-details a, a[href^="http"]');
+          var imgEl = row.querySelector('.match-thumb img, .image img, img');
+          if (linkEl && imgEl && linkEl.href && imgEl.src) {
+              var href = linkEl.href.split('#')[0];
+              if (seen.has(href)) return;
+              seen.add(href);
+              items.push({
+                  title: (linkEl.innerText || 'TinEye Match').replace(/\\s+/g,' ').trim().slice(0, 100),
+                  link: href,
+                  thumbnail: imgEl.src,
+                  source: 'TinEye',
+                  score: 800
+              });
+          }
+      });
+      return items;
+    `
   }
 ];
 
-async function scrapeEngine(engine, imageUrl, keywordHint) {
+async function scrapeEngine(engine, imageUrl) {
   const browser = await getBrowser();
   let page = null;
-  const targetUrl = engine.name === 'DuckDuckGo' ? engine.urlFor(imageUrl, keywordHint) : engine.urlFor(imageUrl);
 
   try {
     page = await browser.newPage();
     await page.setUserAgent(USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]);
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
 
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
-    await new Promise((r) => setTimeout(r, 2500));
+    console.log(`[${engine.name}] Loading...`);
 
-    // Scroll down once to trigger lazy loading
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2));
-    await new Promise((r) => setTimeout(r, 1500));
+    await page.goto(engine.urlFor(imageUrl), { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
 
-    const matches = await page.evaluate(({ selector, engineName }) => {
-      const results = [];
-      const seen = new Set();
-      const elements = document.querySelectorAll(selector);
+    // Bypass consent
+    await page.evaluate(() => {
+        const consentBtns = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]'];
+        consentBtns.forEach(c => { const b = document.querySelector(c); if(b) b.click(); });
+    });
 
-      elements.forEach((el) => {
-        const anchor = el.tagName === 'A' ? el : el.closest('a');
-        if (!anchor || !anchor.href || !anchor.href.startsWith('http')) return;
+    // Scroll to trigger lazy loading
+    await new Promise(r => setTimeout(r, 2000));
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3));
+    await new Promise(r => setTimeout(r, 2000));
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await new Promise(r => setTimeout(r, 2000));
 
-        const link = anchor.href.split('#')[0];
-        if (seen.has(link) || link.includes('google.com/search') || link.includes('bing.com/search')) return;
+    // Extract matches using the engine-specific JS
+    const matches = await page.evaluate((js) => {
+        try {
+            return new Function(js)();
+        } catch(e) {
+            return [];
+        }
+    }, engine.extractJs);
 
-        const img = anchor.querySelector('img') || anchor.closest('div')?.querySelector('img');
-        const thumb = img?.src || img?.getAttribute('data-src') || null;
-        let title = (anchor.innerText || anchor.getAttribute('aria-label') || anchor.title || '').trim();
-
-        if (title.length < 3 && img?.alt) title = img.alt.trim();
-        if (title.length < 3) title = 'Visual Candidate';
-
-        seen.add(link);
-        results.push({
-          title: title.slice(0, 140),
-          link,
-          thumbnail: thumb,
-          source: engineName,
-          isSocial: /(instagram|facebook|twitter|tiktok|linkedin|reddit|youtube|x\.com)/i.test(link),
-          score: 85
-        });
-      });
-
-      return results.slice(0, 25);
-    }, { selector: engine.selectors, engineName: engine.name });
-
+    console.log(`[${engine.name}] Found ${matches.length} matches`);
     return matches;
   } catch (err) {
     console.error(`[${engine.name}] Error:`, err.message);
@@ -162,28 +220,34 @@ app.get('/api/ping', (req, res) => {
 });
 
 app.post('/api/search', async (req, res) => {
-  const { imageUrl, sceneUrl, keywordHint } = req.body;
+  const { imageUrl, sceneUrl } = req.body;
   const targetImage = sceneUrl || imageUrl;
 
   if (!targetImage || !targetImage.startsWith('http')) {
     return res.status(400).json({ success: false, error: 'A public http/https image URL is required.' });
   }
 
-  console.log(`[Search] Starting probe for: ${targetImage.slice(0, 40)}... (Hint: ${keywordHint || 'None'})`);
+  console.log(`[Search] Starting probe for: ${targetImage.slice(0, 40)}...`);
 
   try {
-    const searchPromises = ENGINES.map((engine) => scrapeEngine(engine, targetImage, keywordHint));
-    const resultsArray = await Promise.all(searchPromises);
-    const flattened = resultsArray.flat();
+    // Run engines sequentially in Termux to save RAM
+    const allMatches = [];
+    for (const engine of ENGINES) {
+        const matches = await scrapeEngine(engine, targetImage);
+        allMatches.push(...matches);
+    }
 
     // Deduplicate by URL
     const uniqueMatches = [];
     const seenUrls = new Set();
 
-    for (const match of flattened) {
+    for (const match of allMatches) {
       if (!seenUrls.has(match.link)) {
         seenUrls.add(match.link);
-        uniqueMatches.push(match);
+
+        // Enhance source detection
+        const isSocial = /(instagram|facebook|twitter|tiktok|linkedin|reddit|youtube|x\.com)/i.test(match.link);
+        uniqueMatches.push({ ...match, isSocial });
       }
     }
 

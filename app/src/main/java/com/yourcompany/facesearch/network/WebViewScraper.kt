@@ -24,7 +24,17 @@ class WebViewScraper private constructor(
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
                 settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                
+                // FIX: Force Desktop Mode! 
+                // Mobile Google/Bing/Yandex hide their images in heavily obfuscated carousels.
+                // Desktop mode gives us the standard CSS grids our scraper is looking for.
                 settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+                settings.useWideViewPort = true
+                settings.loadWithOverviewMode = true
+                
+                // Some Android versions require this explicit flag to stop mobile redirects
+                val newUa = settings.userAgentString.replace("Mobile", "eliboM").replace("Android", "diordnA")
+                settings.userAgentString = newUa
             }
             val handler = Handler(Looper.getMainLooper())
             WebViewScraper(webView, handler)
@@ -32,8 +42,7 @@ class WebViewScraper private constructor(
 
         private const val CONSENT_AND_EXTRACT_JS = """
             (function(){
-                // 1. Auto-bypass cookie and consent dialogs
-                var consentBtns = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'button[aria-label*="Accept"]'];
+                var consentBtns = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]'];
                 for (var i = 0; i < consentBtns.length; i++) {
                     var b = document.querySelector(consentBtns[i]);
                     if (b) { b.click(); }
@@ -41,82 +50,97 @@ class WebViewScraper private constructor(
 
                 function extract(){
                     var items = [], seen = new Set();
+                    var hostname = window.location.hostname || '';
                     
-                    // ==========================================
-                    // TINEYE-SPECIFIC HIGH ACCURACY EXTRACTION
-                    // ==========================================
-                    if (window.location.hostname.indexOf('tineye.com') >= 0) {
-                        var rows = document.querySelectorAll('.match-row, .match');
-                        if (rows.length > 0) {
-                            rows.forEach(function(row) {
-                                var linkEl = row.querySelector('h4 a, p a, .match-details a');
-                                // Specifically target the matched image, ignore site favicons
-                                var imgEl = row.querySelector('.match-thumb img');
-                                
-                                if (linkEl && imgEl && linkEl.href && imgEl.src) {
-                                    var href = linkEl.href.split('#')[0];
-                                    if (seen.has(href)) return;
-                                    seen.add(href);
-                                    items.push({
-                                        title: (linkEl.innerText || 'TinEye Match').replace(/\s+/g,' ').trim().slice(0, 100),
-                                        link: href,
-                                        thumbnail: imgEl.src,
-                                        source: 'TinEye',
-                                        score: 800
-                                    });
-                                }
-                            });
-                            return items;
+                    function addItem(title, link, thumb, source) {
+                        if (!link || link.indexOf('http') !== 0) return;
+                        
+                        var href = link.split('#')[0];
+                        if (seen.has(href)) return;
+                        
+                        var lowHref = href.toLowerCase();
+                        if (lowHref.indexOf('google.') >= 0 || lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('yandex.') >= 0 || lowHref.indexOf('tineye.com') >= 0) return;
+                        
+                        if (!thumb || thumb.length < 15) return;
+                        
+                        var lowThumb = thumb.toLowerCase();
+                        var badThumb = ['logo', 'icon', 'favicon', 'avatar', 'default', 'shutterstock', 'istock', 'data:image/gif'];
+                        for (var i = 0; i < badThumb.length; i++) {
+                            if (lowThumb.indexOf(badThumb[i]) >= 0) return;
                         }
+                        
+                        var cleanTitle = (title || 'Visual Match').replace(/\s+/g,' ').trim().slice(0, 100);
+                        if (cleanTitle.toLowerCase().indexOf('sign in') >= 0 || cleanTitle.length < 3) return;
+                        
+                        seen.add(href);
+                        items.push({
+                            title: cleanTitle,
+                            link: href,
+                            thumbnail: thumb,
+                            source: source,
+                            score: 100
+                        });
                     }
 
-                    // ==========================================
-                    // GENERIC EXTRACTION (Google, Bing, Yandex)
-                    // ==========================================
-                    var badThumb = ['logo', 'icon', 'favicon', 'avatar', 'default', 'data:image', 'shutterstock', 'istock'];
-                    
+                    if (hostname.indexOf('tineye.com') >= 0) {
+                        document.querySelectorAll('.match-row, .match, .result-row').forEach(function(row) {
+                            var linkEl = row.querySelector('h4 a, p a, .match-details a, a[href^="http"]');
+                            var imgEl = row.querySelector('.match-thumb img, .image img, img');
+                            if (linkEl && imgEl) {
+                                addItem(linkEl.innerText || 'TinEye Match', linkEl.href, imgEl.src, 'TinEye');
+                            }
+                        });
+                        if (items.length > 0) return items;
+                    }
+
+                    if (hostname.indexOf('google.') >= 0) {
+                        document.querySelectorAll('a.V6bBh, a.Luz2Q, a.G714Sc, .uaqyqd a, .G6S96 a, a.cspn0c').forEach(function(a) {
+                            var img = a.querySelector('img') || a.closest('div')?.querySelector('img');
+                            var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
+                            addItem(a.innerText || a.getAttribute('aria-label'), a.href, imgSrc, 'Google Lens');
+                        });
+                        if (items.length > 0) return items;
+                    }
+
+                    if (hostname.indexOf('bing.com') >= 0) {
+                        document.querySelectorAll('.imgpt a, .iusc, .visual_search_results a, .richImgLnk, .infopt a').forEach(function(a) {
+                            var href = a.href || a.getAttribute('m');
+                            if (href && href.indexOf('{') === 0) {
+                                try { var m = JSON.parse(href); href = m.purl || m.murl; } catch(e){}
+                            }
+                            var img = a.querySelector('img') || a.closest('.imgpt, .img_cont, .dg_u, div')?.querySelector('img');
+                            var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
+                            addItem(a.innerText || a.getAttribute('aria-label'), href, imgSrc, 'Bing Visual');
+                        });
+                        if (items.length > 0) return items;
+                    }
+
+                    if (hostname.indexOf('yandex.') >= 0) {
+                        document.querySelectorAll('.CbirItem-Title a, .serp-item__link, .CbirSites-ItemTitle a, .CbirItem-TitleLink').forEach(function(a) {
+                            var img = a.closest('.CbirItem, .serp-item, .CbirSites-Item, div')?.querySelector('img');
+                            var imgSrc = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
+                            addItem(a.innerText, a.href, imgSrc, 'Yandex');
+                        });
+                        if (items.length > 0) return items;
+                    }
+
                     document.querySelectorAll('a[href^="http"]').forEach(function(a){
                         try {
                             var href = a.href;
-                            
-                            // Unpack Google redirects
                             if (href.indexOf('google.com/url?') >= 0) {
                                 var match = href.match(/url\?q=([^&]+)/);
                                 if (match) href = decodeURIComponent(match[1]);
                             }
-                            
-                            href = href.split('#')[0];
-                            if(seen.has(href)) return;
-
                             var img = a.querySelector('img');
                             if (!img) {
                                 var div = a.closest('div');
                                 if (div) img = div.querySelector('img');
                             }
-                            
                             var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
-                            if(!imgSrc || imgSrc.length < 15) return;
-                            
-                            // Strip out blank avatars and stock banners
-                            var lowSrc = imgSrc.toLowerCase();
-                            var isBad = false;
-                            for(var j = 0; j < badThumb.length; j++) {
-                                if(lowSrc.indexOf(badThumb[j]) >= 0) { isBad = true; break; }
-                            }
-                            if(isBad) return;
-
-                            var title = (a.innerText || a.title || 'Visual Candidate').replace(/\s+/g,' ').trim().slice(0, 100);
-                            
-                            seen.add(href);
-                            items.push({
-                                title: title,
-                                link: href,
-                                thumbnail: imgSrc,
-                                source: 'Web',
-                                score: 100
-                            });
+                            addItem(a.innerText || a.title, href, imgSrc, 'Web');
                         } catch(e){}
                     });
+
                     return items;
                 }
                 Native.onResults(JSON.stringify(extract()));
@@ -125,22 +149,6 @@ class WebViewScraper private constructor(
 
         private const val DORK_EXTRACT_JS = """
             (function(){
-                function pickUrl(v){
-                    if(!v || v.length < 8) return '';
-                    if(v.indexOf('data:image') === 0 && v.length > 200) return v;
-                    if(v.indexOf('http') === 0) return v;
-                    if(v.indexOf('//') === 0) return 'https:' + v;
-                    return '';
-                }
-                function imgFrom(el){
-                    if(!el) return '';
-                    var attrs = ['src', 'data-src', 'data-original', 'data-thumb'];
-                    for(var i = 0; i < attrs.length; i++){
-                        var picked = pickUrl(el.getAttribute(attrs[i]));
-                        if(picked) return picked;
-                    }
-                    return pickUrl(el.src);
-                }
                 function extract(){
                     var items = [], seen = new Set();
                     var rows = document.querySelectorAll('li.b_algo, .b_algo, .result, .result__body, .g');
@@ -150,16 +158,14 @@ class WebViewScraper private constructor(
                         try {
                             var a = row.tagName === 'A' ? row : row.querySelector('h2 a, .result__a, .b_title a, a[href^="http"]');
                             if(!a) return;
-                            var href = a.href || a.getAttribute('href');
-                            if(!href || href.indexOf('http') !== 0) return;
-                            href = href.split('#')[0];
-                            if(seen.has(href)) return;
+                            var href = a.href.split('#')[0];
+                            if(!href || href.indexOf('http') !== 0 || seen.has(href)) return;
 
                             var title = (a.innerText || a.textContent || '').replace(/\s+/g,' ').trim();
                             if(title.length < 3) return;
 
                             var img = row.querySelector('img');
-                            var thumb = imgFrom(img);
+                            var thumb = img ? (img.src || img.getAttribute('data-src')) : null;
 
                             seen.add(href);
                             items.push({
@@ -187,7 +193,7 @@ class WebViewScraper private constructor(
     suspend fun scrapeBing(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Bing",
-        delayMs = 7000
+        delayMs = 9000 // Increased for desktop rendering
     )
 
     suspend fun scrapeTinEye(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
@@ -199,7 +205,7 @@ class WebViewScraper private constructor(
     suspend fun scrapeYandex(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://yandex.com/images/search?rpt=imageview&url=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Yandex",
-        delayMs = 7000
+        delayMs = 9000 // Increased for desktop rendering
     )
 
     suspend fun scrapeSogou(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(

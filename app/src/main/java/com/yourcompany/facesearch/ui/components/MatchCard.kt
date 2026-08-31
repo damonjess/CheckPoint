@@ -50,7 +50,8 @@ fun MatchCard(
     onLoadHighRes: () -> Unit,
     onClick: () -> Unit
 ) {
-    val style = SourceStyles.getStyle(match.source)
+    // FIX: Look at BOTH the source name and the profile URL to detect social networks!
+    val style = SourceStyles.getStyle("${match.source} ${match.profileUrl}")
     val handle = rememberHandle(match)
     
     // Auto-fetch high-res for suspicious social thumbnails

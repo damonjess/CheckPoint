@@ -47,8 +47,6 @@ class FaceSearchRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             val allResults = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
 
-            // 1. FORCE TIGHT FACE CROP UPLOAD
-            // We intercept the image here to ensure clothing/background is NEVER sent to Google Lens
             val faceToUpload = faceBitmap ?: NativeFaceCropper().getTightFaceCrop(bitmap) ?: bitmap
             
             val probeUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
@@ -63,7 +61,6 @@ class FaceSearchRepository(private val context: Context) {
                 return@withContext emptyList()
             }
 
-            // 2. Termux Execution
             if (isLocalBackendAvailable()) {
                 onLog("Querying Termux scraper backend...")
                 val termuxResponse = performLocalServerSearch(
@@ -89,7 +86,6 @@ class FaceSearchRepository(private val context: Context) {
                 }
             }
 
-            // 3. In-App Scraper Fallback
             if (allResults.size < 5) {
                 onLog("Running in-app visual engine fallback...")
                 coroutineScope {
@@ -155,7 +151,6 @@ class FaceSearchRepository(private val context: Context) {
                 }
             }
 
-            // 4. Social Scan
             val harvestedHints = if (keywordHint.isNullOrBlank()) {
                 harvestSearchHints(allResults.toList())
             } else listOf(keywordHint)
@@ -169,6 +164,12 @@ class FaceSearchRepository(private val context: Context) {
                     allResults.addAll(scraper.scrapeSocialDork("facebook.com", primaryName))
                     allResults.addAll(scraper.scrapeSocialDork("twitter.com", primaryName))
                     allResults.addAll(scraper.scrapeSocialDork("tiktok.com", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("linktr.ee", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("twitch.tv", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("patreon.com", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("bsky.app", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("mastodon.social", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("behance.net", primaryName))
                 } finally {
                     scraper.destroy()
                 }
@@ -179,59 +180,34 @@ class FaceSearchRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Attempts to extract high-resolution media from a profile URL using the Termux backend.
-     */
-    suspend fun extractHighResMedia(profileUrl: String): String? = withContext(Dispatchers.IO) {
-        val backendBase = activeBackend ?: return@withContext null
-        try {
-            val api = RetrofitClient.getInstance(backendBase)
-            val response = api.extractMedia(mapOf("url" to profileUrl))
-            if (response.isSuccessful) {
-                response.body()?.highResUrl
-            } else null
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    /**
-     * Fallback that extracts thumbnail/preview from page metadata (og:image).
-     */
-    suspend fun extractMetadataThumbnail(url: String): String? = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val html = response.body?.string() ?: return@withContext null
-
-                val ogRegex = Regex("""<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-                val twitterRegex = Regex("""<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-
-                ogRegex.find(html)?.groupValues?.get(1)
-                    ?: twitterRegex.find(html)?.groupValues?.get(1)
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
     private fun harvestSearchHints(matches: List<SerpVisualMatch>): List<String> {
-        val candidates = matches.filter { !it.title.isNullOrBlank() && it.title != "Visual Match" }
+        val candidates = matches.filter { !it.title.isNullOrBlank() && it.title != "Visual Match" && it.title != "Visual Candidate" }
         if (candidates.isEmpty()) return emptyList()
 
         val hints = mutableSetOf<String>()
+        
+        // Expanded to completely block weird extractions like "Page 294: Celebrity"
         val stopWords = setOf(
             "image", "photo", "picture", "wallpaper", "visual", "match", "stock", "vector",
             "search", "engine", "google", "bing", "yandex", "lens", "the", "and", "for", "with",
             "amazon", "vest", "shirt", "apparel", "clothing", "camicie", "style", "shop", "store",
-            "t-shirt", "tee", "sleeve", "patchwork", "casual", "mens", "womens", "aliexpress", "temu"
+            "t-shirt", "tee", "sleeve", "patchwork", "casual", "mens", "womens", "aliexpress", "temu",
+            "fotka", "foto", "pic", "pics", "images", "img", "teeth", "hair", "feet", "body", "legs",
+            "hot", "pregnant", "surgery", "plastic", "boyfriend", "girlfriend", "husband", "wife",
+            "dating", "outfit", "dress", "makeup", "look", "looks", "page", "celebrity", "gallery",
+            "index", "collection", "album", "download", "free", "video", "videos", "clip", "watch",
+            "movie", "movies", "actor", "actress", "model", "star", "birthday", "celebrates", "today",
+            "tiktok", "instagram", "facebook", "reddit", "twitter", "shein", "ebay"
         )
 
         candidates.forEach { match ->
+            // Aggressively strip anything after a dash, pipe, colon, or bracket to isolate the name
             val cleanTitle = match.title.orEmpty()
-                .replace(Regex("(?i)[|\\-].*(wikipedia|imdb|instagram|facebook|twitter|news|youtube|amazon|shein|temu|ebay).*"), "")
+                .replace(Regex("(?i)[|\\-–—:(\\[].*"), "") 
                 .trim()
+
+            // Names don't typically have numbers in them. Discard instantly.
+            if (cleanTitle.any { it.isDigit() }) return@forEach
 
             val words = cleanTitle.split(Regex("\\s+")).filter { it.isNotBlank() }
             if (words.size in 2..3 && words.none { it.lowercase() in stopWords }) {
@@ -291,6 +267,80 @@ class FaceSearchRepository(private val context: Context) {
             visualMatches
         } catch (_: Exception) {
             emptyList()
+        }
+    }
+
+    // RESTORED FUNCTIONS:
+
+    suspend fun extractHighResMedia(url: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val backendBase = activeBackend ?: "http://127.0.0.1:3000"
+            val api = RetrofitClient.getInstance(backendBase)
+            val response = api.extractMedia(mapOf("url" to url))
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body?.success == true) {
+                    return@withContext body.highResUrl
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("FaceSearchRepository", "Extraction error: ${e.message}")
+        }
+        null
+    }
+
+    suspend fun performTermuxDorkSearch(
+        keyword: String,
+        sites: List<String> = AdultSiteConfig.SITES,
+        onLog: (String) -> Unit = {}
+    ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
+        onLog("Requesting Termux Dork Scan...")
+        try {
+            val request = com.yourcompany.facesearch.network.model.DorkSearchRequest(
+                keyword = keyword,
+                sites = sites
+            )
+            val backendBase = activeBackend ?: "http://127.0.0.1:3000"
+            val api = RetrofitClient.getInstance(backendBase)
+            val response = api.dorkSearch(request)
+            if (response.success) {
+                onLog("✓ Termux Dork found ${response.matches?.size ?: 0} hits")
+                return@withContext response.matches?.map {
+                    SerpVisualMatch(
+                        title = it.title,
+                        link = it.link,
+                        source = it.source,
+                        thumbnail = it.thumbnail,
+                        score = it.score
+                    )
+                } ?: emptyList()
+            }
+        } catch (e: Exception) {
+            onLog("⚠ Termux Dork failed: ${e.message}")
+        }
+        emptyList()
+    }
+
+    suspend fun extractMetadataThumbnail(url: String): String? = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext null
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+                .build()
+            
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val html = response.body?.string() ?: return@withContext null
+                
+                val ogMatch = Regex("<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']").find(html)
+                    ?: Regex("<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:image[\"']").find(html)
+                
+                val rawUrl = ogMatch?.groupValues?.get(1)
+                ThumbnailUtils.normalize(rawUrl)
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 }

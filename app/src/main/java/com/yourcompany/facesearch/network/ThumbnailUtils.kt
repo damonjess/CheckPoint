@@ -10,7 +10,10 @@ object ThumbnailUtils {
 
         if (url.startsWith("//")) url = "https:$url"
         if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:image")) {
-            if (isNoise(url)) return null
+            if (isNoise(url)) {
+                android.util.Log.d("ThumbnailUtils", "Dropped noise URL: $url")
+                return null
+            }
             return url
         }
         return null

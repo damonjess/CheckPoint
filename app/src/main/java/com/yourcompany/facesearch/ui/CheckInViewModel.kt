@@ -564,6 +564,30 @@ class CheckInViewModel(
             return
         }
         coroutineScope {
+            // Keep the structured SerpApi path independent from Termux Chromium.
+            // This restores the old fallback when Termux providers are blocked or unavailable.
+            val serpApiFallbackDeferred = async {
+                if (useTermux && com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
+                    val serpProbeUrl = publicSceneUrl ?: publicUrl
+                    if (!serpProbeUrl.isNullOrBlank()) {
+                        try {
+                            faceSearchRepository.performSerpApiSearch(
+                                imageUrl = serpProbeUrl,
+                                includeExactMatches = broadenLensCoverage,
+                                onLog = { message -> handleScraperLog(message) }
+                            )
+                        } catch (e: Exception) {
+                            addLog("⚠ SerpApi fallback failed: ${e.message}")
+                            emptyList()
+                        }
+                    } else {
+                        emptyList()
+                    }
+                } else {
+                    emptyList()
+                }
+            }
+
             val termuxDeferred = async {
                 if (!useTermux) return@async null
                 try {
@@ -655,8 +679,18 @@ class CheckInViewModel(
                 emptyList<SerpVisualMatch>()
             }
 
+            val serpApiFallbackResults = try {
+                serpApiFallbackDeferred.await()
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    addLog("⚠ SerpApi fallback error: ${e.message}")
+                }
+                emptyList<SerpVisualMatch>()
+            }
+
             allRawResults.addAll(termuxResults)
             allRawResults.addAll(webResults)
+            allRawResults.addAll(serpApiFallbackResults)
         }
 
         // Correct TinEye fix: Identify and retain external TinEye results separately

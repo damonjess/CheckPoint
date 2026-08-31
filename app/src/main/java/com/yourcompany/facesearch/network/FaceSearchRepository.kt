@@ -69,11 +69,13 @@ class FaceSearchRepository(private val context: Context) {
                 faceUrl
             }
 
-            val contextProbe = finalSceneUrl ?: faceUrl
+            // FIX: Force engines to use the tightly cropped face! 
+            // Sending finalSceneUrl causes Google to search for clothing instead of the face.
+            val primaryProbe = faceUrl ?: finalSceneUrl
 
             // 2. Termux First Execution
             val termuxAvailable = isLocalBackendAvailable()
-            if (termuxAvailable && contextProbe != null) {
+            if (termuxAvailable && primaryProbe != null) {
                 onLog("Querying Termux scraper backend...")
                 val termuxResponse = performLocalServerSearch(
                     bitmap = bitmap,
@@ -99,7 +101,7 @@ class FaceSearchRepository(private val context: Context) {
             }
 
             // 3. In-App Scraper Fallback if Termux returned few or zero results
-            if (allResults.size < 5 && contextProbe != null) {
+            if (allResults.size < 5 && primaryProbe != null) {
                 onLog("Running in-app visual engine fallback...")
                 coroutineScope {
                     val jobs = mutableListOf<Deferred<Unit>>()
@@ -108,7 +110,7 @@ class FaceSearchRepository(private val context: Context) {
                         jobs.add(async {
                             val s = WebViewScraper.create(context)
                             try {
-                                val matches = s.scrapeGoogle(contextProbe)
+                                val matches = s.scrapeGoogle(primaryProbe)
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
@@ -119,21 +121,29 @@ class FaceSearchRepository(private val context: Context) {
                         jobs.add(async {
                             val s = WebViewScraper.create(context)
                             try {
-                                val matches = s.scrapeBing(contextProbe)
+                                val matches = s.scrapeBing(primaryProbe)
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
                         })
                     }
 
-                    if ("Yandex" !in enginesToSkip && faceUrl != null) {
+                    if ("Yandex" !in enginesToSkip) {
                         jobs.add(async {
                             val s = WebViewScraper.create(context)
                             try {
-                                val matches = s.scrapeYandex(faceUrl)
+                                val matches = s.scrapeYandex(primaryProbe)
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
+                        })
+                    }
+
+                    if (com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
+                        jobs.add(async {
+                            val matches = performSerpApiSearch(primaryProbe, includeExactLensMatches, onLog)
+                            allResults.addAll(matches)
+                            Unit
                         })
                     }
 
@@ -159,6 +169,12 @@ class FaceSearchRepository(private val context: Context) {
                     allResults.addAll(scraper.scrapeSocialDork("vsco.co", primaryName))
                     allResults.addAll(scraper.scrapeSocialDork("github.com", primaryName))
                     allResults.addAll(scraper.scrapeSocialDork("newsite.com", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("linktr.ee", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("twitch.tv", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("patreon.com", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("bsky.app", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("mastodon.social", primaryName))
+                    allResults.addAll(scraper.scrapeSocialDork("behance.net", primaryName))
                 } finally {
                     scraper.destroy()
                 }
@@ -174,14 +190,18 @@ class FaceSearchRepository(private val context: Context) {
         if (candidates.isEmpty()) return emptyList()
 
         val hints = mutableSetOf<String>()
+        
+        // FIX: Added extensive shopping and product stop-words so it doesn't search for shirts
         val stopWords = setOf(
             "image", "photo", "picture", "wallpaper", "visual", "match", "stock", "vector",
-            "search", "engine", "google", "bing", "yandex", "lens", "the", "and", "for", "with"
+            "search", "engine", "google", "bing", "yandex", "lens", "the", "and", "for", "with",
+            "amazon", "amazoncom", "vest", "shirt", "apparel", "clothing", "camicie", "style", 
+            "scarf", "preaching", "consulting", "contact", "product", "shop", "store"
         )
 
         candidates.forEach { match ->
             val cleanTitle = match.title.orEmpty()
-                .replace(Regex("(?i)[|\\-].*(wikipedia|imdb|instagram|facebook|twitter|news|youtube).*"), "")
+                .replace(Regex("(?i)[|\\-].*(wikipedia|imdb|instagram|facebook|twitter|news|youtube|amazon).*"), "")
                 .trim()
 
             val words = cleanTitle.split(Regex("\\s+")).filter { it.isNotBlank() }

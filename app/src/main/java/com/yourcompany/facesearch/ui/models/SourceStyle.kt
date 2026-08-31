@@ -36,6 +36,36 @@ object SourceStyles {
                 Icons.Default.CameraAlt,
                 Brush.verticalGradient(listOf(Color.DarkGray, Color.Black))
             )
+            s.contains("linktree") || s.contains("linktr.ee") -> SourceStyle(
+                Color(0xFF43E660),
+                Icons.Default.Link,
+                Brush.verticalGradient(listOf(Color(0xFF43E660), Color(0xFF138A36)))
+            )
+            s.contains("twitch") -> SourceStyle(
+                Color(0xFF9146FF),
+                Icons.Default.Videocam,
+                Brush.verticalGradient(listOf(Color(0xFFA970FF), Color(0xFF9146FF)))
+            )
+            s.contains("patreon") -> SourceStyle(
+                Color(0xFFFF424D),
+                Icons.Default.Favorite,
+                Brush.verticalGradient(listOf(Color(0xFFFF7078), Color(0xFFFF424D)))
+            )
+            s.contains("bsky") || s.contains("bluesky") -> SourceStyle(
+                Color(0xFF0085FF),
+                Icons.Default.Cloud,
+                Brush.verticalGradient(listOf(Color(0xFF33A1FF), Color(0xFF0085FF)))
+            )
+            s.contains("mastodon") -> SourceStyle(
+                Color(0xFF6364FF),
+                Icons.Default.Forum,
+                Brush.verticalGradient(listOf(Color(0xFF8586FF), Color(0xFF6364FF)))
+            )
+            s.contains("behance") -> SourceStyle(
+                Color(0xFF0057FF),
+                Icons.Default.Brush,
+                Brush.verticalGradient(listOf(Color(0xFF3379FF), Color(0xFF0057FF)))
+            )
             s.contains("github") -> SourceStyle(
                 Color(0xFF24292E),
                 Icons.Default.Code,

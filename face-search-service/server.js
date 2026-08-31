@@ -2,7 +2,6 @@ require('dotenv').config();
 
 const express = require('express');
 const http = require('http');
-const WebSocket = require('ws');
 const fs = require('fs');
 
 const puppeteer = require('puppeteer-extra');
@@ -11,14 +10,12 @@ puppeteer.use(StealthPlugin());
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
 
 app.use(express.json({ limit: '10mb' }));
 
 const PORT = Number(process.env.PORT || 3000);
-const ENGINE_TIMEOUT_MS = 35_000;
+const ENGINE_TIMEOUT_MS = 60_000; // 60 seconds. Mobile chips are slow to parse JS.
 
-// Forced Desktop User-Agent
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
 const getChromiumPath = () => {
@@ -34,7 +31,7 @@ const getChromiumPath = () => {
 };
 
 let browserInstance = null;
-let isSearching = false;
+let activeSearchPromise = null;
 
 async function getBrowser() {
   if (browserInstance) {
@@ -48,33 +45,35 @@ async function getBrowser() {
 
   const chromiumPath = getChromiumPath();
 
+  // High-stability, low-memory flags for Termux
   const args = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
     '--disable-software-rasterizer',
+    '--disable-webgl',
+    '--disable-animations',
     '--disable-blink-features=AutomationControlled',
     '--hide-scrollbars',
     '--mute-audio',
-    '--window-size=1920,1080',
+    '--window-size=1280,800', // Lowered from 1920x1080 to prevent OOM
     `--user-agent=${DEFAULT_UA}`,
-    '--single-process'
+    '--single-process',
+    '--no-zygote' // Prevents the browser from spawning unnecessary helper processes
   ];
 
   browserInstance = await puppeteer.launch({
-    headless: true,
+    headless: true, // Standard headless is required for stability
     executablePath: chromiumPath,
     args: args,
     ignoreHTTPSErrors: true,
-    // Force a large desktop viewport to guarantee desktop HTML
-    defaultViewport: { width: 1920, height: 1080, isMobile: false, hasTouch: false }
+    defaultViewport: { width: 1280, height: 800, isMobile: false, hasTouch: false }
   });
 
   return browserInstance;
 }
 
-// Universal extractor script that ignores CSS classes and just looks for image links
 const UNIVERSAL_EXTRACT_JS = `
     var items = [], seen = new Set();
     var badThumb = ['logo', 'icon', 'favicon', 'avatar', 'default', 'shutterstock', 'istock', 'data:image/gif'];
@@ -114,7 +113,6 @@ const UNIVERSAL_EXTRACT_JS = `
                 title: title,
                 link: href,
                 thumbnail: imgSrc,
-                source: 'Web',
                 score: 100
             });
         } catch(e){}
@@ -147,31 +145,31 @@ async function scrapeEngine(engine, imageUrl) {
   try {
     page = await browser.newPage();
 
-    // Evasions
+    // Stealth Evasions
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
       window.chrome = { runtime: {} };
     });
 
     console.log(`[${engine.name}] Loading...`);
 
+    // We use domcontentloaded, but wait a hard 4 seconds afterward to ensure dynamic JS frameworks (like React/Angular) have rendered the grid.
     await page.goto(engine.urlFor(imageUrl), { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
+    await new Promise(r => setTimeout(r, 4000));
 
     // Handle Consent Banners
     await page.evaluate(() => {
         const consentBtns = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]'];
         consentBtns.forEach(c => { const b = document.querySelector(c); if(b) b.click(); });
-    });
+    }).catch(() => {});
 
     // Scroll to trigger lazy loading
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3)).catch(() => {});
     await new Promise(r => setTimeout(r, 2000));
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3));
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 1.5)).catch(() => {});
     await new Promise(r => setTimeout(r, 2000));
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 1.5));
-    await new Promise(r => setTimeout(r, 2000));
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await new Promise(r => setTimeout(r, 2000));
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+    await new Promise(r => setTimeout(r, 2500));
 
     // Extract matches
     const matches = await page.evaluate((js) => {
@@ -183,8 +181,6 @@ async function scrapeEngine(engine, imageUrl) {
     }, engine.extractJs);
 
     console.log(`[${engine.name}] Found ${matches.length} matches`);
-
-    // Re-map the source name so the Android app knows where it came from
     return matches.map(m => ({ ...m, source: engine.name }));
 
   } catch (err) {
@@ -207,17 +203,23 @@ app.post('/api/search', async (req, res) => {
     return res.status(400).json({ success: false, error: 'A public URL is required.' });
   }
 
-  if (isSearching) {
-    console.log('[Search] Rejected overlapping request to prevent OOM crash.');
-    return res.status(429).json({ success: false, error: 'Search already in progress.' });
+  // Await any existing search to finish to prevent parallel OOM crashes
+  if (activeSearchPromise) {
+    console.log('[Search] Waiting for previous search to complete...');
+    try {
+        await activeSearchPromise;
+    } catch(e) {}
   }
 
-  isSearching = true;
+  let resolveSearch;
+  activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
+
   console.log(`\n[Search] Starting probe for: ${targetImage.slice(0, 45)}...`);
 
   try {
     const allMatches = [];
 
+    // Sequential execution
     for (const engine of ENGINES) {
         const matches = await scrapeEngine(engine, targetImage);
         allMatches.push(...matches);
@@ -244,7 +246,8 @@ app.post('/api/search', async (req, res) => {
     console.error('[Search] Fatal error:', err);
     res.status(500).json({ success: false, error: err.message });
   } finally {
-    isSearching = false;
+    resolveSearch();
+    activeSearchPromise = null;
   }
 });
 

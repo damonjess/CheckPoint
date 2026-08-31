@@ -34,6 +34,7 @@ import kotlinx.coroutines.sync.withPermit
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.Locale
+import kotlin.math.max
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
@@ -87,7 +88,7 @@ class CheckInViewModel(
 
     var targetHint by mutableStateOf("")
 
-    var sensitivity by mutableFloatStateOf(0.58f)
+    var sensitivity by mutableFloatStateOf(0.65f)
     var fullFaceMode by mutableStateOf(false)
 
     private val currentLogs = mutableListOf<String>()
@@ -150,7 +151,7 @@ class CheckInViewModel(
     }
 
     var searchMode by mutableStateOf(SearchMode.PRECISION)
-    var broadenLensCoverage by mutableStateOf(false)
+    var broadenLensCoverage by mutableStateOf(true)
         private set
     var debugMode by mutableStateOf(false)
 
@@ -1147,6 +1148,9 @@ class CheckInViewModel(
             )
         latestSourceEmbedding = sourceEmbedding
         
+        // Use the sensitivity slider as the absolute minimum threshold to suppress weak matches
+        val minimumThreshold = sensitivity
+
         val verified = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
         val likely = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
         val faceBearingLeads = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
@@ -1154,10 +1158,10 @@ class CheckInViewModel(
         val excludedCounter = java.util.concurrent.atomic.AtomicInteger(0)
         val lowRelevanceCounter = java.util.concurrent.atomic.AtomicInteger(0)
 
-        // Dynamic thresholds based on search quality/source
-        val verifiedThreshold = if (isTermuxAvailable) FaceVerifier.VERIFICATION_THRESHOLD else 0.60f
-        val likelyThreshold = if (isTermuxAvailable) LIKELY_MATCH_THRESHOLD else 0.42f
-        val reviewLeadThreshold = if (isTermuxAvailable) REVIEW_LEAD_SIMILARITY_THRESHOLD else 0.05f
+        // Dynamic thresholds scaled by the sensitivity floor
+        val verifiedThreshold = max(minimumThreshold, if (isTermuxAvailable) FaceVerifier.VERIFICATION_THRESHOLD else 0.65f)
+        val likelyThreshold = max(minimumThreshold, if (isTermuxAvailable) LIKELY_MATCH_THRESHOLD else 0.60f)
+        val reviewLeadThreshold = max(minimumThreshold, if (isTermuxAvailable) REVIEW_LEAD_SIMILARITY_THRESHOLD else 0.40f)
 
         // Limit parallelism to avoid overwhelming the device (ML Kit/Embedder)
         val semaphore = kotlinx.coroutines.sync.Semaphore(8)
@@ -1219,7 +1223,8 @@ class CheckInViewModel(
                                                     (similarity * REVIEW_LEAD_SIMILARITY_WEIGHT).toInt()
                                             )
                                         }
-                                        similarity >= FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD -> {
+                                        // Use the sensitivity slider as the hard floor for all displayed matches
+                                        similarity >= minimumThreshold && similarity >= FALLBACK_CANDIDATE_SIMILARITY_THRESHOLD -> {
                                             fallbackCandidates += faceBearingMatch.copy(
                                                 score = FALLBACK_CANDIDATE_BASE_SCORE +
                                                     (similarity * FALLBACK_CANDIDATE_SIMILARITY_WEIGHT).toInt()

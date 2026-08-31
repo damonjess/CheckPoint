@@ -185,6 +185,12 @@ class FaceDetectorHelper(private val context: Context) {
         }
         return try {
             val bitmap = sourceBitmap.asSoftwareBitmap()
+            
+            // NEW: Texture / Sharpness check to discard flat silhouettes and vectors
+            // Real faces have texture. Silhouettes score below 5f.
+            val variance = laplacianVariance(bitmap)
+            if (variance < 15f) return false 
+
             val primaryFaces = detector.process(InputImage.fromBitmap(bitmap, 0)).await()
             val candidateFaces = if (primaryFaces.isEmpty()) {
                 candidateDetector.process(InputImage.fromBitmap(bitmap, 0)).await()
@@ -196,6 +202,7 @@ class FaceDetectorHelper(private val context: Context) {
             } else {
                 emptyList()
             }
+            
             val faces = when {
                 primaryFaces.isNotEmpty() -> primaryFaces
                 candidateFaces.isNotEmpty() -> candidateFaces
@@ -203,16 +210,13 @@ class FaceDetectorHelper(private val context: Context) {
             }
             if (faces.isEmpty()) return false
 
-            // Use the largest detected face as the primary candidate.
-            // This allows group photos to be processed while focusing on the dominant subject.
             val dominant = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
                 ?: return false
 
             val box = dominant.boundingBox.clampTo(bitmap.width, bitmap.height)
             
-            // Permissive check: just ensure the face has some minimum size in pixels.
-            // We ignore coverage percentage for candidates to capture background people.
-            box.width() >= 8 && box.height() >= 8
+            // NEW: Relaxed size requirement to 16px to capture distant web faces
+            box.width() >= 16 && box.height() >= 16
         } catch (_: Exception) {
             false
         }

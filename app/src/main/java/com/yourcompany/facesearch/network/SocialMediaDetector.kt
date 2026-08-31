@@ -20,6 +20,8 @@ object SocialMediaDetector {
             lower.contains("linkedin.com") -> PlatformScore("LinkedIn", 2100, true)
             lower.contains("tiktok.com") -> PlatformScore("TikTok", 2000, true)
             lower.contains("twitter.com") || lower.contains("x.com") -> PlatformScore("Twitter", 1900, true)
+            lower.contains("vsco.co") -> PlatformScore("VSCO", 1500, true)
+            lower.contains("newsite.com") -> PlatformScore("NewSite", 1400, true)
             lower.contains("vk.com") || lower.contains("vkontakte") -> PlatformScore("VKontakte", 1800, true)
             lower.contains("youtube.com") -> PlatformScore("YouTube", 1400, false)
             

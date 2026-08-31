@@ -16,11 +16,6 @@ object ThumbnailUtils {
         return null
     }
 
-    /**
-     * Produces a stable key for common image-CDN resize/cache variants. This is
-     * used only for local result deduplication; it never changes the URL opened
-     * by the user.
-     */
     fun canonicalKey(raw: String?): String? {
         val normalized = normalize(raw) ?: return null
         if (normalized.startsWith("data:image")) return normalized.take(96)
@@ -50,7 +45,11 @@ object ThumbnailUtils {
             "instagram.com/static/images", "twitter_logo", "x_logo",
             "tiktok_logo", "linkedin_logo", "logo.png", "logo.jpg",
             "favicon.ico", "apple-touch-icon", "default_avatar",
-            "no_profile", "blank_profile", "anonymous.png"
+            "no_profile", "blank_profile", "anonymous.png",
+            // NEW: Aggressively drop stock vector sites
+            "shutterstock", "istockphoto", "stock.adobe", "vectorstock", 
+            "freepik", "depositphotos", "123rf", "dreamstime", "alamy",
+            "gettyimages", "vecteezy", "flaticon", "icon-icons", "pngtree"
         )
         
         return noise.any { lower.contains(it) } ||

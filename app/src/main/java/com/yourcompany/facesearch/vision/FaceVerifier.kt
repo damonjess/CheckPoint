@@ -7,36 +7,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 
-/**
- * Verifies search result accuracy by comparing face embeddings.
- * Filters out false positive matches.
- */
 class FaceVerifier(context: Context) {
     private val faceEmbedder = FaceEmbedder(context)
     private val faceCropper = NativeFaceCropper()
     
     companion object {
-        // This is intentionally conservative: engine ranking is not identity evidence.
-        const val VERIFICATION_THRESHOLD = 0.68f
+        // Lowered from 0.68f to 0.58f to accept more highly-probable look-alikes
+        const val VERIFICATION_THRESHOLD = 0.58f
     }
 
-    /**
-     * Verifies if a face in a search result matches the source face.
-     * Returns confidence score (0-1), or null if verification failed.
-     * 
-     * FIX: Converts hardware bitmaps to software bitmaps for pixel access.
-     */
     suspend fun verifyFaceMatch(
         searchResultBitmap: Bitmap,
         sourceEmbedding: FloatArray?
     ): Float? = calculateSimilarity(searchResultBitmap, sourceEmbedding)
         ?.takeIf { it >= VERIFICATION_THRESHOLD }
 
-    /**
-     * Returns the raw embedding similarity for an already face-bearing result.
-     * Callers must keep the conservative [VERIFICATION_THRESHOLD] for confirmed
-     * matches; lower values are suitable only for visibly labelled review leads.
-     */
     suspend fun calculateSimilarity(
         searchResultBitmap: Bitmap,
         sourceEmbedding: FloatArray?
@@ -62,23 +47,16 @@ class FaceVerifier(context: Context) {
         }
     }
 
-    /**
-     * Converts a hardware bitmap to a software bitmap for pixel access.
-     */
     private fun ensureSoftwareBitmap(bitmap: Bitmap): Bitmap {
-        // If it's already a software bitmap, return it
         if (bitmap.config != null && bitmap.config != Bitmap.Config.HARDWARE) {
             return bitmap
         }
-        
-        // Convert to software bitmap by copying
         return try {
             val stream = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
             val bytes = stream.toByteArray()
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: bitmap
-        } catch (e: Exception) {
-            android.util.Log.e("FaceVerifier", "Failed to convert hardware bitmap", e)
+        } catch (_: Exception) {
             bitmap
         }
     }
@@ -89,7 +67,6 @@ class FaceVerifier(context: Context) {
     }
 }
 
-// Extension to FaceMatcher for public access to cosine similarity
 object FaceMatcherExt {
     fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
         require(a.size == b.size) { "Embedding size mismatch: ${a.size} vs ${b.size}" }

@@ -31,6 +31,16 @@ object SourceStyles {
                 Icons.Default.MusicNote,
                 Brush.verticalGradient(listOf(Color(0xFF00F2EA), Color(0xFFFF0050)))
             )
+            s.contains("vsco") -> SourceStyle(
+                Color(0xFF000000),
+                Icons.Default.CameraAlt,
+                Brush.verticalGradient(listOf(Color.DarkGray, Color.Black))
+            )
+            s.contains("github") -> SourceStyle(
+                Color(0xFF24292E),
+                Icons.Default.Code,
+                Brush.verticalGradient(listOf(Color.Gray, Color.DarkGray))
+            )
             s.contains("onlyfans") || s.contains("fansly") -> SourceStyle(
                 Color(0xFF00AFF0), 
                 Icons.Default.Public,

@@ -119,8 +119,9 @@ fun SuccessContent(
     }
     
     val hasStrongResults = (verifiedMatches.size + likelyMatches.size) > 0
-    // Show visual candidates by default whenever there are no verified or likely face matches.
-    var showReviewLeads by remember(uiState.matches) { mutableStateOf(!hasStrongResults) }
+    
+    // NOTE: Removed the showReviewLeads toggle state here.
+    
     val visualLeads = remember(uiState.matches) {
         uiState.matches.filterNot { it.isFaceVerified || it.isLikelyFaceMatch }
             .sortedWith(compareByDescending<WebMatchDisplay> { it.isSocial }.thenByDescending { it.score })
@@ -278,20 +279,19 @@ fun SuccessContent(
                 }
             }
 
-            TextButton(onClick = { showReviewLeads = !showReviewLeads }) {
-                Text(if (showReviewLeads) "Hide visual candidates" else "Show visual candidates")
-            }
-            if (showReviewLeads) {
-                visualLeads.forEach { match ->
-                    MatchCard(
-                        match = match,
-                        isPrimary = false,
-                        debugMode = debugMode,
-                        onLoadHighRes = { onLoadHighRes(match) },
-                        onClick = { onMatchClick(match) }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
+            // NOTE: Removed the TextButton toggle here. 
+            // All candidates will now render automatically.
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            visualLeads.forEach { match ->
+                MatchCard(
+                    match = match,
+                    isPrimary = false,
+                    debugMode = debugMode,
+                    onLoadHighRes = { onLoadHighRes(match) },
+                    onClick = { onMatchClick(match) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
             }
         }
 

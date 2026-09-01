@@ -10,6 +10,28 @@ puppeteer.use(StealthPlugin());
 
 const app = express();
 const server = http.createServer(app);
+const WebSocket = require('ws');
+const wss = new WebSocket.Server({ noServer: true });
+
+// WebSocket progress broadcast
+function broadcastProgress(message, progress) {
+  const data = JSON.stringify({ type: 'progress', message, progress });
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data);
+    }
+  });
+}
+
+server.on('upgrade', (request, socket, head) => {
+  if (request.url === '/ws') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -142,8 +164,14 @@ async function scrapeEngine(engine, imageUrl) {
   const browser = await getBrowser();
   let page = null;
 
+  const engineTimeout = setTimeout(() => {
+    console.error(`[${engine.name}] Global engine timeout triggered`);
+  }, ENGINE_TIMEOUT_MS + 15000);
+
   try {
     page = await browser.newPage();
+    // Set a default timeout for all page operations
+    page.setDefaultTimeout(ENGINE_TIMEOUT_MS);
 
     // Stealth Evasions
     await page.evaluateOnNewDocument(() => {
@@ -152,9 +180,23 @@ async function scrapeEngine(engine, imageUrl) {
     });
 
     console.log(`[${engine.name}] Loading...`);
+    broadcastProgress(`[${engine.name}] Loading...`, 0.2);
 
     // We use domcontentloaded, but wait a hard 4 seconds afterward to ensure dynamic JS frameworks (like React/Angular) have rendered the grid.
     await page.goto(engine.urlFor(imageUrl), { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
+
+    // Check if we are being challenged
+    const isChallenged = await page.evaluate(() => {
+        const text = document.body.innerText.toLowerCase();
+        return text.includes('captcha') || text.includes('verify you are a human') || text.includes('unusual traffic');
+    }).catch(() => false);
+
+    if (isChallenged) {
+        console.log(`[${engine.name}] Access challenge detected. Skipping.`);
+        broadcastProgress(`[${engine.name}] Access challenge detected. Skipping.`, 0.3);
+        return [];
+    }
+
     await new Promise(r => setTimeout(r, 4000));
 
     // Handle Consent Banners
@@ -164,6 +206,8 @@ async function scrapeEngine(engine, imageUrl) {
     }).catch(() => {});
 
     // Scroll to trigger lazy loading
+    console.log(`[${engine.name}] Scrolling...`);
+    broadcastProgress(`[${engine.name}] Scrolling...`, 0.4);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3)).catch(() => {});
     await new Promise(r => setTimeout(r, 2000));
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 1.5)).catch(() => {});
@@ -172,6 +216,8 @@ async function scrapeEngine(engine, imageUrl) {
     await new Promise(r => setTimeout(r, 2500));
 
     // Extract matches
+    console.log(`[${engine.name}] Extracting matches...`);
+    broadcastProgress(`[${engine.name}] Extracting matches...`, 0.6);
     const matches = await page.evaluate((js) => {
         try {
             return new Function(js)();
@@ -187,7 +233,14 @@ async function scrapeEngine(engine, imageUrl) {
     console.error(`[${engine.name}] Error:`, err.message);
     return [];
   } finally {
-    if (page) await page.close().catch(() => {});
+    clearTimeout(engineTimeout);
+    if (page) {
+        try {
+            await page.close();
+        } catch (e) {
+            console.error(`[${engine.name}] Error closing page:`, e.message);
+        }
+    }
   }
 }
 
@@ -196,7 +249,7 @@ app.get('/api/ping', (req, res) => {
 });
 
 app.post('/api/search', async (req, res) => {
-  const { imageUrl, sceneUrl } = req.body;
+  const { imageUrl, sceneUrl, keywordHint, searchMode } = req.body;
   const targetImage = sceneUrl || imageUrl;
 
   if (!targetImage || !targetImage.startsWith('http')) {
@@ -207,14 +260,24 @@ app.post('/api/search', async (req, res) => {
   if (activeSearchPromise) {
     console.log('[Search] Waiting for previous search to complete...');
     try {
-        await activeSearchPromise;
-    } catch(e) {}
+        // Wait at most 90 seconds for previous search
+        await Promise.race([
+            activeSearchPromise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Search queue timeout')), 90000))
+        ]);
+    } catch(e) {
+        console.warn('[Search] Proceeding despite previous search status:', e.message);
+    }
   }
 
   let resolveSearch;
   activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
 
   console.log(`\n[Search] Starting probe for: ${targetImage.slice(0, 45)}...`);
+  if (keywordHint) console.log(`[Search] Identity Hint: "${keywordHint}"`);
+  if (searchMode) console.log(`[Search] Mode: ${searchMode}`);
+
+  broadcastProgress(`[Search] Starting probe ${keywordHint ? `for "${keywordHint}"` : ''}...`, 0.1);
 
   try {
     const allMatches = [];
@@ -249,6 +312,84 @@ app.post('/api/search', async (req, res) => {
     resolveSearch();
     activeSearchPromise = null;
   }
+});
+
+app.post('/api/dork-search', async (req, res) => {
+  const { keyword, sites } = req.body;
+  if (!keyword) return res.status(400).json({ success: false, error: 'Keyword is required.' });
+
+  const siteList = sites || [];
+  console.log(`[Dork] Scanning for "${keyword}" across ${siteList.length} sites...`);
+  broadcastProgress(`[Dork] Scanning for "${keyword}"...`, 0.7);
+
+  const browser = await getBrowser();
+  let page = null;
+  try {
+    page = await browser.newPage();
+    page.setDefaultTimeout(30000);
+
+    const siteQuery = siteList.length > 0 ? `(site:${siteList.join(' OR site:')})` : '';
+    const query = `${siteQuery} "${keyword}"`.trim();
+    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&adlt=off`;
+
+    console.log(`[Dork] Querying: ${url}`);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await new Promise(r => setTimeout(r, 3000));
+
+    const matches = await page.evaluate(() => {
+        const items = [];
+        const seen = new Set();
+        const rows = document.querySelectorAll('li.b_algo, .b_algo, .result, .g');
+
+        rows.forEach(row => {
+            const a = row.querySelector('h2 a, .result__a, .b_title a');
+            if (!a || !a.href) return;
+            const href = a.href.split('#')[0];
+            if (seen.has(href)) return;
+            seen.add(href);
+
+            const img = row.querySelector('img');
+            items.push({
+                title: a.innerText,
+                link: href,
+                thumbnail: img ? (img.src || img.getAttribute('data-src')) : null,
+                source: 'Dork',
+                score: 300
+            });
+        });
+        return items;
+    });
+
+    console.log(`[Dork] Found ${matches.length} matches`);
+    res.json({ success: true, matches });
+  } catch (err) {
+    console.error('[Dork] Error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  } finally {
+    if (page) await page.close().catch(() => {});
+  }
+});
+
+app.post('/api/extract-media', async (req, res) => {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ success: false, error: 'URL is required.' });
+
+    console.log(`[Extract] Extracting from ${url.slice(0, 50)}...`);
+    const browser = await getBrowser();
+    let page = null;
+    try {
+        page = await browser.newPage();
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        const highResUrl = await page.evaluate(() => {
+            const og = document.querySelector('meta[property="og:image"]');
+            return og ? og.content : null;
+        });
+        res.json({ success: true, highResUrl });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        if (page) await page.close().catch(() => {});
+    }
 });
 
 server.listen(PORT, '127.0.0.1', () => {

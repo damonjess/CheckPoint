@@ -36,7 +36,7 @@ server.on('upgrade', (request, socket, head) => {
 app.use(express.json({ limit: '10mb' }));
 
 const PORT = Number(process.env.PORT || 3000);
-const ENGINE_TIMEOUT_MS = 60_000; // 60 seconds. Mobile chips are slow to parse JS.
+const ENGINE_TIMEOUT_MS = 60_000;
 
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
@@ -67,7 +67,6 @@ async function getBrowser() {
 
   const chromiumPath = getChromiumPath();
 
-  // High-stability, low-memory flags for Termux
   const args = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -79,14 +78,14 @@ async function getBrowser() {
     '--disable-blink-features=AutomationControlled',
     '--hide-scrollbars',
     '--mute-audio',
-    '--window-size=1280,800', // Lowered from 1920x1080 to prevent OOM
+    '--window-size=1280,800',
     `--user-agent=${DEFAULT_UA}`,
     '--single-process',
-    '--no-zygote' // Prevents the browser from spawning unnecessary helper processes
+    '--no-zygote'
   ];
 
   browserInstance = await puppeteer.launch({
-    headless: true, // Standard headless is required for stability
+    headless: true,
     executablePath: chromiumPath,
     args: args,
     ignoreHTTPSErrors: true,
@@ -170,10 +169,8 @@ async function scrapeEngine(engine, imageUrl) {
 
   try {
     page = await browser.newPage();
-    // Set a default timeout for all page operations
     page.setDefaultTimeout(ENGINE_TIMEOUT_MS);
 
-    // Stealth Evasions
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
       window.chrome = { runtime: {} };
@@ -182,10 +179,8 @@ async function scrapeEngine(engine, imageUrl) {
     console.log(`[${engine.name}] Loading...`);
     broadcastProgress(`[${engine.name}] Loading...`, 0.2);
 
-    // We use domcontentloaded, but wait a hard 4 seconds afterward to ensure dynamic JS frameworks (like React/Angular) have rendered the grid.
     await page.goto(engine.urlFor(imageUrl), { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
 
-    // Check if we are being challenged
     const isChallenged = await page.evaluate(() => {
         const text = document.body.innerText.toLowerCase();
         return text.includes('captcha') || text.includes('verify you are a human') || text.includes('unusual traffic');
@@ -199,13 +194,11 @@ async function scrapeEngine(engine, imageUrl) {
 
     await new Promise(r => setTimeout(r, 4000));
 
-    // Handle Consent Banners
     await page.evaluate(() => {
         const consentBtns = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]'];
         consentBtns.forEach(c => { const b = document.querySelector(c); if(b) b.click(); });
     }).catch(() => {});
 
-    // Scroll to trigger lazy loading
     console.log(`[${engine.name}] Scrolling...`);
     broadcastProgress(`[${engine.name}] Scrolling...`, 0.4);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3)).catch(() => {});
@@ -215,7 +208,6 @@ async function scrapeEngine(engine, imageUrl) {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
     await new Promise(r => setTimeout(r, 2500));
 
-    // Extract matches
     console.log(`[${engine.name}] Extracting matches...`);
     broadcastProgress(`[${engine.name}] Extracting matches...`, 0.6);
     const matches = await page.evaluate((js) => {
@@ -256,11 +248,9 @@ app.post('/api/search', async (req, res) => {
     return res.status(400).json({ success: false, error: 'A public URL is required.' });
   }
 
-  // Await any existing search to finish to prevent parallel OOM crashes
   if (activeSearchPromise) {
     console.log('[Search] Waiting for previous search to complete...');
     try {
-        // Wait at most 90 seconds for previous search
         await Promise.race([
             activeSearchPromise,
             new Promise((_, reject) => setTimeout(() => reject(new Error('Search queue timeout')), 90000))
@@ -281,8 +271,6 @@ app.post('/api/search', async (req, res) => {
 
   try {
     const allMatches = [];
-
-    // Sequential execution
     for (const engine of ENGINES) {
         const matches = await scrapeEngine(engine, targetImage);
         allMatches.push(...matches);
@@ -314,6 +302,7 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
+// FIX: Added SafeSearch bypass cookies, queued execution, and updated selectors
 app.post('/api/dork-search', async (req, res) => {
   const { keyword, sites } = req.body;
   if (!keyword) return res.status(400).json({ success: false, error: 'Keyword is required.' });
@@ -322,35 +311,58 @@ app.post('/api/dork-search', async (req, res) => {
   console.log(`[Dork] Scanning for "${keyword}" across ${siteList.length} sites...`);
   broadcastProgress(`[Dork] Scanning for "${keyword}"...`, 0.7);
 
+  if (activeSearchPromise) {
+    console.log('[Dork] Waiting for previous search to complete...');
+    try {
+        await Promise.race([
+            activeSearchPromise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Search queue timeout')), 90000))
+        ]);
+    } catch(e) {}
+  }
+
+  let resolveSearch;
+  activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
+
   const browser = await getBrowser();
   let page = null;
   try {
     page = await browser.newPage();
     page.setDefaultTimeout(30000);
 
+    // Bypass Bing SafeSearch explicitly so Adult endpoints trigger
+    await page.setCookie({ name: 'SRCHHPGUSR', value: 'ADLT=OFF', domain: '.bing.com', path: '/' });
+    await page.setCookie({ name: '_EDGE_V', value: '1', domain: '.bing.com', path: '/' });
+
     const siteQuery = siteList.length > 0 ? `(site:${siteList.join(' OR site:')})` : '';
     const query = `${siteQuery} "${keyword}"`.trim();
-    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&adlt=off`;
+    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&adlt=off&safesearch=0`;
 
     console.log(`[Dork] Querying: ${url}`);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 4000));
 
     const matches = await page.evaluate(() => {
         const items = [];
         const seen = new Set();
-        const rows = document.querySelectorAll('li.b_algo, .b_algo, .result, .g');
+        const rows = document.querySelectorAll('li.b_algo, .b_algo, .result, .g, .dg_u, .vr_items');
 
         rows.forEach(row => {
-            const a = row.querySelector('h2 a, .result__a, .b_title a');
-            if (!a || !a.href) return;
+            let a = row.querySelector('h2 a, .result__a, .b_title a');
+            if(!a) a = row.closest('a') || row.querySelector('a');
+            if(!a || !a.href) return;
+
             const href = a.href.split('#')[0];
-            if (seen.has(href)) return;
+            if(seen.has(href)) return;
+
+            const lowHref = href.toLowerCase();
+            if (lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('google.') >= 0 || lowHref.indexOf('microsoft.com') >= 0) return;
+
             seen.add(href);
 
-            const img = row.querySelector('img');
+            const img = row.querySelector('img') || row.closest('div')?.querySelector('img');
             items.push({
-                title: a.innerText,
+                title: (a.innerText || a.textContent || '').trim().slice(0, 150),
                 link: href,
                 thumbnail: img ? (img.src || img.getAttribute('data-src')) : null,
                 source: 'Dork',
@@ -367,6 +379,8 @@ app.post('/api/dork-search', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   } finally {
     if (page) await page.close().catch(() => {});
+    resolveSearch();
+    activeSearchPromise = null;
   }
 });
 

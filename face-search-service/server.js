@@ -255,6 +255,7 @@ app.post('/api/search', async (req, res) => {
 
     // Run sequentially to prevent CPU throttling on device
     for (const engine of ENGINES) {
+      console.log(`[${engine.name}] Loading...`);
       const matches = await scrapeEngine(engine, targetImage);
       allMatches.push(...matches);
     }

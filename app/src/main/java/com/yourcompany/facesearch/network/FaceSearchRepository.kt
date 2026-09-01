@@ -10,6 +10,7 @@ import okhttp3.Request
 import com.yourcompany.facesearch.network.model.ServerSearchRequest
 import com.yourcompany.facesearch.network.model.ServerSearchResponse
 import com.yourcompany.facesearch.vision.NativeFaceCropper
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 class FaceSearchRepository(private val context: Context) {
@@ -50,13 +51,17 @@ class FaceSearchRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             val allResults = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
 
-            val faceToUpload = faceBitmap ?: NativeFaceCropper().prepareFaceForSearch(bitmap)
-            
+            val searchBitmap = faceBitmap ?: NativeFaceCropper().prepareFaceForSearch(bitmap)
+            val stream = ByteArrayOutputStream()
+            // This must be 92 (high quality) instead of a low number! (The 15 KB Issue Fix)
+            searchBitmap.compress(Bitmap.CompressFormat.JPEG, 92, stream)
+            val byteArray = stream.toByteArray()
+
             val probeUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
                 imageUrl
             } else {
-                onLog("Uploading strict face probe to prevent clothing matches...")
-                freeHost.upload(faceToUpload, onLog)
+                onLog("Uploading strict face probe (${byteArray.size / 1024} KB) to prevent clothing matches...")
+                freeHost.upload(searchBitmap, onLog)
             }
 
             if (probeUrl == null) {
@@ -68,7 +73,7 @@ class FaceSearchRepository(private val context: Context) {
                 onLog("Querying Termux scraper backend...")
                 val termuxResponse = performLocalServerSearch(
                     bitmap = bitmap,
-                    faceBitmap = faceToUpload,
+                    faceBitmap = searchBitmap,
                     keywordHint = keywordHint,
                     imageUrl = probeUrl,
                     sceneUrl = probeUrl,

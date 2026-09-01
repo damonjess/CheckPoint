@@ -236,35 +236,48 @@ app.post('/api/search', async (req, res) => {
   }
 
   if (activeSearchPromise) {
-    console.log('[Search] Waiting for previous search to complete...');
-    try { await activeSearchPromise; } catch(e) {}
+    console.log('[Search] Waiting for previous active search to finish...');
+    try { await activeSearchPromise; } catch (_) {}
   }
 
   let resolveSearch;
   activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
 
-  console.log(`\n[Search] Starting probe for: ${targetImage.slice(0, 45)}...`);
+  console.log(`\n[Search] Starting batched probe for: ${targetImage.slice(0, 45)}...`);
 
   try {
     const allMatches = [];
+    const BATCH_SIZE = 2;
 
-    for (const engine of ENGINES) {
-      const matches = await scrapeEngine(engine, targetImage);
-      allMatches.push(...matches);
+    // Process engines in batches of 2 to avoid Android OOM killer
+    for (let i = 0; i < ENGINES.length; i += BATCH_SIZE) {
+      const batch = ENGINES.slice(i, i + BATCH_SIZE);
+      console.log(`[Search] Executing batch: ${batch.map(e => e.name).join(', ')}`);
+
+      const batchPromises = batch.map(engine => scrapeEngine(engine, targetImage));
+      const settledResults = await Promise.allSettled(batchPromises);
+
+      settledResults.forEach((result, idx) => {
+        if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+          allMatches.push(...result.value);
+        } else if (result.status === 'rejected') {
+          console.error(`[${batch[idx].name}] Engine failed:`, result.reason?.message);
+        }
+      });
     }
 
     const uniqueMatches = [];
     const seenUrls = new Set();
 
     for (const match of allMatches) {
-      if (!seenUrls.has(match.link)) {
+      if (match.link && !seenUrls.has(match.link)) {
         seenUrls.add(match.link);
-        const isSocial = /(instagram|facebook|twitter|tiktok|linkedin|reddit|youtube|x\.com)/i.test(match.link);
+        const isSocial = /(instagram|facebook|twitter|tiktok|linkedin|reddit|youtube|x\.com|threads|pinterest|vk\.com|tumblr|vsco)/i.test(match.link);
         uniqueMatches.push({ ...match, isSocial });
       }
     }
 
-    console.log(`[Search] Success. Total candidates found: ${uniqueMatches.length}`);
+    console.log(`[Search] Completed. Aggregated ${uniqueMatches.length} unique candidates.`);
     res.json({
       success: true,
       matches: uniqueMatches,
@@ -274,7 +287,7 @@ app.post('/api/search', async (req, res) => {
     console.error('[Search] Fatal error:', err);
     res.status(500).json({ success: false, error: err.message });
   } finally {
-    resolveSearch();
+    if (resolveSearch) resolveSearch();
     activeSearchPromise = null;
   }
 });

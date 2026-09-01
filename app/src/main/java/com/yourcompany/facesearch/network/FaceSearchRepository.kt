@@ -48,7 +48,7 @@ class FaceSearchRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             val allResults = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
 
-            val faceToUpload = faceBitmap ?: NativeFaceCropper().getTightFaceCrop(bitmap) ?: bitmap
+            val faceToUpload = faceBitmap ?: NativeFaceCropper().prepareFaceForSearch(bitmap)
             
             val probeUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
                 imageUrl

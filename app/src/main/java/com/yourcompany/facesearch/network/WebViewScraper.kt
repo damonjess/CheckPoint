@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -18,21 +19,25 @@ class WebViewScraper private constructor(
     companion object {
         suspend fun create(context: Context): WebViewScraper = withContext(Dispatchers.Main) {
             val appContext = context.applicationContext
+            
+            // Disable SafeSearch at the cookie level across all WebView search engines
+            val cookieManager = CookieManager.getInstance()
+            cookieManager.setAcceptCookie(true)
+            cookieManager.setCookie("https://www.bing.com", "SRCHHPGUSR=ADLT=OFF; domain=.bing.com; path=/")
+            cookieManager.setCookie("https://www.bing.com", "_EDGE_V=1; domain=.bing.com; path=/")
+            cookieManager.setCookie("https://www.bing.com", "MUID=1; domain=.bing.com; path=/")
+            cookieManager.flush()
+
             val webView = WebView(appContext).apply {
                 @SuppressLint("SetJavaScriptEnabled")
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
                 settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                
-                // FIX: Force Desktop Mode! 
-                // Mobile Google/Bing/Yandex hide their images in heavily obfuscated carousels.
-                // Desktop mode gives us the standard CSS grids our scraper is looking for.
                 settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
                 settings.useWideViewPort = true
                 settings.loadWithOverviewMode = true
                 
-                // Some Android versions require this explicit flag to stop mobile redirects
                 val newUa = settings.userAgentString.replace("Mobile", "eliboM").replace("Android", "diordnA")
                 settings.userAgentString = newUa
             }
@@ -54,13 +59,11 @@ class WebViewScraper private constructor(
                     
                     function addItem(title, link, thumb, source) {
                         if (!link || link.indexOf('http') !== 0) return;
-                        
                         var href = link.split('#')[0];
                         if (seen.has(href)) return;
                         
                         var lowHref = href.toLowerCase();
                         if (lowHref.indexOf('google.') >= 0 || lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('yandex.') >= 0 || lowHref.indexOf('tineye.com') >= 0) return;
-                        
                         if (!thumb || thumb.length < 15) return;
                         
                         var lowThumb = thumb.toLowerCase();
@@ -131,11 +134,7 @@ class WebViewScraper private constructor(
                                 var match = href.match(/url\?q=([^&]+)/);
                                 if (match) href = decodeURIComponent(match[1]);
                             }
-                            var img = a.querySelector('img');
-                            if (!img) {
-                                var div = a.closest('div');
-                                if (div) img = div.querySelector('img');
-                            }
+                            var img = a.querySelector('img') || a.closest('div')?.querySelector('img');
                             var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
                             addItem(a.innerText || a.title, href, imgSrc, 'Web');
                         } catch(e){}
@@ -151,21 +150,25 @@ class WebViewScraper private constructor(
             (function(){
                 function extract(){
                     var items = [], seen = new Set();
-                    var rows = document.querySelectorAll('li.b_algo, .b_algo, .result, .result__body, .g');
+                    var rows = document.querySelectorAll('li.b_algo, .b_algo, .result, .result__body, .g, .dg_u, .vr_items');
                     if(!rows.length) rows = document.querySelectorAll('a[href^="http"]');
 
                     rows.forEach(function(row){
                         try {
                             var a = row.tagName === 'A' ? row : row.querySelector('h2 a, .result__a, .b_title a, a[href^="http"]');
+                            if(!a) a = row.closest('a') || row.querySelector('a');
                             if(!a) return;
                             var href = a.href.split('#')[0];
                             if(!href || href.indexOf('http') !== 0 || seen.has(href)) return;
 
+                            var lowHref = href.toLowerCase();
+                            if (lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('google.') >= 0 || lowHref.indexOf('microsoft.com') >= 0) return;
+
                             var title = (a.innerText || a.textContent || '').replace(/\s+/g,' ').trim();
                             if(title.length < 3) return;
 
-                            var img = row.querySelector('img');
-                            var thumb = img ? (img.src || img.getAttribute('data-src')) : null;
+                            var img = row.querySelector('img') || row.closest('div')?.querySelector('img');
+                            var thumb = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
 
                             seen.add(href);
                             items.push({
@@ -191,9 +194,9 @@ class WebViewScraper private constructor(
     )
 
     suspend fun scrapeBing(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
-        url = "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
+        url = "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}&adlt=off",
         engineName = "Bing",
-        delayMs = 9000 // Increased for desktop rendering
+        delayMs = 9000
     )
 
     suspend fun scrapeTinEye(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
@@ -203,15 +206,9 @@ class WebViewScraper private constructor(
     )
 
     suspend fun scrapeYandex(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
-        url = "https://yandex.com/images/search?rpt=imageview&url=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}",
+        url = "https://yandex.com/images/search?rpt=imageview&url=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}&family=no",
         engineName = "Yandex",
-        delayMs = 9000 // Increased for desktop rendering
-    )
-
-    suspend fun scrapeSogou(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
-        url = "https://pic.sogou.com/ris?query=${java.net.URLEncoder.encode(imageUrl, "UTF-8")}&flag=1",
-        engineName = "Sogou",
-        delayMs = 6000
+        delayMs = 9000
     )
 
     suspend fun scrapeSocialDork(
@@ -219,12 +216,31 @@ class WebViewScraper private constructor(
         keyword: String,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = scrapeEngine(
-        url = "https://www.bing.com/search?q=site:${site}+%22${java.net.URLEncoder.encode(keyword, "UTF-8")}%22",
+        url = "https://www.bing.com/search?q=site:${site}+%22${java.net.URLEncoder.encode(keyword, "UTF-8")}%22&adlt=off&safesearch=0",
         engineName = AdultSiteConfig.labelFor(site),
         delayMs = 3000,
         extractJs = DORK_EXTRACT_JS,
         onLog = onLog
     )
+
+    suspend fun scrapeBatchedAdultDork(
+        sites: List<String>,
+        keyword: String,
+        groupLabel: String,
+        onLog: (String) -> Unit = {}
+    ): List<SerpVisualMatch> {
+        val siteQuery = sites.joinToString(" OR ") { "site:$it" }
+        val encodedQuery = java.net.URLEncoder.encode("($siteQuery) \"$keyword\"", "UTF-8")
+        val targetUrl = "https://www.bing.com/search?q=$encodedQuery&adlt=off&safesearch=0"
+        
+        return scrapeEngine(
+            url = targetUrl,
+            engineName = groupLabel,
+            delayMs = 3500,
+            extractJs = DORK_EXTRACT_JS,
+            onLog = onLog
+        )
+    }
 
     private suspend fun scrapeEngine(
         url: String,
@@ -237,13 +253,13 @@ class WebViewScraper private constructor(
             val accumulated = linkedMapOf<String, SerpVisualMatch>()
             var passesDone = 0
             val totalPasses = 4
-            val maxTimeout = 18000L
+            val maxTimeout = 16000L
 
             val timeoutRunnable = Runnable {
                 if (continuation.isActive) continuation.resume(accumulated.values.toList())
             }
             handler.postDelayed(timeoutRunnable, maxTimeout)
-            onLog("Loading $engineName visual engine...")
+            onLog("Scanning $engineName...")
 
             val bridge = object {
                 @JavascriptInterface
@@ -255,10 +271,16 @@ class WebViewScraper private constructor(
                             val link = obj.optString("link")
                             if (link.isBlank() || accumulated.containsKey(link)) continue
 
+                            val itemSource = if (engineName.contains("Adult") || engineName.contains("Networks")) {
+                                AdultSiteConfig.labelFor(link)
+                            } else {
+                                engineName
+                            }
+
                             accumulated[link] = SerpVisualMatch(
                                 title = obj.optString("title", "Visual Match"),
                                 link = link,
-                                source = engineName,
+                                source = itemSource,
                                 thumbnail = ThumbnailUtils.normalize(obj.optString("thumbnail")),
                                 score = obj.optInt("score", 100)
                             )
@@ -284,15 +306,15 @@ class WebViewScraper private constructor(
                     handler.postDelayed({
                         view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight);", null)
                         view?.evaluateJavascript(extractJs, null)
-                    }, delayMs + 2500)
+                    }, delayMs + 2000)
 
                     handler.postDelayed({
                         view?.evaluateJavascript(extractJs, null)
-                    }, delayMs + 5000)
+                    }, delayMs + 4000)
 
                     handler.postDelayed({
                         view?.evaluateJavascript(extractJs, null)
-                    }, delayMs + 7500)
+                    }, delayMs + 6000)
                 }
             }
             webView.loadUrl(url)

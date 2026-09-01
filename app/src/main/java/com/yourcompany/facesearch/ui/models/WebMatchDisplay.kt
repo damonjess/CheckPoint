@@ -63,7 +63,22 @@ data class WebMatchDisplay(
                 lower.contains("youtube.com/@") || lower.contains("youtube.com/c/") || lower.contains("youtube.com/channel/") -> {
                     clean.substringAfterLast("/").takeIf { it.isNotBlank() && it.length < 40 }
                 }
-                else -> null // REMOVE the generic fallback that produced @fat-uncle, @havant, etc.
+                // Adult / Creator Networks
+                lower.contains("onlyfans.com/") -> clean.substringAfter("onlyfans.com/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("fansly.com/") -> clean.substringAfter("fansly.com/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("pornhub.com/model/") -> clean.substringAfter("/model/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("pornhub.com/users/") -> clean.substringAfter("/users/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("xvideos.com/profiles/") -> clean.substringAfter("/profiles/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("xvideos.com/model/") -> clean.substringAfter("/model/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("xnxx.com/profiles/") -> clean.substringAfter("/profiles/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("xnxx.com/model/") -> clean.substringAfter("/model/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("xhamster.com/users/") -> clean.substringAfter("/users/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("xhamster.com/models/") -> clean.substringAfter("/models/").substringBefore("/").takeIf { it.isNotBlank() }
+                lower.contains("chaturbate.com/") -> {
+                    val after = clean.substringAfter("chaturbate.com/").trimEnd('/')
+                    if (after.contains("/") || after.isEmpty()) null else after
+                }
+                else -> null
             }
         }
     }

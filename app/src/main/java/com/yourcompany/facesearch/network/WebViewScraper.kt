@@ -72,6 +72,15 @@ class WebViewScraper private constructor(
                             if (lowThumb.indexOf(badThumb[i]) >= 0) return;
                         }
                         
+                        var score = 100;
+                        var socialCDNs = ['cdninstagram.com', 'fbcdn.net', 'twimg.com', 'tiktokcdn.com'];
+                        for (var i = 0; i < socialCDNs.length; i++) {
+                            if (lowThumb.indexOf(socialCDNs[i]) >= 0) {
+                                score = 500;
+                                break;
+                            }
+                        }
+
                         var cleanTitle = (title || 'Visual Match').replace(/\s+/g,' ').trim().slice(0, 100);
                         if (cleanTitle.toLowerCase().indexOf('sign in') >= 0 || cleanTitle.length < 3) return;
                         
@@ -81,7 +90,7 @@ class WebViewScraper private constructor(
                             link: href,
                             thumbnail: thumb,
                             source: source,
-                            score: 100
+                            score: score
                         });
                     }
 

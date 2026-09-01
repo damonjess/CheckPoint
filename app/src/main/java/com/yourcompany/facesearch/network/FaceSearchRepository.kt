@@ -152,55 +152,72 @@ class FaceSearchRepository(private val context: Context) {
                 }
             }
 
-            val harvestedHints = if (keywordHint.isNullOrBlank()) {
+            // 1. Check if the user manually typed a hint, or if visual search found names in web articles
+            val visualHints = if (!keywordHint.isNullOrBlank()) {
+                listOf(keywordHint.trim())
+            } else {
                 harvestSearchHints(allResults.toList())
-            } else listOf(keywordHint.trim())
+            }
+
+            // 2. AUTO-FALLBACK: If still empty, automatically pull from the saved Identity Profile card
+            val harvestedHints = if (visualHints.isEmpty()) {
+                val savedProfile = com.yourcompany.facesearch.data.IdentityProfileStore.load(context)
+                buildList {
+                    if (savedProfile.fullName.isNotBlank()) add(savedProfile.fullName.trim())
+                    if (savedProfile.handles.isNotBlank()) {
+                        savedProfile.handles.split(',', ';', '\n')
+                            .map { it.trim().removePrefix("@") }
+                            .filter { it.isNotBlank() }
+                            .forEach { add(it) }
+                    }
+                    if (savedProfile.aliases.isNotBlank()) {
+                        savedProfile.aliases.split(',', ';', '\n')
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
+                            .forEach { add(it) }
+                    }
+                }.distinct()
+            } else {
+                visualHints
+            }
 
             if (harvestedHints.isNotEmpty()) {
-                val primaryName = harvestedHints.first().trim()
-                if (searchMode.equals("ADULT", ignoreCase = true)) {
-                    onLog("Adult scan mode active: Running dork queries for '$primaryName' across adult networks...")
-                    
-                    val chunks = AdultSiteConfig.SITES.chunked(5)
-                    chunks.forEachIndexed { idx, siteBatch ->
-                        onLog("Termux: Scanning Adult Group #${idx + 1}...")
-                        val dorkHits = performTermuxDorkSearch(
-                            keyword = primaryName,
-                            sites = siteBatch,
-                            onLog = onLog
-                        )
-                        
-                        // If Termux returns hits without thumbnails, resolve og:image metadata
-                        dorkHits.forEach { hit ->
-                            if (hit.thumbnail.isNullOrBlank()) {
-                                val metaThumb = extractMetadataThumbnail(hit.link ?: "")
-                                allResults.add(hit.copy(thumbnail = metaThumb))
-                            } else {
-                                allResults.add(hit)
-                            }
+                val primaryName = harvestedHints.first()
+                onLog("Active target hint: '$primaryName' (auto-resolved). Running social lookup...")
+                
+                val scraper = WebViewScraper.create(context)
+                try {
+                    if (searchMode.equals("ADULT", ignoreCase = true)) {
+                        onLog("Adult scan mode active: Running dork queries for '$primaryName' across adult networks...")
+                        val chunks = AdultSiteConfig.SITES.chunked(5)
+                        chunks.forEachIndexed { idx, siteBatch ->
+                            val dorkHits = performTermuxDorkSearch(
+                                keyword = primaryName,
+                                sites = siteBatch,
+                                onLog = onLog
+                            )
+                            allResults.addAll(dorkHits)
                         }
-                        onLog("✓ Adult Group #${idx + 1} returned ${dorkHits.size} result(s)")
-                    }
-                } else {
-                    val scraper = WebViewScraper.create(context)
-                    try {
-                        onLog("Discovered identity hint: '$primaryName'. Running social lookup...")
+                    } else {
+                        // Global Social & Lifestyle Networks
                         allResults.addAll(scraper.scrapeSocialDork("instagram.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("facebook.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("twitter.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("tiktok.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("threads.net", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("pinterest.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("tumblr.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("vsco.co", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("vk.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("reddit.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("linktr.ee", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("twitch.tv", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("patreon.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("bsky.app", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("mastodon.social", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("behance.net", primaryName, onLog))
-                    } finally {
-                        scraper.destroy()
                     }
+                } finally {
+                    scraper.destroy()
                 }
-            } else if (searchMode.equals("ADULT", ignoreCase = true)) {
-                onLog("⚠️ Tip: Adult platform scanning was skipped because no identity hints were found. Enter a name or username in OSINT TARGET HINT to force a scan.")
+            } else {
+                onLog("ℹ️ No name or profile hint available. Reverse-image search will rely purely on visual matching.")
             }
 
             onLog("Search complete. Retrieved ${allResults.size} total candidates.")

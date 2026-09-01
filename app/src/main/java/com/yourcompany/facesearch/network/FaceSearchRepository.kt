@@ -153,54 +153,51 @@ class FaceSearchRepository(private val context: Context) {
             }
 
             val harvestedHints = if (keywordHint.isNullOrBlank()) {
-                val hints = harvestSearchHints(allResults.toList())
-                if (hints.isNotEmpty()) onLog("Harvested hints from visual search: ${hints.joinToString(", ")}")
-                hints
-            } else {
-                onLog("Using provided identity hint: $keywordHint")
-                listOf(keywordHint)
-            }
+                harvestSearchHints(allResults.toList())
+            } else listOf(keywordHint.trim())
 
             if (harvestedHints.isNotEmpty()) {
-                val primaryName = harvestedHints.first()
-                val scraper = WebViewScraper.create(context)
-                try {
-                    if (searchMode.equals("ADULT", ignoreCase = true)) {
-                        onLog("Adult scan mode active: Running unrestricted dork queries for '$primaryName' across adult networks...")
-                        
-                        val chunks = AdultSiteConfig.SITES.chunked(5)
-                        
-                        chunks.forEachIndexed { idx, siteBatch ->
-                            val batchResults = if (isLocalBackendAvailable()) {
-                                onLog("Termux: Scanning Adult Group #${idx + 1}...")
-                                performTermuxDorkSearch(primaryName, siteBatch, onLog)
-                            } else {
-                                scraper.scrapeBatchedAdultDork(siteBatch, primaryName, "Adult Networks Group #${idx + 1}", onLog)
-                            }
-                            onLog("✓ Adult Group #${idx + 1} returned ${batchResults.size} result(s)")
-                            allResults.addAll(batchResults)
-                        }
-                    } else {
-                        onLog("Discovered identity hint: '$primaryName'. Running social lookup...")
-                        
-                        val socialSites = listOf(
-                            "instagram.com", "facebook.com", "twitter.com", "tiktok.com",
-                            "linktr.ee", "twitch.tv", "patreon.com", "bsky.app", 
-                            "mastodon.social", "behance.net"
+                val primaryName = harvestedHints.first().trim()
+                if (searchMode.equals("ADULT", ignoreCase = true)) {
+                    onLog("Adult scan mode active: Running dork queries for '$primaryName' across adult networks...")
+                    
+                    val chunks = AdultSiteConfig.SITES.chunked(5)
+                    chunks.forEachIndexed { idx, siteBatch ->
+                        onLog("Termux: Scanning Adult Group #${idx + 1}...")
+                        val dorkHits = performTermuxDorkSearch(
+                            keyword = primaryName,
+                            sites = siteBatch,
+                            onLog = onLog
                         )
                         
-                        val chunks = socialSites.chunked(5)
-                        chunks.forEachIndexed { idx, siteBatch ->
-                            val batchResults = if (isLocalBackendAvailable()) {
-                                performTermuxDorkSearch(primaryName, siteBatch, onLog)
+                        // If Termux returns hits without thumbnails, resolve og:image metadata
+                        dorkHits.forEach { hit ->
+                            if (hit.thumbnail.isNullOrBlank()) {
+                                val metaThumb = extractMetadataThumbnail(hit.link ?: "")
+                                allResults.add(hit.copy(thumbnail = metaThumb))
                             } else {
-                                scraper.scrapeBatchedAdultDork(siteBatch, primaryName, "Social Networks Group #${idx + 1}", onLog)
+                                allResults.add(hit)
                             }
-                            allResults.addAll(batchResults)
                         }
+                        onLog("✓ Adult Group #${idx + 1} returned ${dorkHits.size} result(s)")
                     }
-                } finally {
-                    scraper.destroy()
+                } else {
+                    val scraper = WebViewScraper.create(context)
+                    try {
+                        onLog("Discovered identity hint: '$primaryName'. Running social lookup...")
+                        allResults.addAll(scraper.scrapeSocialDork("instagram.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("facebook.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("twitter.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("tiktok.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("linktr.ee", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("twitch.tv", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("patreon.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("bsky.app", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("mastodon.social", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("behance.net", primaryName, onLog))
+                    } finally {
+                        scraper.destroy()
+                    }
                 }
             } else if (searchMode.equals("ADULT", ignoreCase = true)) {
                 onLog("⚠️ Tip: Adult platform scanning was skipped because no identity hints were found. Enter a name or username in OSINT TARGET HINT to force a scan.")

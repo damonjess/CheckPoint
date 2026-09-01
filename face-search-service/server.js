@@ -119,40 +119,40 @@ const UNIVERSAL_EXTRACT_JS = `
     return items;
 `;
 
-const DORK_EXTRACT_JS = `
+const ADULT_EXTRACT_JS = `
     var items = [], seen = new Set();
-    // Select both standard web results and Bing adult video carousels (.mc_vtvc, .vr_items, .dg_u)
-    var rows = document.querySelectorAll('.b_algo, .mc_vtvc, .vr_items, .dg_u, a.thumb');
 
-    rows.forEach(function(row){
+    // Select both Bing Video tiles and standard web result items
+    var nodes = document.querySelectorAll('.mc_vtvc, .vr_items, .dg_u, .b_algo, .b_ans, .inline_video');
+
+    nodes.forEach(function(el) {
         try {
-            var a = row.tagName === 'A' ? row : row.querySelector('h2 a, .b_title a, a[href^="http"]');
-            if(!a) return;
-            var href = a.href.split('#')[0];
-            if(!href || href.indexOf('http') !== 0 || seen.has(href)) return;
+            var linkEl = el.querySelector('a[href^="http"]') || (el.tagName === 'A' ? el : null);
+            if (!linkEl) return;
+
+            var href = linkEl.href.split('#')[0];
+            if (!href || href.indexOf('http') !== 0 || seen.has(href)) return;
 
             var lowHref = href.toLowerCase();
             if (lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('microsoft.com') >= 0) return;
 
-            var title = (row.innerText || a.getAttribute('aria-label') || a.textContent || 'Adult Candidate').replace(/\\s+/g,' ').trim();
-            if(title.length < 3) return;
+            var title = (el.querySelector('.b_title a, .mc_vtvc_title, h2, strong')?.innerText || linkEl.innerText || el.getAttribute('aria-label') || 'Adult Match').replace(/\\s+/g, ' ').trim();
+            if (title.length < 3) return;
 
-            var img = row.querySelector('img') || row.closest('div')?.querySelector('img');
+            var img = el.querySelector('img');
             var thumb = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
-
-            // Strict gate: If there is no thumbnail, we cannot face match it
-            if(!thumb || thumb.length < 15) return;
 
             seen.add(href);
             items.push({
-                title: title.slice(0, 150),
+                title: title.slice(0, 120),
                 link: href,
                 thumbnail: thumb,
-                source: 'Dork',
-                score: 350
+                source: 'Adult',
+                score: thumb ? 350 : 200
             });
         } catch(e){}
     });
+
     return items;
 `;
 
@@ -192,8 +192,8 @@ async function scrapeEngine(engine, imageUrl) {
     await new Promise(r => setTimeout(r, 4000));
 
     await page.evaluate(() => {
-        const consentBtns = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]'];
-        consentBtns.forEach(c => { const b = document.querySelector(c); if(b) b.click(); });
+      const consentBtns = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]'];
+      consentBtns.forEach(c => { const b = document.querySelector(c); if(b) b.click(); });
     }).catch(() => {});
 
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3)).catch(() => {});
@@ -204,11 +204,7 @@ async function scrapeEngine(engine, imageUrl) {
     await new Promise(r => setTimeout(r, 2500));
 
     const matches = await page.evaluate((js) => {
-        try {
-            return new Function(js)();
-        } catch(e) {
-            return [];
-        }
+      try { return new Function(js)(); } catch(e) { return []; }
     }, engine.extractJs);
 
     console.log(`[${engine.name}] Found ${matches.length} matches`);
@@ -226,7 +222,6 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', chromium: Boolean(getChromiumPath()) });
 });
 
-// Standard reverse image search endpoint
 app.post('/api/search', async (req, res) => {
   const { imageUrl, sceneUrl } = req.body;
   const targetImage = sceneUrl || imageUrl;
@@ -249,8 +244,8 @@ app.post('/api/search', async (req, res) => {
     const allMatches = [];
 
     for (const engine of ENGINES) {
-        const matches = await scrapeEngine(engine, targetImage);
-        allMatches.push(...matches);
+      const matches = await scrapeEngine(engine, targetImage);
+      allMatches.push(...matches);
     }
 
     const uniqueMatches = [];
@@ -279,84 +274,83 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
-// Deep Dorking Endpoint for Adult Sites
 app.post('/api/dork-search', async (req, res) => {
-    const { keyword, sites } = req.body;
+  const { keyword, sites } = req.body;
+  const cleanKeyword = (keyword || '').trim();
 
-    if (!keyword || !sites || !sites.length) {
-      return res.status(400).json({ success: false, error: 'Missing keyword or sites' });
-    }
+  if (!cleanKeyword || !sites || !sites.length) {
+    return res.status(400).json({ success: false, error: 'Missing keyword or sites' });
+  }
 
-    if (activeSearchPromise) {
-      console.log('[Dork] Waiting for previous search to complete...');
-      try { await activeSearchPromise; } catch(e) {}
-    }
+  if (activeSearchPromise) {
+    console.log('[Dork] Waiting for previous search to complete...');
+    try { await activeSearchPromise; } catch(e) {}
+  }
 
-    let resolveSearch;
-    activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
+  let resolveSearch;
+  activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
 
+  try {
+    const browser = await getBrowser();
+    const allMatches = [];
+
+    // Query Bing Videos vertical for tube platforms
+    const siteQuery = sites.map(s => `site:${s}`).join(' OR ');
+    const query = `${siteQuery} "${cleanKeyword}"`;
+    const videoUrl = `https://www.bing.com/videos/search?q=${encodeURIComponent(query)}&adlt=off&safesearch=0`;
+
+    console.log(`[Dork] Querying Bing Video index for "${cleanKeyword}" across ${sites.length} sites...`);
+
+    let page = null;
     try {
-      const browser = await getBrowser();
-      const allMatches = [];
-      const siteQuery = sites.map(s => `site:${s}`).join(' OR ');
-      const query = `(${siteQuery}) "${keyword}"`;
-      const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&adlt=off&safesearch=0`;
+      page = await browser.newPage();
 
-      console.log(`[Dork] Scanning for "${keyword}" across ${sites.length} sites...`);
-
-      let page = null;
-      try {
-          page = await browser.newPage();
-
-          // CRITICAL FIX: Inject the SafeSearch override cookie before loading
-          await page.setCookie({
-              name: 'SRCHHPGUSR',
-              value: 'ADLT=OFF',
-              domain: '.bing.com',
-              path: '/'
-          });
-
-          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
-          await new Promise(r => setTimeout(r, 3500));
-
-          // Click past any Bing adult warning splash screens
-          await page.evaluate(() => {
-              const btns = document.querySelectorAll('a#adlt_set_off, #adult_warning_safesearch, a.b_check, #bnp_btn_accept');
-              btns.forEach(b => b.click());
-          }).catch(() => {});
-
-          // Scroll to load lazy image thumbnails
-          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight/2)).catch(() => {});
-          await new Promise(r => setTimeout(r, 2000));
-          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
-          await new Promise(r => setTimeout(r, 2000));
-
-          const matches = await page.evaluate((js) => {
-              try { return new Function(js)(); } catch(e) { return []; }
-          }, DORK_EXTRACT_JS);
-
-          console.log(`[Dork] Found ${matches.length} matches`);
-          allMatches.push(...matches);
-
-      } catch(err) {
-          console.error(`[Dork] Error during extraction:`, err.message);
-      } finally {
-          if (page) await page.close().catch(() => {});
-      }
-
-      res.json({
-        success: true,
-        matches: allMatches,
-        meta: { count: allMatches.length }
+      await page.setCookie({
+        name: 'SRCHHPGUSR',
+        value: 'ADLT=OFF',
+        domain: '.bing.com',
+        path: '/'
       });
 
+      await page.goto(videoUrl, { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
+      await new Promise(r => setTimeout(r, 4000));
+
+      await page.evaluate(() => {
+        const btns = document.querySelectorAll('a#adlt_set_off, #adult_warning_safesearch, a.b_check, #bnp_btn_accept');
+        btns.forEach(b => b.click());
+      }).catch(() => {});
+
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2)).catch(() => {});
+      await new Promise(r => setTimeout(r, 2000));
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+      await new Promise(r => setTimeout(r, 2000));
+
+      const matches = await page.evaluate((js) => {
+        try { return new Function(js)(); } catch(e) { return []; }
+      }, ADULT_EXTRACT_JS);
+
+      console.log(`[Dork] Found ${matches.length} matches`);
+      allMatches.push(...matches);
+
     } catch (err) {
-      console.error('[Dork] Fatal error:', err);
-      res.status(500).json({ success: false, error: err.message });
+      console.error(`[Dork] Error during extraction:`, err.message);
     } finally {
-      resolveSearch();
-      activeSearchPromise = null;
+      if (page) await page.close().catch(() => {});
     }
+
+    res.json({
+      success: true,
+      matches: allMatches,
+      meta: { count: allMatches.length }
+    });
+
+  } catch (err) {
+    console.error('[Dork] Fatal error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  } finally {
+    resolveSearch();
+    activeSearchPromise = null;
+  }
 });
 
 server.listen(PORT, '127.0.0.1', () => {

@@ -125,12 +125,20 @@ class NativeFaceCropper {
     private fun scaleToMaxDimension(source: Bitmap): Bitmap {
         val safe = source.asSoftwareBitmap()
         val longest = max(safe.width, safe.height)
-        if (longest <= MAX_OUTPUT_DIMENSION) return safe
-        val scale = MAX_OUTPUT_DIMENSION.toFloat() / longest
+        
+        // Ensure minimum 640px for reverse image search engines, max 1600px
+        val targetScale = when {
+            longest > MAX_OUTPUT_DIMENSION -> MAX_OUTPUT_DIMENSION.toFloat() / longest
+            longest < MIN_PROBE_DIMENSION -> MIN_PROBE_DIMENSION.toFloat() / longest
+            else -> 1.0f
+        }
+
+        if (targetScale == 1.0f) return safe
+
         return Bitmap.createScaledBitmap(
             safe,
-            (safe.width * scale).toInt().coerceAtLeast(1),
-            (safe.height * scale).toInt().coerceAtLeast(1),
+            (safe.width * targetScale).toInt().coerceAtLeast(1),
+            (safe.height * targetScale).toInt().coerceAtLeast(1),
             true
         )
     }
@@ -158,5 +166,6 @@ class NativeFaceCropper {
         const val MAX_PITCH = 25f
         const val MAX_ROLL = 22f
         const val MAX_OUTPUT_DIMENSION = 1600
+        const val MIN_PROBE_DIMENSION = 640
     }
 }

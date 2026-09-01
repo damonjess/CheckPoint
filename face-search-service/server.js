@@ -191,28 +191,41 @@ async function scrapeEngine(engine, imageUrl) {
       window.chrome = { runtime: {} };
     });
 
-    console.log(`[${engine.name}] Loading...`);
+    console.log(`[${engine.name}] Navigating to probe URL...`);
 
-    await page.goto(engine.urlFor(imageUrl), { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
-    await new Promise(r => setTimeout(r, 4000));
+    await page.goto(engine.urlFor(imageUrl), {
+      waitUntil: 'networkidle2',
+      timeout: ENGINE_TIMEOUT_MS
+    });
 
+    // Dismiss common cookie/consent dialogues
     await page.evaluate(() => {
-      const consentBtns = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]'];
-      consentBtns.forEach(c => { const b = document.querySelector(c); if(b) b.click(); });
+      const consentSelectors = [
+        '#L2AGLb', '#bnp_btn_accept', '#accept-all',
+        'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]',
+        'a#adlt_set_off', '.bnp_btn_accept'
+      ];
+      consentSelectors.forEach(s => {
+        const el = document.querySelector(s);
+        if (el) el.click();
+      });
     }).catch(() => {});
 
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3)).catch(() => {});
+    // Allow dynamic results to settle in the DOM
+    await new Promise(r => setTimeout(r, 4500));
+
+    // Scroll to trigger lazy loading of thumbnail grids
+    await page.evaluate(() => window.scrollBy(0, 600)).catch(() => {});
     await new Promise(r => setTimeout(r, 2000));
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 1.5)).catch(() => {});
-    await new Promise(r => setTimeout(r, 2000));
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
-    await new Promise(r => setTimeout(r, 2500));
+
+    const pageTitle = await page.title();
+    console.log(`[${engine.name}] Page loaded: "${pageTitle.slice(0, 50)}"`);
 
     const matches = await page.evaluate((js) => {
       try { return new Function(js)(); } catch(e) { return []; }
     }, engine.extractJs);
 
-    console.log(`[${engine.name}] Found ${matches.length} matches`);
+    console.log(`[${engine.name}] Extracted ${matches.length} candidate(s)`);
     return matches.map(m => ({ ...m, source: engine.name }));
 
   } catch (err) {
@@ -235,35 +248,15 @@ app.post('/api/search', async (req, res) => {
     return res.status(400).json({ success: false, error: 'A public URL is required.' });
   }
 
-  if (activeSearchPromise) {
-    console.log('[Search] Waiting for previous active search to finish...');
-    try { await activeSearchPromise; } catch (_) {}
-  }
-
-  let resolveSearch;
-  activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
-
-  console.log(`\n[Search] Starting batched probe for: ${targetImage.slice(0, 45)}...`);
+  console.log(`\n[Search] Probe target: ${targetImage.slice(0, 50)}...`);
 
   try {
     const allMatches = [];
-    const BATCH_SIZE = 2;
 
-    // Process engines in batches of 2 to avoid Android OOM killer
-    for (let i = 0; i < ENGINES.length; i += BATCH_SIZE) {
-      const batch = ENGINES.slice(i, i + BATCH_SIZE);
-      console.log(`[Search] Executing batch: ${batch.map(e => e.name).join(', ')}`);
-
-      const batchPromises = batch.map(engine => scrapeEngine(engine, targetImage));
-      const settledResults = await Promise.allSettled(batchPromises);
-
-      settledResults.forEach((result, idx) => {
-        if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-          allMatches.push(...result.value);
-        } else if (result.status === 'rejected') {
-          console.error(`[${batch[idx].name}] Engine failed:`, result.reason?.message);
-        }
-      });
+    // Run sequentially to prevent CPU throttling on device
+    for (const engine of ENGINES) {
+      const matches = await scrapeEngine(engine, targetImage);
+      allMatches.push(...matches);
     }
 
     const uniqueMatches = [];
@@ -272,23 +265,20 @@ app.post('/api/search', async (req, res) => {
     for (const match of allMatches) {
       if (match.link && !seenUrls.has(match.link)) {
         seenUrls.add(match.link);
-        const isSocial = /(instagram|facebook|twitter|tiktok|linkedin|reddit|youtube|x\.com|threads|pinterest|vk\.com|tumblr|vsco)/i.test(match.link);
+        const isSocial = /(instagram|facebook|twitter|tiktok|linkedin|reddit|youtube|x\.com|threads|pinterest|vk\.com)/i.test(match.link);
         uniqueMatches.push({ ...match, isSocial });
       }
     }
 
-    console.log(`[Search] Completed. Aggregated ${uniqueMatches.length} unique candidates.`);
+    console.log(`[Search] Completed. Aggregated ${uniqueMatches.length} candidate(s).`);
     res.json({
       success: true,
       matches: uniqueMatches,
       meta: { count: uniqueMatches.length }
     });
   } catch (err) {
-    console.error('[Search] Fatal error:', err);
+    console.error('[Search] Server error:', err);
     res.status(500).json({ success: false, error: err.message });
-  } finally {
-    if (resolveSearch) resolveSearch();
-    activeSearchPromise = null;
   }
 });
 

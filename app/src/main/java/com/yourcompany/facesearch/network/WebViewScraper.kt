@@ -224,13 +224,26 @@ class WebViewScraper private constructor(
         site: String, 
         keyword: String,
         onLog: (String) -> Unit = {}
-    ): List<SerpVisualMatch> = scrapeEngine(
-        url = "https://www.bing.com/search?q=site:${site}+%22${java.net.URLEncoder.encode(keyword, "UTF-8")}%22&adlt=off&safesearch=0",
-        engineName = AdultSiteConfig.labelFor(site),
-        delayMs = 3000,
-        extractJs = DORK_EXTRACT_JS,
-        onLog = onLog
-    )
+    ): List<SerpVisualMatch> {
+        // Split terms so Name and City/Location are quoted separately
+        val tokens = keyword.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        val formattedQuery = if (tokens.size > 1) {
+            tokens.joinToString(" ") { "\"$it\"" }
+        } else {
+            "\"$keyword\""
+        }
+        
+        val encodedQuery = java.net.URLEncoder.encode("site:$site $formattedQuery", "UTF-8")
+        val targetUrl = "https://www.bing.com/search?q=$encodedQuery&adlt=off&safesearch=0"
+        
+        return scrapeEngine(
+            url = targetUrl,
+            engineName = AdultSiteConfig.labelFor(site),
+            delayMs = 3000,
+            extractJs = DORK_EXTRACT_JS,
+            onLog = onLog
+        )
+    }
 
     suspend fun scrapeBatchedAdultDork(
         sites: List<String>,

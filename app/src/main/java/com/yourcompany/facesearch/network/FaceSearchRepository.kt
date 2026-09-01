@@ -15,8 +15,10 @@ import java.util.concurrent.TimeUnit
 class FaceSearchRepository(private val context: Context) {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(45, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(45, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
@@ -152,72 +154,95 @@ class FaceSearchRepository(private val context: Context) {
                 }
             }
 
-            // 1. Check if the user manually typed a hint, or if visual search found names in web articles
-            val visualHints = if (!keywordHint.isNullOrBlank()) {
-                listOf(keywordHint.trim())
-            } else {
+            val harvestedHints = if (keywordHint.isNullOrBlank()) {
                 harvestSearchHints(allResults.toList())
-            }
-
-            // 2. AUTO-FALLBACK: If still empty, automatically pull from the saved Identity Profile card
-            val harvestedHints = if (visualHints.isEmpty()) {
-                val savedProfile = com.yourcompany.facesearch.data.IdentityProfileStore.load(context)
-                buildList {
-                    if (savedProfile.fullName.isNotBlank()) add(savedProfile.fullName.trim())
-                    if (savedProfile.handles.isNotBlank()) {
-                        savedProfile.handles.split(',', ';', '\n')
-                            .map { it.trim().removePrefix("@") }
-                            .filter { it.isNotBlank() }
-                            .forEach { add(it) }
-                    }
-                    if (savedProfile.aliases.isNotBlank()) {
-                        savedProfile.aliases.split(',', ';', '\n')
-                            .map { it.trim() }
-                            .filter { it.isNotBlank() }
-                            .forEach { add(it) }
-                    }
-                }.distinct()
-            } else {
-                visualHints
-            }
+            } else listOf(keywordHint.trim())
 
             if (harvestedHints.isNotEmpty()) {
-                val primaryName = harvestedHints.first()
-                onLog("Active target hint: '$primaryName' (auto-resolved). Running social lookup...")
-                
+                val primaryName = harvestedHints.first().trim()
                 val scraper = WebViewScraper.create(context)
                 try {
                     if (searchMode.equals("ADULT", ignoreCase = true)) {
+                        // ==========================================
+                        // 1. ADULT NETWORK DORKING BRANCH
+                        // ==========================================
                         onLog("Adult scan mode active: Running dork queries for '$primaryName' across adult networks...")
                         val chunks = AdultSiteConfig.SITES.chunked(5)
                         chunks.forEachIndexed { idx, siteBatch ->
+                            onLog("Scanning Adult Group #${idx + 1}...")
+                            
+                            // Try Termux Video Index Scraper first
                             val dorkHits = performTermuxDorkSearch(
                                 keyword = primaryName,
                                 sites = siteBatch,
                                 onLog = onLog
                             )
-                            allResults.addAll(dorkHits)
+                            
+                            if (dorkHits.isNotEmpty()) {
+                                // Fetch any missing metadata thumbnails concurrently in parallel
+                                val enrichedHits = coroutineScope {
+                                    dorkHits.map { hit ->
+                                        async {
+                                            if (hit.thumbnail.isNullOrBlank()) {
+                                                val metaThumb = extractMetadataThumbnail(hit.link.orEmpty())
+                                                hit.copy(thumbnail = metaThumb)
+                                            } else {
+                                                hit
+                                            }
+                                        }
+                                    }.awaitAll()
+                                }
+                                
+                                allResults.addAll(enrichedHits)
+                                onLog("✓ Termux Adult Group #${idx + 1} returned ${dorkHits.size} result(s)")
+                            }
+ else {
+                                // Fallback to In-App WebView scraper if Termux returned 0 or is offline
+                                val batchResults = scraper.scrapeBatchedAdultDork(
+                                    sites = siteBatch,
+                                    keyword = primaryName,
+                                    groupLabel = "Adult Group #${idx + 1}",
+                                    onLog = onLog
+                                )
+                                allResults.addAll(batchResults)
+                                onLog("✓ In-App Adult Group #${idx + 1} returned ${batchResults.size} result(s)")
+                            }
                         }
                     } else {
-                        // Global Social & Lifestyle Networks
-                        allResults.addAll(scraper.scrapeSocialDork("instagram.com", primaryName, onLog))
+                        // ==========================================
+                        // 2. STANDARD OSINT & REGIONAL LOOKUP BRANCH
+                        // ==========================================
+                        onLog("Discovered identity hint: '$primaryName'. Running UK & global profile lookup...")
+                        
+                        // Core Social Networks
                         allResults.addAll(scraper.scrapeSocialDork("facebook.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("instagram.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("linkedin.com/in", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("twitter.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("tiktok.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("tiktok.com/@", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("threads.net", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("pinterest.com", primaryName, onLog))
+                        
+                        // UK & Regional Directories
+                        allResults.addAll(scraper.scrapeSocialDork("192.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("thegazette.co.uk", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("grimsbytelegraph.co.uk", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("scunthorpetelegraph.co.uk", primaryName, onLog))
+                        
+                        // Image & Creator Platforms
+                        allResults.addAll(scraper.scrapeSocialDork("reddit.com/user", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("pinterest.co.uk", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("flickr.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("tumblr.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("vsco.co", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("vk.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("reddit.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("linktr.ee", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("twitch.tv", primaryName, onLog))
                     }
                 } finally {
                     scraper.destroy()
                 }
-            } else {
-                onLog("ℹ️ No name or profile hint available. Reverse-image search will rely purely on visual matching.")
+            } else if (searchMode.equals("ADULT", ignoreCase = true)) {
+                onLog("⚠️ Tip: For adult platform scanning, enter a name or username in OSINT TARGET HINT if reverse image search finds no text matches.")
             }
 
             onLog("Search complete. Retrieved ${allResults.size} total candidates.")
@@ -237,16 +262,10 @@ class FaceSearchRepository(private val context: Context) {
         val stopWords = setOf(
             "image", "photo", "picture", "wallpaper", "visual", "match", "stock", "vector",
             "search", "engine", "google", "bing", "yandex", "lens", "the", "and", "for", "with",
-            "amazon", "vest", "shirt", "apparel", "clothing", "camicie", "style", "shop", "store",
-            "t-shirt", "tee", "sleeve", "patchwork", "casual", "mens", "womens", "aliexpress", "temu",
-            "fotka", "foto", "pic", "pics", "images", "img", "teeth", "hair", "feet", "body", "legs",
-            "hot", "pregnant", "surgery", "plastic", "boyfriend", "girlfriend", "husband", "wife",
-            "dating", "outfit", "dress", "makeup", "look", "looks", "page", "celebrity", "gallery",
-            "index", "collection", "album", "download", "free", "video", "videos", "clip", "watch",
-            "movie", "movies", "actor", "actress", "model", "star", "birthday", "celebrates", "today",
-            "tiktok", "instagram", "facebook", "reddit", "twitter", "shein", "ebay", 
-            "news", "breaking", "update", "hurricane", "storm", "weather", "live", "report",
-            "details", "profile", "view", "click", "more", "related", "found", "near", "similar"
+            "amazon", "vest", "shirt", "apparel", "clothing", "style", "shop", "store",
+            // Exclude entertainment databases
+            "imdb", "wikipedia", "fandom", "themoviedb", "britannica", "wiki", "biography",
+            "actor", "actress", "celebrity", "movie", "film", "cast", "character", "tv"
         )
 
         candidates.forEach { match ->

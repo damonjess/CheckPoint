@@ -158,6 +158,11 @@ const ADULT_EXTRACT_JS = `
 
 const ENGINES = [
   {
+    name: 'Sogou Visual',
+    urlFor: (url) => `https://pic.sogou.com/ris?query=${encodeURIComponent(url)}&flag=1`,
+    extractJs: UNIVERSAL_EXTRACT_JS
+  },
+  {
     name: 'Google Lens',
     urlFor: (url) => `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(url)}`,
     extractJs: UNIVERSAL_EXTRACT_JS

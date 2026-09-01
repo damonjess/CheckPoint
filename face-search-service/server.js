@@ -14,7 +14,7 @@ const server = http.createServer(app);
 app.use(express.json({ limit: '10mb' }));
 
 const PORT = Number(process.env.PORT || 3000);
-const ENGINE_TIMEOUT_MS = 60_000;
+const ENGINE_TIMEOUT_MS = 45_000;
 
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
@@ -160,22 +160,26 @@ const ENGINES = [
   {
     name: 'Sogou Visual',
     urlFor: (url) => `https://pic.sogou.com/ris?query=${encodeURIComponent(url)}&flag=1`,
-    extractJs: UNIVERSAL_EXTRACT_JS
+    extractJs: UNIVERSAL_EXTRACT_JS,
+    waitUntil: 'domcontentloaded'
   },
   {
     name: 'Google Lens',
     urlFor: (url) => `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(url)}`,
-    extractJs: UNIVERSAL_EXTRACT_JS
+    extractJs: UNIVERSAL_EXTRACT_JS,
+    waitUntil: 'networkidle2'
   },
   {
     name: 'Bing Visual',
     urlFor: (url) => `https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${encodeURIComponent(url)}`,
-    extractJs: UNIVERSAL_EXTRACT_JS
+    extractJs: UNIVERSAL_EXTRACT_JS,
+    waitUntil: 'domcontentloaded'
   },
   {
     name: 'Yandex',
     urlFor: (url) => `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(url)}`,
-    extractJs: UNIVERSAL_EXTRACT_JS
+    extractJs: UNIVERSAL_EXTRACT_JS,
+    waitUntil: 'domcontentloaded'
   }
 ];
 
@@ -194,7 +198,7 @@ async function scrapeEngine(engine, imageUrl) {
     console.log(`[${engine.name}] Navigating to probe URL...`);
 
     await page.goto(engine.urlFor(imageUrl), {
-      waitUntil: 'networkidle2',
+      waitUntil: engine.waitUntil || 'networkidle2',
       timeout: ENGINE_TIMEOUT_MS
     });
 

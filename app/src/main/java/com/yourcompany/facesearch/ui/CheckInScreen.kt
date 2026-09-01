@@ -41,6 +41,7 @@ fun CheckInScreen(
     onProfileDiscoveryClick: () -> Unit,
     onSelectGalleryClick: () -> Unit,
     onRetryClick: () -> Unit,
+    onConfirmSearch: (Bitmap, Bitmap) -> Unit,
     onConfirmFreeSearch: (Bitmap) -> Unit,
     onTinEyeExactSearch: (Bitmap) -> Unit,
     onLoadHighRes: (WebMatchDisplay) -> Unit
@@ -242,7 +243,7 @@ fun CheckInScreen(
                             croppedBitmap = uiState.faceBitmap,
                             nameHint = targetHint,
                             searchMode = searchMode,
-                            onConfirm = { onConfirmFreeSearch(uiState.faceBitmap) },
+                            onConfirm = { onConfirmSearch(uiState.faceBitmap, uiState.sceneBitmap) },
                             onTinEyeExactSearch = { onTinEyeExactSearch(uiState.faceBitmap) },
                             onCancel = onRetryClick
                         )

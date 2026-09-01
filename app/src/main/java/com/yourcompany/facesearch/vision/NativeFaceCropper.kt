@@ -76,14 +76,15 @@ class NativeFaceCropper {
         val source = bitmap.asSoftwareBitmap()
         val face = findLargestFace(source) ?: return null
         val box = face.boundingBox.clampTo(source.width, source.height)
-        // FIX: Scaled down to remove neck and shoulders completely
-        val widthScale = 1.15f // Was 1.25f
-        val heightScale = 1.25f // Was 1.55f
+        
+        // FIX: Match FaceDetectorHelper EXACTLY to ensure source and result embeddings map correctly
+        val widthScale = 1.25f
+        val heightScale = 1.55f
         
         val crop = cropAround(
             source = source,
             centerX = box.centerX(),
-            centerY = (box.centerY() - box.height() * 0.05f).toInt(),
+            centerY = (box.centerY() - box.height() * 0.08f).toInt(), // Match 0.08f shift upward
             width = max(box.width(), (box.width() * widthScale).toInt()),
             height = max(box.height(), (box.height() * heightScale).toInt())
         )

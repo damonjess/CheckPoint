@@ -232,6 +232,34 @@ fun SuccessContent(
             }
         }
 
+        if (uiState.adultMatches.isNotEmpty()) {
+            if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty() || uiState.tinEyeMatches.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            Text(
+                text = "ADULT PLATFORM HITS",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = Color(0xFFE53935) // Reddish for Adult
+            )
+            Text(
+                text = "These results were found on adult networks using identity dorks. They skip local face verification to ensure coverage.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.DarkGray
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            uiState.adultMatches.forEach { match ->
+                MatchCard(
+                    match = match,
+                    isPrimary = false,
+                    debugMode = debugMode,
+                    onLoadHighRes = { onLoadHighRes(match) },
+                    onClick = { onMatchClick(match) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+
         if (visualLeads.isNotEmpty()) {
             if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty() || uiState.tinEyeMatches.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(12.dp))

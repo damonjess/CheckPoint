@@ -13,11 +13,12 @@ sealed class CheckInUiState {
     data class Success(
         val matches: List<WebMatchDisplay>,
         val tinEyeMatches: List<WebMatchDisplay> = emptyList(),
+        val adultMatches: List<WebMatchDisplay> = emptyList(),
         val logs: List<String> = emptyList(),
         val termuxAvailable: Boolean = true,
         val isolatedFace: Bitmap? = null
     ) : CheckInUiState()
-    data class Confirming(val faceBitmap: Bitmap) : CheckInUiState()
+    data class Confirming(val faceBitmap: Bitmap, val sceneBitmap: Bitmap) : CheckInUiState()
     data class NoFaceDetected(
         val reasons: List<String> = emptyList(),
         val logs: List<String> = emptyList()

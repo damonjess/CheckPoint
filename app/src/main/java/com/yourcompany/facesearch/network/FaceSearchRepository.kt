@@ -38,10 +38,11 @@ class FaceSearchRepository(private val context: Context) {
         imageUrl: String? = null,
         sceneUrl: String? = null,
         @Suppress("UNUSED_PARAMETER") deepCrawl: Boolean = false,
-        @Suppress("UNUSED_PARAMETER") searchMode: String = "PRECISION",
-        @Suppress("UNUSED_PARAMETER") includeExactLensMatches: Boolean = false,
+        searchMode: String = "PRECISION",
+        includeExactLensMatches: Boolean = false,
         @Suppress("UNUSED_PARAMETER") skipVisualEngines: Boolean = false,
         enginesToSkip: Set<String> = emptySet(),
+        skipTermux: Boolean = false,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = searchMutex.withLock {
         withContext(Dispatchers.IO) {
@@ -61,7 +62,7 @@ class FaceSearchRepository(private val context: Context) {
                 return@withContext emptyList()
             }
 
-            if (isLocalBackendAvailable()) {
+            if (!skipTermux && isLocalBackendAvailable()) {
                 onLog("Querying Termux scraper backend...")
                 val termuxResponse = performLocalServerSearch(
                     bitmap = bitmap,
@@ -152,27 +153,74 @@ class FaceSearchRepository(private val context: Context) {
             }
 
             val harvestedHints = if (keywordHint.isNullOrBlank()) {
-                harvestSearchHints(allResults.toList())
-            } else listOf(keywordHint)
+                val hints = harvestSearchHints(allResults.toList())
+                if (hints.isNotEmpty()) onLog("Harvested hints from visual search: ${hints.joinToString(", ")}")
+                hints
+            } else {
+                onLog("Using provided identity hint: $keywordHint")
+                listOf(keywordHint)
+            }
 
             if (harvestedHints.isNotEmpty()) {
                 val primaryName = harvestedHints.first()
-                onLog("Discovered identity hint: '$primaryName'. Running social lookup...")
                 val scraper = WebViewScraper.create(context)
                 try {
-                    allResults.addAll(scraper.scrapeSocialDork("instagram.com", primaryName))
-                    allResults.addAll(scraper.scrapeSocialDork("facebook.com", primaryName))
-                    allResults.addAll(scraper.scrapeSocialDork("twitter.com", primaryName))
-                    allResults.addAll(scraper.scrapeSocialDork("tiktok.com", primaryName))
-                    allResults.addAll(scraper.scrapeSocialDork("linktr.ee", primaryName))
-                    allResults.addAll(scraper.scrapeSocialDork("twitch.tv", primaryName))
-                    allResults.addAll(scraper.scrapeSocialDork("patreon.com", primaryName))
-                    allResults.addAll(scraper.scrapeSocialDork("bsky.app", primaryName))
-                    allResults.addAll(scraper.scrapeSocialDork("mastodon.social", primaryName))
-                    allResults.addAll(scraper.scrapeSocialDork("behance.net", primaryName))
+                    if (searchMode.equals("ADULT", ignoreCase = true)) {
+                        onLog("Adult scan mode active: Running unrestricted dork queries for '$primaryName' across adult networks...")
+                        
+                        // Try Termux dorking first as it's more reliable
+                        val termuxDorkResults = if (isLocalBackendAvailable()) {
+                            performTermuxDorkSearch(primaryName, AdultSiteConfig.SITES, onLog)
+                        } else emptyList()
+
+                        if (termuxDorkResults.isNotEmpty()) {
+                            allResults.addAll(termuxDorkResults)
+                        } else {
+                            // Fallback to in-app WebView dorking
+                            val chunks = AdultSiteConfig.SITES.chunked(5)
+                            chunks.forEachIndexed { idx, siteBatch ->
+                                val batchResults = scraper.scrapeBatchedAdultDork(
+                                    sites = siteBatch,
+                                    keyword = primaryName,
+                                    groupLabel = "Adult Networks Group #${idx + 1}",
+                                    onLog = onLog
+                                )
+                                allResults.addAll(batchResults)
+                            }
+                        }
+                    } else {
+                        onLog("Discovered identity hint: '$primaryName'. Running social lookup...")
+                        
+                        // Try Termux dorking for social media if available
+                        val termuxSocialResults = if (isLocalBackendAvailable()) {
+                            performTermuxDorkSearch(primaryName, listOf(
+                                "instagram.com", "facebook.com", "twitter.com", "tiktok.com",
+                                "linktr.ee", "twitch.tv", "patreon.com", "bsky.app", 
+                                "mastodon.social", "behance.net"
+                            ), onLog)
+                        } else emptyList()
+
+                        if (termuxSocialResults.isNotEmpty()) {
+                            allResults.addAll(termuxSocialResults)
+                        } else {
+                            // WebView fallback
+                            allResults.addAll(scraper.scrapeSocialDork("instagram.com", primaryName, onLog))
+                            allResults.addAll(scraper.scrapeSocialDork("facebook.com", primaryName, onLog))
+                            allResults.addAll(scraper.scrapeSocialDork("twitter.com", primaryName, onLog))
+                            allResults.addAll(scraper.scrapeSocialDork("tiktok.com", primaryName, onLog))
+                            allResults.addAll(scraper.scrapeSocialDork("linktr.ee", primaryName, onLog))
+                            allResults.addAll(scraper.scrapeSocialDork("twitch.tv", primaryName, onLog))
+                            allResults.addAll(scraper.scrapeSocialDork("patreon.com", primaryName, onLog))
+                            allResults.addAll(scraper.scrapeSocialDork("bsky.app", primaryName, onLog))
+                            allResults.addAll(scraper.scrapeSocialDork("mastodon.social", primaryName, onLog))
+                            allResults.addAll(scraper.scrapeSocialDork("behance.net", primaryName, onLog))
+                        }
+                    }
                 } finally {
                     scraper.destroy()
                 }
+            } else if (searchMode.equals("ADULT", ignoreCase = true)) {
+                onLog("⚠️ Tip: Adult platform scanning was skipped because no identity hints were found. Enter a name or username in OSINT TARGET HINT to force a scan.")
             }
 
             onLog("Search complete. Retrieved ${allResults.size} total candidates.")
@@ -181,7 +229,11 @@ class FaceSearchRepository(private val context: Context) {
     }
 
     private fun harvestSearchHints(matches: List<SerpVisualMatch>): List<String> {
-        val candidates = matches.filter { !it.title.isNullOrBlank() && it.title != "Visual Match" && it.title != "Visual Candidate" }
+        // Broadened filter: Accept titles even if they seem generic, as long as they aren't EXACTLY "Visual Match"
+        val candidates = matches.filter { 
+            val title = it.title?.lowercase() ?: ""
+            title.isNotBlank() && title != "visual match" && title != "visual candidate" && title != "visual matches"
+        }
         if (candidates.isEmpty()) return emptyList()
 
         val hints = mutableSetOf<String>()
@@ -197,29 +249,49 @@ class FaceSearchRepository(private val context: Context) {
             "index", "collection", "album", "download", "free", "video", "videos", "clip", "watch",
             "movie", "movies", "actor", "actress", "model", "star", "birthday", "celebrates", "today",
             "tiktok", "instagram", "facebook", "reddit", "twitter", "shein", "ebay", 
-            "news", "breaking", "update", "hurricane", "storm", "weather", "live", "report" // NEW: News blockers
+            "news", "breaking", "update", "hurricane", "storm", "weather", "live", "report",
+            "details", "profile", "view", "click", "more", "related", "found", "near", "similar"
         )
 
         candidates.forEach { match ->
-            // Strip anything after common separators
-            val cleanTitle = match.title.orEmpty()
-                .replace(Regex("(?i)[|\\-–—:(\\[].*"), "") 
+            val title = match.title.orEmpty()
+            
+            // Clean common prefixes/suffixes and punctuation
+            var cleanTitle = title
+                .replace(Regex("(?i)[|\\-–—:(\\[].*"), "")
+                .replace(Regex("[^a-zA-Z0-9\\s]"), "")
                 .trim()
-
-            // Remove numbers
-            if (cleanTitle.any { it.isDigit() }) return@forEach
 
             val words = cleanTitle.split(Regex("\\s+")).filter { it.isNotBlank() }
             
-            // STRICT NAME RULE: Must be exactly 2 or 3 words. 
-            // "Hurricane Dorian" is 2 words, so the stopWords list catches it.
-            if (words.size in 2..3 && words.none { it.lowercase() in stopWords }) {
-                // Only take the first two words (First Name + Last Name)
-                val possibleName = words.take(2).joinToString(" ")
-                hints.add(possibleName)
+            if (cleanTitle.all { it.isDigit() || it.isWhitespace() }) return@forEach
+
+            // If we have 2+ words and none are stopWords, it's a very high quality hint (likely a name)
+            if (words.size >= 2 && words.none { it.lowercase() in stopWords }) {
+                hints.add(cleanTitle)
+            } else if (words.size == 1 && words[0].length > 3 && words[0].lowercase() !in stopWords) {
+                // Also accept single words if they are long/unique enough
+                hints.add(words[0])
             }
         }
-        return hints.toList().take(3)
+        
+        // If we found nothing, be even less strict: just take the most frequent non-stop words
+        if (hints.isEmpty()) {
+            val allWords = candidates.flatMap { it.title.orEmpty().lowercase().split(Regex("\\s+")) }
+                .filter { it.length > 3 && it !in stopWords }
+                .groupingBy { it }
+                .eachCount()
+                .entries
+                .sortedByDescending { it.value }
+                .take(3)
+                .map { it.key }
+            
+            if (allWords.isNotEmpty()) {
+                hints.add(allWords.joinToString(" "))
+            }
+        }
+
+        return hints.toList().take(5)
     }
 
     suspend fun performLocalServerSearch(
@@ -274,8 +346,6 @@ class FaceSearchRepository(private val context: Context) {
             emptyList()
         }
     }
-
-    // RESTORED FUNCTIONS:
 
     suspend fun extractHighResMedia(url: String): String? = withContext(Dispatchers.IO) {
         try {

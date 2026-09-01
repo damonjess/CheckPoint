@@ -12,8 +12,7 @@ class FaceVerifier(context: Context) {
     private val faceCropper = NativeFaceCropper()
     
     companion object {
-        // Lowered from 0.68f to 0.58f to accept more highly-probable look-alikes
-        const val VERIFICATION_THRESHOLD = 0.58f
+        const val VERIFICATION_THRESHOLD = 0.68f
     }
 
     suspend fun verifyFaceMatch(
@@ -36,7 +35,8 @@ class FaceVerifier(context: Context) {
         return withContext(Dispatchers.Default) {
             try {
                 val safeBitmap = ensureSoftwareBitmap(searchResultBitmap)
-                val resultFace = faceCropper.getTightFaceCrop(safeBitmap) ?: return@withContext null
+                // FIX: Use cropAndAlignFace instead of getTightFaceCrop to ensure embedding alignment matches source
+                val resultFace = faceCropper.cropAndAlignFace(safeBitmap) ?: return@withContext null
                 val resultEmbedding = faceEmbedder.getEmbedding(resultFace) ?: return@withContext null
                 val similarity = FaceMatcherExt.cosineSimilarity(sourceEmbedding, resultEmbedding)
                 Pair(similarity, resultEmbedding)

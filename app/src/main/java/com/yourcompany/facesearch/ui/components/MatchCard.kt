@@ -253,29 +253,41 @@ private fun PrimaryMatchContent(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Handle
-        Surface(
-            color = Color(0xFFF5F5F5),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .padding(bottom = 8.dp)
-                .fillMaxWidth(0.85f)   // don't stretch full width
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+        // Name and Handle
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = match.displayName,
+                fontWeight = FontWeight.Black,
+                fontSize = 18.sp,
+                color = Color.Black,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Surface(
+                color = Color(0xFFF5F5F5),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(0.85f)
             ) {
-                Text(
-                    text = handle,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = Color.DarkGray,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis   // truncates with ... instead of overflow
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(Icons.AutoMirrored.Filled.Launch, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.Gray)
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = handle,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = Color.Gray,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(Icons.AutoMirrored.Filled.Launch, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.Gray)
+                }
             }
         }
         
@@ -395,7 +407,16 @@ private fun SecondaryMatchContent(
                 }
             }
             
-            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = match.displayName,
+                fontWeight = FontWeight.Black,
+                fontSize = 15.sp,
+                color = Color.Black,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -404,8 +425,8 @@ private fun SecondaryMatchContent(
                 Text(
                     text = handle,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = Color.DarkGray,
+                    fontSize = 12.sp,
+                    color = Color.Gray,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)

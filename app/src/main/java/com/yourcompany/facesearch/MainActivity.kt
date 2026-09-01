@@ -135,6 +135,7 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         onRetryClick = { checkInViewModel.onRetry() },
+                        onConfirmSearch = { face, scene -> checkInViewModel.onConfirmSearch(face, scene) },
                         onConfirmFreeSearch = { checkInViewModel.onConfirmFreeSearch(it) },
                         onTinEyeExactSearch = { checkInViewModel.onTinEyeExactSearch(it) },
                         onLoadHighRes = { checkInViewModel.loadHighRes(it) }

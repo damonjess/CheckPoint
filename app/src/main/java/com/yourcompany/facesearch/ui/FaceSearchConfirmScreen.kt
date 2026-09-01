@@ -3,9 +3,7 @@ package com.yourcompany.facesearch.ui
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -29,17 +27,24 @@ fun FaceSearchConfirmScreen(
 ) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
-            .verticalScroll(rememberScrollState()),
+            .fillMaxWidth()
+            .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = if (searchMode == SearchMode.AGGRESSIVE) "Confirm Aggressive Search" else "Confirm Face Search",
+            text = when (searchMode) {
+                SearchMode.AGGRESSIVE -> "Confirm Aggressive Search"
+                SearchMode.ADULT -> "Confirm Adult Scan"
+                else -> "Confirm Face Search"
+            },
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            color = if (searchMode == SearchMode.AGGRESSIVE) Color.Red else MaterialTheme.colorScheme.onSurface
+            color = when (searchMode) {
+                SearchMode.AGGRESSIVE -> Color.Red
+                SearchMode.ADULT -> Color(0xFFE53935)
+                else -> MaterialTheme.colorScheme.onSurface
+            }
         )
         
         Spacer(modifier = Modifier.height(24.dp))
@@ -70,13 +75,21 @@ fun FaceSearchConfirmScreen(
                 .fillMaxWidth()
                 .height(54.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (searchMode == SearchMode.AGGRESSIVE) Color.Red else Color(0xFFFFB000)
+                containerColor = when (searchMode) {
+                    SearchMode.AGGRESSIVE -> Color.Red
+                    SearchMode.ADULT -> Color(0xFFE53935)
+                    else -> Color(0xFFFFB000)
+                }
             ),
             enabled = true
         ) {
             Text(
-                text = if (searchMode == SearchMode.AGGRESSIVE) "🔥 LAUNCH AGGRESSIVE SCAN" else "Launch Free Search", 
-                color = if (searchMode == SearchMode.AGGRESSIVE) Color.White else Color.Black, 
+                text = when (searchMode) {
+                    SearchMode.AGGRESSIVE -> "🔥 LAUNCH AGGRESSIVE SCAN"
+                    SearchMode.ADULT -> "🔞 LAUNCH ADULT SCAN"
+                    else -> "Launch Free Search"
+                }, 
+                color = Color.White, 
                 fontWeight = FontWeight.Bold, 
                 fontSize = 16.sp
             )

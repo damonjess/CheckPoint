@@ -13,6 +13,7 @@ import coil3.request.ImageRequest
 import coil3.imageLoader
 import coil3.toBitmap
 import coil3.request.allowHardware
+import com.yourcompany.facesearch.network.AdultSiteConfig
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.FreeImageHost
 import com.yourcompany.facesearch.network.LocalServer
@@ -117,7 +118,8 @@ class CheckInViewModel(
 
     private fun connectToTermuxWebSocket(baseUrl: String) {
         try {
-            val wsUrl = baseUrl.removeSuffix("/").replace("http://", "ws://").replace("https://", "wss://")
+            val baseWsUrl = baseUrl.removeSuffix("/").replace("http://", "ws://").replace("https://", "wss://")
+            val wsUrl = "$baseWsUrl/ws"
             val request = Request.Builder().url(wsUrl).build()
             val client = OkHttpClient()
             
@@ -194,20 +196,14 @@ class CheckInViewModel(
                                 "sharpness ${quality.sharpness.toInt()}."
                         )
                         
-                        // [PIPELINE STEP 2: Feature Extraction & Biometric Mapping]
-                        addLog("STEP 2: Feature Extraction & Biometric Mapping in progress...")
-                        addLog("Analyzing unique structural markers: interpupillary distance, bridge of nose, jawline curvature, and lip shape.")
-                        
-                        // [PIPELINE STEP 3: Creating a Face Embedding (The \"Faceprint\")]
-                        addLog("STEP 3: Generating Biometric Faceprint...")
-                        addLog("Spatial geometries translated into a mathematically compressed embedding string.")
-                        
                         LocalServer.stageProbe(detection.croppedFace, isFaceCrop = true)
-                        performSearchPipeline(
-                            sceneBitmap = searchPhoto,
+                        
+                        // Introduce Confirming state to allow user to review face and add/edit hint
+                        uiState = CheckInUiState.Confirming(
                             faceBitmap = detection.croppedFace,
-                            fullResSceneBitmap = originalFullResBitmap
+                            sceneBitmap = searchPhoto
                         )
+                        isSearching = false // Stop the loading spinner while confirming
                     }
                     is FaceDetectionResult.MultipleFacesFound -> {
                         uiState = CheckInUiState.NoFaceDetected(
@@ -342,6 +338,33 @@ class CheckInViewModel(
         }
     }
 
+    fun onConfirmSearch(faceBitmap: Bitmap, sceneBitmap: Bitmap) {
+        if (isSearching) return
+        isSearching = true
+        viewModelScope.launch {
+            try {
+                // [PIPELINE STEP 2: Feature Extraction & Biometric Mapping]
+                addLog("STEP 2: Feature Extraction & Biometric Mapping in progress...")
+                addLog("Analyzing unique structural markers: interpupillary distance, bridge of nose, jawline curvature, and lip shape.")
+                
+                // [PIPELINE STEP 3: Creating a Face Embedding (The \"Faceprint\")]
+                addLog("STEP 3: Generating Biometric Faceprint...")
+                addLog("Spatial geometries translated into a mathematically compressed embedding string.")
+                
+                performSearchPipeline(
+                    sceneBitmap = sceneBitmap,
+                    faceBitmap = faceBitmap,
+                    fullResSceneBitmap = originalFullResBitmap
+                )
+            } catch (e: Exception) {
+                Log.e("CheckIn", "Search pipeline failed", e)
+                uiState = CheckInUiState.Error("Search failed: ${e.message}")
+            } finally {
+                isSearching = false
+            }
+        }
+    }
+
     fun onConfirmFreeSearch(bitmap: Bitmap) {
         val toSearch = originalFullResBitmap ?: bitmap
         freeSearchHelper.launchDirectSearch(toSearch, targetHint)
@@ -409,6 +432,24 @@ class CheckInViewModel(
         return metadata.contains("tineye")
     }
 
+    private fun isAdultResult(match: SerpVisualMatch): Boolean {
+        val metadata = listOfNotNull(match.title, match.link, match.source)
+            .joinToString(" ")
+            .lowercase(Locale.US)
+
+        // Check against domains
+        if (AdultSiteConfig.SITES.any { site -> metadata.contains(site.lowercase()) }) return true
+        
+        // Check against labels (e.g. "Pornhub", "XVideos")
+        val sourceLower = match.source?.lowercase() ?: ""
+        if (AdultSiteConfig.SITES.any { site -> 
+            val label = AdultSiteConfig.labelFor(site).lowercase()
+            sourceLower.contains(label) || metadata.contains(label)
+        }) return true
+        
+        return false
+    }
+
     private suspend fun performSearchPipeline(
         sceneBitmap: Bitmap,
         faceBitmap: Bitmap,
@@ -452,12 +493,12 @@ class CheckInViewModel(
 
         // Upgrade 5: EXIF Metadata Extraction
         val exifHints = extractExifHints(sceneBitmap)
-        val combinedHint = listOf(targetHint, exifHints)
-            .filter { it.isNotBlank() }
-            .joinToString(" ")
-            .ifBlank { null }
+        // Prioritize user-provided hint over EXIF metadata for dorking queries
+        val combinedHint = targetHint.ifBlank { exifHints }.ifBlank { null }
 
-        if (exifHints.isNotBlank()) {
+        if (targetHint.isNotBlank()) {
+            addLog("Using OSINT target hint: $targetHint")
+        } else if (exifHints.isNotBlank()) {
             addLog("EXIF hints found: $exifHints")
         }
 
@@ -632,6 +673,7 @@ class CheckInViewModel(
                         includeExactLensMatches = broadenLensCoverage,
                         skipVisualEngines = false,
                         enginesToSkip = enginesToSkip,
+                        skipTermux = true,
                         onLog = { message -> handleScraperLog(message) }
                     )
                 } catch (e: Exception) {
@@ -715,10 +757,21 @@ class CheckInViewModel(
             addLog("TinEye returned $tinEyeRawCount raw links; ${tinEyeOccurrences.size} were usable external image-occurrence pages.")
         }
 
-        // Remove TinEye results from the pool that goes through face verification
-        val filteredRawResults = allRawResults.filterNot(::isTinEyeResult)
+        // Separate adult results to ensure they aren't filtered out by the face detector
+        val adultRawCount = allRawResults.count(::isAdultResult)
+        val adultOccurrences = allRawResults
+            .filter(::isAdultResult)
+            .filter { !it.link.isNullOrBlank() }
+            .distinctBy { it.link }
 
-        if (filteredRawResults.isEmpty() && tinEyeOccurrences.isEmpty()) {
+        if (adultRawCount > 0) {
+            addLog("Adult scan returned $adultRawCount raw links; ${adultOccurrences.size} were unique platform hits.")
+        }
+
+        // Remove TinEye and Adult results from the pool that goes through face verification
+        val filteredRawResults = allRawResults.filterNot(::isTinEyeResult).filterNot(::isAdultResult)
+
+        if (filteredRawResults.isEmpty() && tinEyeOccurrences.isEmpty() && adultOccurrences.isEmpty()) {
             val message = if (blockedEngines.isNotEmpty()) {
                 "${blockedEngines.joinToString()} requested an access check and returned no candidates. Open your photo in Lens to continue manually."
             } else {
@@ -767,11 +820,17 @@ class CheckInViewModel(
         val tinEyeDisplayMatches = tinEyeOccurrences.map { match ->
             mapToDisplay(match).copy(
                 source = "TinEye Occurrence",
-                score = 500 // Generic score for TinEye results
+                score = 500
             )
         }
 
-        if (verifiedMatches.isEmpty() && likelyMatches.isEmpty() && retainedVisualCandidates.isEmpty() && tinEyeDisplayMatches.isEmpty()) {
+        val adultDisplayMatches = adultOccurrences.map { match ->
+            mapToDisplay(match).copy(
+                score = 600 // Slight boost for adult platform hits
+            )
+        }
+
+        if (verifiedMatches.isEmpty() && likelyMatches.isEmpty() && retainedVisualCandidates.isEmpty() && tinEyeDisplayMatches.isEmpty() && adultDisplayMatches.isEmpty()) {
             addLog("No candidate with one visible face remained after local filtering.")
             uiState = CheckInUiState.NoMatch(
                 logs = currentLogs.toList(),
@@ -784,24 +843,24 @@ class CheckInViewModel(
             return
         }
 
-        if (verifiedMatches.isEmpty() && likelyMatches.isEmpty() && retainedVisualCandidates.isEmpty() && tinEyeDisplayMatches.isNotEmpty()) {
-            addLog("No locally verified face match was found, but ${tinEyeDisplayMatches.size} TinEye occurrence(s) were identified.")
-            updateResultsLive(emptyList(), useTermux, tinEyeDisplayMatches)
-            termuxWs?.close(1000, "TinEye only")
+        if (verifiedMatches.isEmpty() && likelyMatches.isEmpty() && retainedVisualCandidates.isEmpty() && (tinEyeDisplayMatches.isNotEmpty() || adultDisplayMatches.isNotEmpty())) {
+            addLog("No locally verified face match was found, but ${tinEyeDisplayMatches.size} TinEye and ${adultDisplayMatches.size} adult platform hit(s) were identified.")
+            updateResultsLive(emptyList(), useTermux, tinEyeDisplayMatches, adultDisplayMatches)
+            termuxWs?.close(1000, "Occurrence hits only")
             termuxWs = null
             return
         }
 
         if (verifiedMatches.isEmpty() && likelyMatches.isEmpty()) {
-            addLog("No locally verified or possible face match was found. Showing ${unverifiedLeads.size} review lead(s), ${fallbackCandidates.size} visual candidate(s), and ${tinEyeDisplayMatches.size} TinEye occurrence(s).")
-            updateResultsLive(retainedVisualCandidates, useTermux, tinEyeDisplayMatches)
+            addLog("No locally verified or possible face match was found. Showing ${unverifiedLeads.size} review lead(s), ${fallbackCandidates.size} visual candidate(s), ${tinEyeDisplayMatches.size} TinEye, and ${adultDisplayMatches.size} adult hit(s).")
+            updateResultsLive(retainedVisualCandidates, useTermux, tinEyeDisplayMatches, adultDisplayMatches)
             termuxWs?.close(1000, "Leads only")
             termuxWs = null
             return
         }
 
-        updateResultsLive(verifiedMatches + likelyMatches + retainedVisualCandidates, useTermux, tinEyeDisplayMatches)
-        addLog("Showing ${verifiedMatches.size} verified, ${likelyMatches.size} possible face match(es), ${unverifiedLeads.size} review lead(s), ${fallbackCandidates.size} visual candidate(s), and ${tinEyeDisplayMatches.size} TinEye occurrence(s).")
+        updateResultsLive(verifiedMatches + likelyMatches + retainedVisualCandidates, useTermux, tinEyeDisplayMatches, adultDisplayMatches)
+        addLog("Showing ${verifiedMatches.size} verified, ${likelyMatches.size} possible face match(es), ${unverifiedLeads.size} review lead(s), ${fallbackCandidates.size} visual candidate(s), ${tinEyeDisplayMatches.size} TinEye, and ${adultDisplayMatches.size} adult hit(s).")
         termuxWs?.close(1000, "Success")
         termuxWs = null
     }
@@ -809,9 +868,10 @@ class CheckInViewModel(
     private fun updateResultsLive(
         newResults: List<SerpVisualMatch>,
         termuxAvailable: Boolean = true,
-        tinEyeMatches: List<WebMatchDisplay> = emptyList()
+        tinEyeMatches: List<WebMatchDisplay> = emptyList(),
+        adultMatches: List<WebMatchDisplay> = emptyList()
     ) {
-        Log.e("CheckIn", "CONSOLE_LOG: updateResultsLive called with ${newResults.size} new results and ${tinEyeMatches.size} TinEye matches")
+        Log.e("CheckIn", "CONSOLE_LOG: updateResultsLive called with ${newResults.size} new results, ${tinEyeMatches.size} TinEye, and ${adultMatches.size} Adult matches")
         val currentState = uiState
         val existingMatches = if (currentState is CheckInUiState.Success) {
             currentState.matches
@@ -832,6 +892,7 @@ class CheckInViewModel(
         uiState = CheckInUiState.Success(
             matches = allMatches,
             tinEyeMatches = (if (currentState is CheckInUiState.Success) currentState.tinEyeMatches else emptyList()) + tinEyeMatches,
+            adultMatches = (if (currentState is CheckInUiState.Success) currentState.adultMatches else emptyList()) + adultMatches,
             logs = currentLogs.toList(),
             termuxAvailable = termuxAvailable,
             isolatedFace = isolatedFace

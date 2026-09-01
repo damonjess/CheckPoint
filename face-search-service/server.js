@@ -10,28 +10,6 @@ puppeteer.use(StealthPlugin());
 
 const app = express();
 const server = http.createServer(app);
-const WebSocket = require('ws');
-const wss = new WebSocket.Server({ noServer: true });
-
-// WebSocket progress broadcast
-function broadcastProgress(message, progress) {
-  const data = JSON.stringify({ type: 'progress', message, progress });
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(data);
-    }
-  });
-}
-
-server.on('upgrade', (request, socket, head) => {
-  if (request.url === '/ws') {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
-    });
-  } else {
-    socket.destroy();
-  }
-});
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -141,6 +119,43 @@ const UNIVERSAL_EXTRACT_JS = `
     return items;
 `;
 
+const DORK_EXTRACT_JS = `
+    var items = [], seen = new Set();
+    // Select both standard web results and Bing adult video carousels (.mc_vtvc, .vr_items, .dg_u)
+    var rows = document.querySelectorAll('.b_algo, .mc_vtvc, .vr_items, .dg_u, a.thumb');
+
+    rows.forEach(function(row){
+        try {
+            var a = row.tagName === 'A' ? row : row.querySelector('h2 a, .b_title a, a[href^="http"]');
+            if(!a) return;
+            var href = a.href.split('#')[0];
+            if(!href || href.indexOf('http') !== 0 || seen.has(href)) return;
+
+            var lowHref = href.toLowerCase();
+            if (lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('microsoft.com') >= 0) return;
+
+            var title = (row.innerText || a.getAttribute('aria-label') || a.textContent || 'Adult Candidate').replace(/\\s+/g,' ').trim();
+            if(title.length < 3) return;
+
+            var img = row.querySelector('img') || row.closest('div')?.querySelector('img');
+            var thumb = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
+
+            // Strict gate: If there is no thumbnail, we cannot face match it
+            if(!thumb || thumb.length < 15) return;
+
+            seen.add(href);
+            items.push({
+                title: title.slice(0, 150),
+                link: href,
+                thumbnail: thumb,
+                source: 'Dork',
+                score: 350
+            });
+        } catch(e){}
+    });
+    return items;
+`;
+
 const ENGINES = [
   {
     name: 'Google Lens',
@@ -163,13 +178,8 @@ async function scrapeEngine(engine, imageUrl) {
   const browser = await getBrowser();
   let page = null;
 
-  const engineTimeout = setTimeout(() => {
-    console.error(`[${engine.name}] Global engine timeout triggered`);
-  }, ENGINE_TIMEOUT_MS + 15000);
-
   try {
     page = await browser.newPage();
-    page.setDefaultTimeout(ENGINE_TIMEOUT_MS);
 
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
@@ -177,21 +187,8 @@ async function scrapeEngine(engine, imageUrl) {
     });
 
     console.log(`[${engine.name}] Loading...`);
-    broadcastProgress(`[${engine.name}] Loading...`, 0.2);
 
     await page.goto(engine.urlFor(imageUrl), { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
-
-    const isChallenged = await page.evaluate(() => {
-        const text = document.body.innerText.toLowerCase();
-        return text.includes('captcha') || text.includes('verify you are a human') || text.includes('unusual traffic');
-    }).catch(() => false);
-
-    if (isChallenged) {
-        console.log(`[${engine.name}] Access challenge detected. Skipping.`);
-        broadcastProgress(`[${engine.name}] Access challenge detected. Skipping.`, 0.3);
-        return [];
-    }
-
     await new Promise(r => setTimeout(r, 4000));
 
     await page.evaluate(() => {
@@ -199,8 +196,6 @@ async function scrapeEngine(engine, imageUrl) {
         consentBtns.forEach(c => { const b = document.querySelector(c); if(b) b.click(); });
     }).catch(() => {});
 
-    console.log(`[${engine.name}] Scrolling...`);
-    broadcastProgress(`[${engine.name}] Scrolling...`, 0.4);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3)).catch(() => {});
     await new Promise(r => setTimeout(r, 2000));
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 1.5)).catch(() => {});
@@ -208,8 +203,6 @@ async function scrapeEngine(engine, imageUrl) {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
     await new Promise(r => setTimeout(r, 2500));
 
-    console.log(`[${engine.name}] Extracting matches...`);
-    broadcastProgress(`[${engine.name}] Extracting matches...`, 0.6);
     const matches = await page.evaluate((js) => {
         try {
             return new Function(js)();
@@ -225,14 +218,7 @@ async function scrapeEngine(engine, imageUrl) {
     console.error(`[${engine.name}] Error:`, err.message);
     return [];
   } finally {
-    clearTimeout(engineTimeout);
-    if (page) {
-        try {
-            await page.close();
-        } catch (e) {
-            console.error(`[${engine.name}] Error closing page:`, e.message);
-        }
-    }
+    if (page) await page.close().catch(() => {});
   }
 }
 
@@ -240,8 +226,9 @@ app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', chromium: Boolean(getChromiumPath()) });
 });
 
+// Standard reverse image search endpoint
 app.post('/api/search', async (req, res) => {
-  const { imageUrl, sceneUrl, keywordHint, searchMode } = req.body;
+  const { imageUrl, sceneUrl } = req.body;
   const targetImage = sceneUrl || imageUrl;
 
   if (!targetImage || !targetImage.startsWith('http')) {
@@ -250,27 +237,17 @@ app.post('/api/search', async (req, res) => {
 
   if (activeSearchPromise) {
     console.log('[Search] Waiting for previous search to complete...');
-    try {
-        await Promise.race([
-            activeSearchPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Search queue timeout')), 90000))
-        ]);
-    } catch(e) {
-        console.warn('[Search] Proceeding despite previous search status:', e.message);
-    }
+    try { await activeSearchPromise; } catch(e) {}
   }
 
   let resolveSearch;
   activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
 
   console.log(`\n[Search] Starting probe for: ${targetImage.slice(0, 45)}...`);
-  if (keywordHint) console.log(`[Search] Identity Hint: "${keywordHint}"`);
-  if (searchMode) console.log(`[Search] Mode: ${searchMode}`);
-
-  broadcastProgress(`[Search] Starting probe ${keywordHint ? `for "${keywordHint}"` : ''}...`, 0.1);
 
   try {
     const allMatches = [];
+
     for (const engine of ENGINES) {
         const matches = await scrapeEngine(engine, targetImage);
         allMatches.push(...matches);
@@ -302,107 +279,83 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
-// FIX: Added SafeSearch bypass cookies, queued execution, and updated selectors
+// Deep Dorking Endpoint for Adult Sites
 app.post('/api/dork-search', async (req, res) => {
-  const { keyword, sites } = req.body;
-  if (!keyword) return res.status(400).json({ success: false, error: 'Keyword is required.' });
+    const { keyword, sites } = req.body;
 
-  const siteList = sites || [];
-  console.log(`[Dork] Scanning for "${keyword}" across ${siteList.length} sites...`);
-  broadcastProgress(`[Dork] Scanning for "${keyword}"...`, 0.7);
+    if (!keyword || !sites || !sites.length) {
+      return res.status(400).json({ success: false, error: 'Missing keyword or sites' });
+    }
 
-  if (activeSearchPromise) {
-    console.log('[Dork] Waiting for previous search to complete...');
+    if (activeSearchPromise) {
+      console.log('[Dork] Waiting for previous search to complete...');
+      try { await activeSearchPromise; } catch(e) {}
+    }
+
+    let resolveSearch;
+    activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
+
     try {
-        await Promise.race([
-            activeSearchPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Search queue timeout')), 90000))
-        ]);
-    } catch(e) {}
-  }
+      const browser = await getBrowser();
+      const allMatches = [];
+      const siteQuery = sites.map(s => `site:${s}`).join(' OR ');
+      const query = `(${siteQuery}) "${keyword}"`;
+      const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&adlt=off&safesearch=0`;
 
-  let resolveSearch;
-  activeSearchPromise = new Promise((resolve) => { resolveSearch = resolve; });
+      console.log(`[Dork] Scanning for "${keyword}" across ${sites.length} sites...`);
 
-  const browser = await getBrowser();
-  let page = null;
-  try {
-    page = await browser.newPage();
-    page.setDefaultTimeout(30000);
+      let page = null;
+      try {
+          page = await browser.newPage();
 
-    // Bypass Bing SafeSearch explicitly so Adult endpoints trigger
-    await page.setCookie({ name: 'SRCHHPGUSR', value: 'ADLT=OFF', domain: '.bing.com', path: '/' });
-    await page.setCookie({ name: '_EDGE_V', value: '1', domain: '.bing.com', path: '/' });
+          // CRITICAL FIX: Inject the SafeSearch override cookie before loading
+          await page.setCookie({
+              name: 'SRCHHPGUSR',
+              value: 'ADLT=OFF',
+              domain: '.bing.com',
+              path: '/'
+          });
 
-    const siteQuery = siteList.length > 0 ? `(site:${siteList.join(' OR site:')})` : '';
-    const query = `${siteQuery} "${keyword}"`.trim();
-    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&adlt=off&safesearch=0`;
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: ENGINE_TIMEOUT_MS });
+          await new Promise(r => setTimeout(r, 3500));
 
-    console.log(`[Dork] Querying: ${url}`);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise(r => setTimeout(r, 4000));
+          // Click past any Bing adult warning splash screens
+          await page.evaluate(() => {
+              const btns = document.querySelectorAll('a#adlt_set_off, #adult_warning_safesearch, a.b_check, #bnp_btn_accept');
+              btns.forEach(b => b.click());
+          }).catch(() => {});
 
-    const matches = await page.evaluate(() => {
-        const items = [];
-        const seen = new Set();
-        const rows = document.querySelectorAll('li.b_algo, .b_algo, .result, .g, .dg_u, .vr_items');
+          // Scroll to load lazy image thumbnails
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight/2)).catch(() => {});
+          await new Promise(r => setTimeout(r, 2000));
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+          await new Promise(r => setTimeout(r, 2000));
 
-        rows.forEach(row => {
-            let a = row.querySelector('h2 a, .result__a, .b_title a');
-            if(!a) a = row.closest('a') || row.querySelector('a');
-            if(!a || !a.href) return;
+          const matches = await page.evaluate((js) => {
+              try { return new Function(js)(); } catch(e) { return []; }
+          }, DORK_EXTRACT_JS);
 
-            const href = a.href.split('#')[0];
-            if(seen.has(href)) return;
+          console.log(`[Dork] Found ${matches.length} matches`);
+          allMatches.push(...matches);
 
-            const lowHref = href.toLowerCase();
-            if (lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('google.') >= 0 || lowHref.indexOf('microsoft.com') >= 0) return;
+      } catch(err) {
+          console.error(`[Dork] Error during extraction:`, err.message);
+      } finally {
+          if (page) await page.close().catch(() => {});
+      }
 
-            seen.add(href);
+      res.json({
+        success: true,
+        matches: allMatches,
+        meta: { count: allMatches.length }
+      });
 
-            const img = row.querySelector('img') || row.closest('div')?.querySelector('img');
-            items.push({
-                title: (a.innerText || a.textContent || '').trim().slice(0, 150),
-                link: href,
-                thumbnail: img ? (img.src || img.getAttribute('data-src')) : null,
-                source: 'Dork',
-                score: 300
-            });
-        });
-        return items;
-    });
-
-    console.log(`[Dork] Found ${matches.length} matches`);
-    res.json({ success: true, matches });
-  } catch (err) {
-    console.error('[Dork] Error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  } finally {
-    if (page) await page.close().catch(() => {});
-    resolveSearch();
-    activeSearchPromise = null;
-  }
-});
-
-app.post('/api/extract-media', async (req, res) => {
-    const { url } = req.body;
-    if (!url) return res.status(400).json({ success: false, error: 'URL is required.' });
-
-    console.log(`[Extract] Extracting from ${url.slice(0, 50)}...`);
-    const browser = await getBrowser();
-    let page = null;
-    try {
-        page = await browser.newPage();
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        const highResUrl = await page.evaluate(() => {
-            const og = document.querySelector('meta[property="og:image"]');
-            return og ? og.content : null;
-        });
-        res.json({ success: true, highResUrl });
     } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+      console.error('[Dork] Fatal error:', err);
+      res.status(500).json({ success: false, error: err.message });
     } finally {
-        if (page) await page.close().catch(() => {});
+      resolveSearch();
+      activeSearchPromise = null;
     }
 });
 

@@ -98,12 +98,24 @@ class WebViewScraper private constructor(
                         addItem(a.innerText, a.href, img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null);
                     });
                 }
+                // TinEye
+                else if (hostname.indexOf('tineye.com') >= 0) {
+                    document.querySelectorAll('.match, .result, .match-thumb, div[class*="match"], div[class*="result"]').forEach(function(el) {
+                        var a = el.querySelector('a[href^="http"]');
+                        var img = el.querySelector('img');
+                        if (a) {
+                            var thumbSrc = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
+                            addItem(a.innerText || a.title || 'Visual Candidate', a.href, thumbSrc);
+                        }
+                    });
+                }
                 // Generic Fallback
                 else {
                     document.querySelectorAll('a[href^="http"]').forEach(function(a){
                         var img = a.querySelector('img');
                         if (!img && a.closest('div')) img = a.closest('div').querySelector('img');
-                        addItem(a.innerText || a.title, a.href, img ? img.src : null);
+                        var thumbSrc = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
+                        addItem(a.innerText || a.title, a.href, thumbSrc);
                     });
                 }
                 Native.onResults(JSON.stringify(items));

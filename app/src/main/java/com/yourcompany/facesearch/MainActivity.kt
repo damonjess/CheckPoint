@@ -41,13 +41,11 @@ class MainActivity : ComponentActivity() {
             ImageLoader.Builder(context)
                 .components {
                     add(OkHttpNetworkFetcherFactory(OkHttpClient.Builder()
-                        .connectTimeout(10, TimeUnit.SECONDS)
+                        .connectTimeout(15, TimeUnit.SECONDS)
+                        .readTimeout(15, TimeUnit.SECONDS)
                         .addInterceptor { chain ->
-                            val requestUrl = chain.request().url
-                            val referer = "https://${requestUrl.host}/"
                             val request = chain.request().newBuilder()
-                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
-                                .header("Referer", referer)
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
                                 .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
                                 .build()
                             chain.proceed(request)

@@ -12,7 +12,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,7 +45,7 @@ fun CheckInScreen(
     onTinEyeExactSearch: (Bitmap) -> Unit,
     onLoadHighRes: (WebMatchDisplay) -> Unit
 ) {
-    val uriHandler = LocalUriHandler.current
+    var activeInAppUrl by remember { mutableStateOf<String?>(null) }
     val isLoading = uiState is CheckInUiState.Loading || isSearching
 
     Scaffold(
@@ -254,7 +253,7 @@ fun CheckInScreen(
                             uiState = uiState,
                             debugMode = debugMode,
                             onLoadHighRes = onLoadHighRes,
-                            onMatchClick = { match -> uriHandler.openUri(match.profileUrl) }
+                            onMatchClick = { match -> activeInAppUrl = match.profileUrl }
                         )
                     }
 
@@ -289,6 +288,13 @@ fun CheckInScreen(
             item {
                 Spacer(modifier = Modifier.height(32.dp))
             }
+        }
+
+        activeInAppUrl?.let { url ->
+            InAppWebViewSheet(
+                url = url,
+                onDismiss = { activeInAppUrl = null }
+            )
         }
     }
 }

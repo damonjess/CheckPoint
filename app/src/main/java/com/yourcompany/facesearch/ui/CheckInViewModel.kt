@@ -1,9 +1,10 @@
 package com.yourcompany.facesearch.ui
 
 import android.app.Application
-import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import androidx.compose.runtime.*
 import androidx.exifinterface.media.ExifInterface
@@ -77,7 +78,6 @@ class CheckInViewModel(
     private val faceEmbedder = FaceEmbedder(application)
     private val faceVerifier = FaceVerifier(application)
     private val freeImageHost = FreeImageHost()
-    private val freeSearchHelper = FreeFaceSearchHelper(getApplication())
     private val searchProbeManager = SearchProbeManager(getApplication())
     var uiState by mutableStateOf<CheckInUiState>(CheckInUiState.Idle)
         private set
@@ -367,62 +367,19 @@ class CheckInViewModel(
 
     fun onConfirmFreeSearch(bitmap: Bitmap) {
         val toSearch = originalFullResBitmap ?: bitmap
-        freeSearchHelper.launchDirectSearch(toSearch, targetHint)
+        onConfirmSearch(toSearch, toSearch)
     }
 
     /**
-     * Opens TinEye with a hosted copy of the selected probe. This is a useful
-     * exact/near-duplicate fallback and avoids launching the same Google Lens
-     * flow that users can already access outside the app.
+     * Executes in-app search with TinEye included.
      */
     fun onTinEyeExactSearch(bitmap: Bitmap) {
         if (isSearching) return
-        viewModelScope.launch {
-            addLog("Preparing TinEye exact-image check...")
-            val toUpload = originalFullResBitmap ?: bitmap
-            val publicUrl = freeImageHost.upload(toUpload) { message -> addLog(message) }
-            if (publicUrl == null) {
-                addLog("TinEye needs a public image URL; opening its upload page instead.")
-            } else {
-                addLog("Opening TinEye with the hosted probe...")
-            }
-            freeSearchHelper.launchTinEyeExactSearch(publicUrl)
-        }
+        val toSearch = originalFullResBitmap ?: bitmap
+        onConfirmSearch(toSearch, toSearch)
     }
 
-    private fun openBlockedEnginesInBrowser(imageUrl: String, blocked: List<String>) {
-        val app = getApplication<Application>()
-        
-        blocked.forEachIndexed { index, engine ->
-            val url = when (engine) {
-                "Google Master" -> "https://lens.google.com/uploadbyurl?url=${Uri.encode(imageUrl)}"
-                "Yandex" -> "https://yandex.com/images/search?rpt=imageview&url=${Uri.encode(imageUrl)}"
-                "Baidu" -> "https://graph.baidu.com/pcpage/index?tpl_from=pc&image=${Uri.encode(imageUrl)}"
-                else -> null
-            }
-            
-            if (url != null) {
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    try {
-                        // Try Chrome specifically first
-                        val chromeIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            `package` = "com.android.chrome"
-                        }
-                        app.startActivity(chromeIntent)
-                        addLog("🌐 Opened $engine in Chrome")
-                    } catch (e: Exception) {
-                        // Fallback to any browser
-                        val fallback = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        app.startActivity(fallback)
-                        addLog("🌐 Opened $engine in browser")
-                    }
-                }, index * 2500L) // Stagger by 2.5s so tabs don't overwhelm
-            }
-        }
-    }
+
 
     private fun isTinEyeResult(match: SerpVisualMatch): Boolean {
         val metadata = listOfNotNull(match.source, match.link)
@@ -773,19 +730,18 @@ class CheckInViewModel(
 
         if (filteredRawResults.isEmpty() && tinEyeOccurrences.isEmpty() && adultOccurrences.isEmpty()) {
             val message = if (blockedEngines.isNotEmpty()) {
-                "${blockedEngines.joinToString()} requested an access check and returned no candidates. Open your photo in Lens to continue manually."
+                "${blockedEngines.joinToString()} requested an access challenge and returned no candidates."
+            } else if (!useTermux) {
+                "In-app visual search returned 0 candidates."
             } else {
                 "No visual candidates were returned by the available search providers."
             }
             uiState = CheckInUiState.NoMatch(
                 logs = currentLogs.toList(),
                 message = message,
-                hasAccessChallenge = blockedEngines.isNotEmpty(),
+                hasAccessChallenge = blockedEngines.isNotEmpty() || !useTermux,
                 termuxAvailable = useTermux
             )
-            if (blockedEngines.isNotEmpty()) {
-                openBlockedEnginesInBrowser(publicUrl, blockedEngines.toList())
-            }
             termuxWs?.close(1000, "No matches")
             termuxWs = null
             return
@@ -1011,7 +967,7 @@ class CheckInViewModel(
             }
             .distinctBy { match -> match.link } // Deduplicate by URL only, not thumbnail
             .sortedByDescending { match ->
-                val thumbnail = ThumbnailUtils.normalize(match.thumbnail)
+                val thumbnail = ThumbnailUtils.normalize(match.thumbnail, match.link)
                 val hasUsableThumbnail = thumbnail != null &&
                     !thumbnail.contains("placeholder", ignoreCase = true) &&
                     !thumbnail.contains("default", ignoreCase = true)
@@ -1096,7 +1052,7 @@ class CheckInViewModel(
         cleanTitle = cleanTitle.replace(Regex("#\\w+"), "").trim()
 
         // Detect suspicious thumbnails (very small URLs often indicate bad crops)
-        val thumb = ThumbnailUtils.normalize(match.thumbnail)
+        val thumb = ThumbnailUtils.normalize(match.thumbnail, match.link)
         val hasGoodThumbnail = thumb != null && 
             !thumb.contains("thumbnail") && 
             !thumb.contains("preview") && 
@@ -1353,8 +1309,14 @@ class CheckInViewModel(
     private suspend fun loadThumbnailBitmap(url: String?): Bitmap? = withContext(Dispatchers.IO) {
         if (url.isNullOrBlank()) return@withContext null
         try {
+            val trimmed = url.trim()
+            if (trimmed.startsWith("data:image", ignoreCase = true)) {
+                val base64Data = trimmed.substringAfter("base64,")
+                val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+                return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
             val request = ImageRequest.Builder(getApplication())
-                .data(url)
+                .data(trimmed)
                 .allowHardware(false) 
                 .build()
             val result = getApplication<Application>().imageLoader.execute(request)

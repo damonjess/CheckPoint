@@ -75,7 +75,7 @@ async function getBrowser() {
 
 const UNIVERSAL_EXTRACT_JS = `
     var items = [], seen = new Set();
-    var badThumb = ['logo', 'icon', 'favicon', 'avatar', 'default', 'shutterstock', 'istock', 'data:image/gif'];
+    var badThumb = ['1x1.gif', 'pixel.gif', 'spacer.gif', 'transparent.png', 'favicon', 'default_avatar', 'no_profile', 'blank_profile', 'shutterstock', 'istock', 'data:image/gif'];
 
     document.querySelectorAll('a[href^="http"]').forEach(function(a){
         try {

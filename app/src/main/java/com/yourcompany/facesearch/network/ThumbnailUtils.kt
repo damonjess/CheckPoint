@@ -1,7 +1,9 @@
 package com.yourcompany.facesearch.network
 
+import android.net.Uri
+
 object ThumbnailUtils {
-    fun normalize(raw: String?): String? {
+    fun normalize(raw: String?, sourceUrl: String? = null): String? {
         if (raw.isNullOrBlank()) return null
         var url = raw.trim()
             .replace("&amp;", "&")
@@ -9,6 +11,18 @@ object ThumbnailUtils {
             .replace("\\/", "/")
 
         if (url.startsWith("//")) url = "https:$url"
+        
+        if (url.startsWith("/") && !sourceUrl.isNullOrBlank()) {
+            url = try {
+                val uri = Uri.parse(sourceUrl)
+                val scheme = uri.scheme ?: "https"
+                val host = uri.host.orEmpty()
+                if (host.isNotBlank()) "$scheme://$host$url" else url
+            } catch (_: Exception) {
+                url
+            }
+        }
+
         if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:image")) {
             if (isNoise(url)) {
                 android.util.Log.d("ThumbnailUtils", "Dropped noise URL: $url")
@@ -46,10 +60,10 @@ object ThumbnailUtils {
             "1x1.gif", "pixel.gif", "spacer.gif", "transparent.png",
             "facebook.com/images/fb_icon", "fb_logo", "facebook_logo",
             "instagram.com/static/images", "twitter_logo", "x_logo",
-            "tiktok_logo", "linkedin_logo", "logo.png", "logo.jpg",
+            "tiktok_logo", "linkedin_logo",
             "favicon.ico", "apple-touch-icon", "default_avatar",
             "no_profile", "blank_profile", "anonymous.png",
-            // NEW: Aggressively drop stock vector sites
+            // Aggressively drop stock vector sites
             "shutterstock", "istockphoto", "stock.adobe", "vectorstock", 
             "freepik", "depositphotos", "123rf", "dreamstime", "alamy",
             "gettyimages", "vecteezy", "flaticon", "icon-icons", "pngtree"

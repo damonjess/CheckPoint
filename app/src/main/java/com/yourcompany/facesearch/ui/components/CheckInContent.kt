@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -485,7 +486,7 @@ fun NoMatchContent(
             ) {
                 Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = Color.White)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Open TinEye Exact-Image Check", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("Run TinEye Exact-Image Check", color = Color.White, fontWeight = FontWeight.Bold)
             }
 
             OutlinedButton(
@@ -494,9 +495,9 @@ fun NoMatchContent(
                 border = BorderStroke(1.dp, Color(0xFF4CAF50)),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF2E7D32))
+                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xFF2E7D32))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Share Photo to Another Search App", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+                Text("Run Deep In-App Search", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
             }
         }
         

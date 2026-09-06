@@ -1,5 +1,6 @@
 package com.yourcompany.facesearch.ui.components
 
+import android.util.Base64
 import androidx.compose.animation.core.*
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
@@ -222,14 +223,15 @@ private fun PrimaryMatchContent(
                 border = BorderStroke(4.dp, Brush.linearGradient(listOf(Color(0xFF4CAF50), Color(0xFF81C784)))),
                 color = Color.LightGray
             ) {
-                if (match.imageUrl != null) {
+                val imageModel = remember(match.imageUrl) { parseImageModel(match.imageUrl) }
+                if (imageModel != null) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
-                            .data(match.imageUrl)
+                            .data(imageModel)
                             .crossfade(true)
                             .build(),
                         contentDescription = null,
-                        contentScale = ContentScale.Fit,  // WAS Crop
+                        contentScale = ContentScale.Crop,
                         alignment = Alignment.Center,
                         modifier = Modifier.fillMaxSize(),
                         placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFF5F5F5)),
@@ -345,14 +347,15 @@ private fun SecondaryMatchContent(
                     .clip(RoundedCornerShape(16.dp))
                     .background(Color.LightGray)
             ) {
-                if (match.imageUrl != null) {
+                val imageModel = remember(match.imageUrl) { parseImageModel(match.imageUrl) }
+                if (imageModel != null) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
-                            .data(match.imageUrl)
+                            .data(imageModel)
                             .crossfade(true)
                             .build(),
                         contentDescription = null,
-                        contentScale = ContentScale.Fit,  // WAS Crop
+                        contentScale = ContentScale.Crop,
                         alignment = Alignment.Center,
                         modifier = Modifier.fillMaxSize(),
                         placeholder = androidx.compose.ui.graphics.painter.ColorPainter(Color(0xFFF5F5F5)),
@@ -491,4 +494,20 @@ private fun rememberHandle(match: WebMatchDisplay): String {
         // FIX: Only show a handle if the URL genuinely contains a real username path
         match.username?.let { "@$it" } ?: "Unnamed visual lead"
     }
+}
+
+private fun parseImageModel(rawModel: Any?): Any? {
+    if (rawModel == null) return null
+    if (rawModel is String) {
+        val trimmed = rawModel.trim()
+        if (trimmed.startsWith("data:image", ignoreCase = true)) {
+            return try {
+                val base64Data = trimmed.substringAfter("base64,")
+                Base64.decode(base64Data, Base64.DEFAULT)
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+    return rawModel
 }

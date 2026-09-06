@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yourcompany.facesearch.data.ProfileLeadStrength
 import com.yourcompany.facesearch.data.PublicProfileLead
+import com.yourcompany.facesearch.ui.components.InAppWebViewSheet
 
 /**
  * Optional local identity-card workflow. It is intentionally independent from
@@ -48,7 +49,7 @@ fun ProfileDiscoveryScreen(
     onBack: () -> Unit
 ) {
     val profile = viewModel.profile
-    val uriHandler = LocalUriHandler.current
+    var activeInAppUrl by remember { mutableStateOf<String?>(null) }
     val focusManager = LocalFocusManager.current
     val scrollState = rememberLazyListState()
     val leadsCount = viewModel.leads.size
@@ -182,13 +183,13 @@ fun ProfileDiscoveryScreen(
                 item {
                     Text("MANUAL WEB SEARCH", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = Color(0xFF2E7D32))
                     Text(
-                        "These searches open in your browser. Review any provider prompt yourself.",
+                        "Search public profiles directly in the app.",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
                 item {
                     OutlinedButton(
-                        onClick = { uriHandler.openUri(viewModel.webQueries.first()) },
+                        onClick = { activeInAppUrl = viewModel.webQueries.first() },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Launch, contentDescription = null)
@@ -208,10 +209,17 @@ fun ProfileDiscoveryScreen(
                 items(viewModel.leads.size, key = { index -> viewModel.leads[index].url }) { index ->
                     ProfileLeadCard(
                         lead = viewModel.leads[index],
-                        onOpen = { uriHandler.openUri(viewModel.leads[index].url) }
+                        onOpen = { activeInAppUrl = viewModel.leads[index].url }
                     )
                 }
             }
+        }
+
+        activeInAppUrl?.let { url ->
+            InAppWebViewSheet(
+                url = url,
+                onDismiss = { activeInAppUrl = null }
+            )
         }
     }
 }

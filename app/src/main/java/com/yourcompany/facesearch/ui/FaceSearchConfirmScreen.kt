@@ -87,7 +87,7 @@ fun FaceSearchConfirmScreen(
                 text = when (searchMode) {
                     SearchMode.AGGRESSIVE -> "🔥 LAUNCH AGGRESSIVE SCAN"
                     SearchMode.ADULT -> "🔞 LAUNCH ADULT SCAN"
-                    else -> "Launch Free Search"
+                    else -> "Launch In-App Search"
                 }, 
                 color = Color.White, 
                 fontWeight = FontWeight.Bold, 
@@ -106,7 +106,7 @@ fun FaceSearchConfirmScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4285F4)),
                 enabled = true
             ) {
-                Text("Open TinEye Exact-Image Search", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Run TinEye Exact-Image Search", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         }
         

@@ -45,7 +45,7 @@ class WebViewScraper private constructor(
             WebViewScraper(webView, handler)
         }
 
-        private const val CONSENT_AND_EXTRACT_JS = """
+        val VISUAL_EXTRACT_JS = """
             (function(){
                 var consentBtns = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]'];
                 for (var i = 0; i < consentBtns.length; i++) {
@@ -53,105 +53,60 @@ class WebViewScraper private constructor(
                     if (b) { b.click(); }
                 }
 
-                function extract(){
-                    var items = [], seen = new Set();
-                    var hostname = window.location.hostname || '';
+                var items = [];
+                var seen = new Set();
+                var hostname = window.location.hostname || '';
+                
+                function addItem(title, link, thumb) {
+                    if (!link || link.indexOf('http') !== 0) return;
+                    var href = link.split('#')[0];
+                    if (seen.has(href)) return;
                     
-                    function addItem(title, link, thumb, source) {
-                        if (!link || link.indexOf('http') !== 0) return;
-                        var href = link.split('#')[0];
-                        if (seen.has(href)) return;
-                        
-                        var lowHref = href.toLowerCase();
-                        if (lowHref.indexOf('google.') >= 0 || lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('yandex.') >= 0 || lowHref.indexOf('tineye.com') >= 0) return;
-                        if (!thumb || thumb.length < 15) return;
-                        
-                        var lowThumb = thumb.toLowerCase();
-                        var badThumb = ['logo', 'icon', 'favicon', 'avatar', 'default', 'shutterstock', 'istock', 'data:image/gif'];
-                        for (var i = 0; i < badThumb.length; i++) {
-                            if (lowThumb.indexOf(badThumb[i]) >= 0) return;
-                        }
-                        
-                        var score = 100;
-                        var socialCDNs = ['cdninstagram.com', 'fbcdn.net', 'twimg.com', 'tiktokcdn.com'];
-                        for (var i = 0; i < socialCDNs.length; i++) {
-                            if (lowThumb.indexOf(socialCDNs[i]) >= 0) {
-                                score = 500;
-                                break;
-                            }
-                        }
-
-                        var cleanTitle = (title || 'Visual Match').replace(/\s+/g,' ').trim().slice(0, 100);
-                        if (cleanTitle.toLowerCase().indexOf('sign in') >= 0 || cleanTitle.length < 3) return;
-                        
-                        seen.add(href);
-                        items.push({
-                            title: cleanTitle,
-                            link: href,
-                            thumbnail: thumb,
-                            source: source,
-                            score: score
-                        });
-                    }
-
-                    if (hostname.indexOf('tineye.com') >= 0) {
-                        document.querySelectorAll('.match-row, .match, .result-row').forEach(function(row) {
-                            var linkEl = row.querySelector('h4 a, p a, .match-details a, a[href^="http"]');
-                            var imgEl = row.querySelector('.match-thumb img, .image img, img');
-                            if (linkEl && imgEl) {
-                                addItem(linkEl.innerText || 'TinEye Match', linkEl.href, imgEl.src, 'TinEye');
-                            }
-                        });
-                        if (items.length > 0) return items;
-                    }
-
-                    if (hostname.indexOf('google.') >= 0) {
-                        document.querySelectorAll('a.V6bBh, a.Luz2Q, a.G714Sc, .uaqyqd a, .G6S96 a, a.cspn0c').forEach(function(a) {
-                            var img = a.querySelector('img') || a.closest('div')?.querySelector('img');
-                            var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
-                            addItem(a.innerText || a.getAttribute('aria-label'), a.href, imgSrc, 'Google Lens');
-                        });
-                        if (items.length > 0) return items;
-                    }
-
-                    if (hostname.indexOf('bing.com') >= 0) {
-                        document.querySelectorAll('.imgpt a, .iusc, .visual_search_results a, .richImgLnk, .infopt a').forEach(function(a) {
-                            var href = a.href || a.getAttribute('m');
-                            if (href && href.indexOf('{') === 0) {
-                                try { var m = JSON.parse(href); href = m.purl || m.murl; } catch(e){}
-                            }
-                            var img = a.querySelector('img') || a.closest('.imgpt, .img_cont, .dg_u, div')?.querySelector('img');
-                            var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
-                            addItem(a.innerText || a.getAttribute('aria-label'), href, imgSrc, 'Bing Visual');
-                        });
-                        if (items.length > 0) return items;
-                    }
-
-                    if (hostname.indexOf('yandex.') >= 0) {
-                        document.querySelectorAll('.CbirItem-Title a, .serp-item__link, .CbirSites-ItemTitle a, .CbirItem-TitleLink').forEach(function(a) {
-                            var img = a.closest('.CbirItem, .serp-item, .CbirSites-Item, div')?.querySelector('img');
-                            var imgSrc = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
-                            addItem(a.innerText, a.href, imgSrc, 'Yandex');
-                        });
-                        if (items.length > 0) return items;
-                    }
-
-                    document.querySelectorAll('a[href^="http"]').forEach(function(a){
-                        try {
-                            var href = a.href;
-                            if (href.indexOf('google.com/url?') >= 0) {
-                                var match = href.match(/url\?q=([^&]+)/);
-                                if (match) href = decodeURIComponent(match[1]);
-                            }
-                            var img = a.querySelector('img') || a.closest('div')?.querySelector('img');
-                            var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
-                            addItem(a.innerText || a.title, href, imgSrc, 'Web');
-                        } catch(e){}
+                    var lowHref = href.toLowerCase();
+                    if (lowHref.indexOf('google.') >= 0 || lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('yandex.') >= 0 || lowHref.indexOf('tineye.com') >= 0) return;
+                    if (!thumb || thumb.length < 15) return;
+                    
+                    seen.add(href);
+                    items.push({
+                        title: (title || 'Visual Candidate').replace(/\s+/g,' ').trim().substring(0, 100),
+                        link: href,
+                        thumbnail: thumb,
+                        score: 100
                     });
-
-                    return items;
                 }
-                Native.onResults(JSON.stringify(extract()));
+
+                // Google Lens
+                if (hostname.indexOf('google.') >= 0) {
+                    document.querySelectorAll('a.V6bBh, a.Luz2Q, a.G714Sc, .uaqyqd a').forEach(function(a) {
+                        var img = a.querySelector('img') || a.closest('div').querySelector('img');
+                        addItem(a.innerText || a.getAttribute('aria-label'), a.href, img ? (img.src || img.getAttribute('data-src')) : null);
+                    });
+                }
+                // Bing Visual
+                else if (hostname.indexOf('bing.com') >= 0) {
+                    document.querySelectorAll('.imgpt a, .iusc, .richImgLnk').forEach(function(a) {
+                        var href = a.href || a.getAttribute('m');
+                        if (href && href.indexOf('{') === 0) { try { href = JSON.parse(href).purl || href; } catch(e){} }
+                        var img = a.querySelector('img') || a.closest('.imgpt, .img_cont, div').querySelector('img');
+                        addItem(a.innerText || a.getAttribute('aria-label'), href, img ? (img.src || img.getAttribute('data-src')) : null);
+                    });
+                }
+                // Yandex
+                else if (hostname.indexOf('yandex.') >= 0) {
+                    document.querySelectorAll('.CbirItem-Title a, .serp-item__link').forEach(function(a) {
+                        var img = a.closest('.CbirItem, .serp-item, div').querySelector('img');
+                        addItem(a.innerText, a.href, img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null);
+                    });
+                }
+                // Generic Fallback
+                else {
+                    document.querySelectorAll('a[href^="http"]').forEach(function(a){
+                        var img = a.querySelector('img');
+                        if (!img && a.closest('div')) img = a.closest('div').querySelector('img');
+                        addItem(a.innerText || a.title, a.href, img ? img.src : null);
+                    });
+                }
+                Native.onResults(JSON.stringify(items));
             })();
         """
 
@@ -268,7 +223,7 @@ class WebViewScraper private constructor(
         url: String,
         engineName: String,
         delayMs: Long,
-        extractJs: String = CONSENT_AND_EXTRACT_JS,
+        extractJs: String = VISUAL_EXTRACT_JS,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = withContext(Dispatchers.Main) {
         suspendCancellableCoroutine { continuation ->

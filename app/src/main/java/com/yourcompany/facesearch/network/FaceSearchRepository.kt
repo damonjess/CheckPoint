@@ -39,7 +39,7 @@ class FaceSearchRepository(private val context: Context) {
         faceBitmap: Bitmap? = null,
         keywordHint: String? = null,
         imageUrl: String? = null,
-        sceneUrl: String? = null,
+        @Suppress("UNUSED_PARAMETER") sceneUrl: String? = null,
         @Suppress("UNUSED_PARAMETER") deepCrawl: Boolean = false,
         searchMode: String = "PRECISION",
         includeExactLensMatches: Boolean = false,
@@ -94,7 +94,9 @@ class FaceSearchRepository(private val context: Context) {
                 }
             }
 
-            if (allResults.size < 5) {
+            // In no-Termux mode (skipTermux) we always run the in-app visual
+            // engines, even if another source already returned a few hits.
+            if (allResults.size < 5 || skipTermux) {
                 onLog("Running in-app visual engine fallback...")
                 coroutineScope {
                     val jobs = mutableListOf<Deferred<Unit>>()
@@ -276,7 +278,7 @@ class FaceSearchRepository(private val context: Context) {
         candidates.forEach { match ->
             val title = match.title.orEmpty()
             
-            var cleanTitle = title
+            val cleanTitle = title
                 .replace(Regex("(?i)[|\\-–—:(\\[].*"), "")
                 .replace(Regex("[^a-zA-Z0-9\\s]"), "")
                 .trim()
@@ -352,13 +354,61 @@ class FaceSearchRepository(private val context: Context) {
         if (apiKey.isBlank()) return@withContext emptyList()
 
         try {
-            val visualResponse = RetrofitClient.getSerpApi().googleLensSearch(url = imageUrl, type = "visual_matches", apiKey = apiKey)
+            val visualResponse = RetrofitClient.getSerpApi().googleLensSearch(
+                url = imageUrl,
+                type = "visual_matches",
+                apiKey = apiKey
+            )
             val visualMatches = visualResponse.visualMatches.orEmpty().map { match ->
-                SerpVisualMatch(title = match.title, link = match.link, source = "Google Lens", thumbnail = match.thumbnail, score = 800)
+                SerpVisualMatch(
+                    title = match.title,
+                    link = match.link,
+                    source = "Google Lens",
+                    thumbnail = match.thumbnail,
+                    score = 800
+                )
             }
-            onLog("✓ SerpApi found ${visualMatches.size} candidate(s)")
-            visualMatches
-        } catch (_: Exception) {
+            val exactFromVisual = visualResponse.exactMatches.orEmpty().map { match ->
+                SerpVisualMatch(
+                    title = match.title,
+                    link = match.link,
+                    source = "Google Lens (Exact)",
+                    thumbnail = match.thumbnail,
+                    score = 900
+                )
+            }
+
+            val exactMatches = if (includeExactMatches) {
+                try {
+                    val exactResponse = RetrofitClient.getSerpApi().googleLensSearch(
+                        url = imageUrl,
+                        type = "exact_matches",
+                        apiKey = apiKey
+                    )
+                    exactResponse.exactMatches.orEmpty().map { match ->
+                        SerpVisualMatch(
+                            title = match.title,
+                            link = match.link,
+                            source = "Google Lens (Exact)",
+                            thumbnail = match.thumbnail,
+                            score = 900
+                        )
+                    }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+
+            val combined = (exactMatches + exactFromVisual + visualMatches)
+                .filter { !it.link.isNullOrBlank() }
+                .distinctBy { it.link }
+
+            onLog("✓ SerpApi found ${combined.size} candidate(s)")
+            combined
+        } catch (e: Exception) {
+            onLog("⚠ SerpApi search error: ${e.message}")
             emptyList()
         }
     }

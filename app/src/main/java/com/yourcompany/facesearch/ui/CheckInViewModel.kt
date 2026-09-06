@@ -18,7 +18,6 @@ import com.yourcompany.facesearch.network.AdultSiteConfig
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.FreeImageHost
 import com.yourcompany.facesearch.network.LocalServer
-import com.yourcompany.facesearch.network.RetrofitClient
 import com.yourcompany.facesearch.network.SerpVisualMatch
 import com.yourcompany.facesearch.network.SocialMediaDetector
 import com.yourcompany.facesearch.network.ThumbnailUtils
@@ -732,7 +731,7 @@ class CheckInViewModel(
             val message = if (blockedEngines.isNotEmpty()) {
                 "${blockedEngines.joinToString()} requested an access challenge and returned no candidates."
             } else if (!useTermux) {
-                "In-app visual search returned 0 candidates."
+                "In-app visual search returned 0 candidates. Google Lens, Bing, and Yandex sometimes block automated lookups — try another clear photo or run the optional Termux/cloud helper for more reliable results."
             } else {
                 "No visual candidates were returned by the available search providers."
             }

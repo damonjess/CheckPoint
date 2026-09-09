@@ -537,50 +537,65 @@ private fun buildNetworkNodes(
         visualLeads to NodeCategory.VISUAL_LEAD
     )
 
-    var totalIndex = 0
+    // Flatten all matches with their assigned category into a single list
+    val allPairs = allBuckets.flatMap { (matches, category) ->
+        matches.map { match -> match to category }
+    }
+
+    if (allPairs.isEmpty()) return emptyList()
+
     // Orbital distribution rings
     val ringRadiiDp = listOf(110.dp, 160.dp, 210.dp)
+    val ringCapacity = 8
 
-    allBuckets.forEach { (matches, category) ->
-        matches.forEach { match ->
-            val ringIndex = (totalIndex / 8).coerceAtMost(ringRadiiDp.lastIndex)
-            val radiusDp = ringRadiiDp[ringIndex]
-            val countInRing = 8.coerceAtMost(matches.size - ringIndex * 8).coerceAtLeast(1)
-            val angleDeg = (totalIndex % 8) * (360f / countInRing)
-            val rad = Math.toRadians(angleDeg.toDouble())
+    allPairs.forEachIndexed { totalIndex, (match, category) ->
+        val ringIndex = (totalIndex / ringCapacity).coerceAtMost(ringRadiiDp.lastIndex)
+        val radiusDp = ringRadiiDp[ringIndex]
 
-            val xOffset = (radiusDp.value * cos(rad)).dp
-            val yOffset = (radiusDp.value * sin(rad)).dp
+        // Calculate total items assigned to this specific ring
+        val startIndexForRing = ringIndex * ringCapacity
+        val itemsInThisRing = if (ringIndex == ringRadiiDp.lastIndex) {
+            allPairs.size - startIndexForRing
+        } else {
+            ringCapacity.coerceAtMost(allPairs.size - startIndexForRing)
+        }.coerceAtLeast(1)
 
-            val color = when (category) {
-                NodeCategory.VERIFIED_FACE -> Color(0xFF00E5FF) // Electric Cyan
-                NodeCategory.LIKELY_FACE -> Color(0xFFFFB74D) // Warm Amber
-                NodeCategory.ADULT_PLATFORM -> Color(0xFFEF4444) // Vibrant Red
-                NodeCategory.TINEYE_OCCURRENCE -> Color(0xFF3B82F6) // Bright Blue
-                NodeCategory.VISUAL_LEAD -> Color(0xFF94A3B8) // Slate Gray
-            }
+        val indexInRing = totalIndex % ringCapacity
+        // Stagger outer rings slightly (+22.5 deg) to prevent overlap with inner ring nodes
+        val ringAngleOffset = ringIndex * 22.5f
+        val angleDeg = (indexInRing * (360f / itemsInThisRing) + ringAngleOffset) % 360f
+        val rad = Math.toRadians(angleDeg.toDouble())
 
-            val connectionType = when (category) {
-                NodeCategory.VERIFIED_FACE -> "Confirmed Facial Match (${(match.confidence * 100).toInt()}%)"
-                NodeCategory.LIKELY_FACE -> "Possible Facial Match (${(match.confidence * 100).toInt()}%)"
-                NodeCategory.ADULT_PLATFORM -> "Adult Network Hit"
-                NodeCategory.TINEYE_OCCURRENCE -> "Exact Image Occurrence"
-                NodeCategory.VISUAL_LEAD -> "Visual Lead Candidate"
-            }
+        val xOffset = (radiusDp.value * cos(rad)).dp
+        val yOffset = (radiusDp.value * sin(rad)).dp
 
-            nodes.add(
-                NetworkNode(
-                    id = "${category.name}_${match.profileUrl}_${totalIndex}",
-                    match = match,
-                    category = category,
-                    xOffsetDp = xOffset,
-                    yOffsetDp = yOffset,
-                    nodeColor = color,
-                    connectionType = connectionType
-                )
-            )
-            totalIndex++
+        val color = when (category) {
+            NodeCategory.VERIFIED_FACE -> Color(0xFF00E5FF) // Electric Cyan
+            NodeCategory.LIKELY_FACE -> Color(0xFFFFB74D) // Warm Amber
+            NodeCategory.ADULT_PLATFORM -> Color(0xFFEF4444) // Vibrant Red
+            NodeCategory.TINEYE_OCCURRENCE -> Color(0xFF3B82F6) // Bright Blue
+            NodeCategory.VISUAL_LEAD -> Color(0xFF94A3B8) // Slate Gray
         }
+
+        val connectionType = when (category) {
+            NodeCategory.VERIFIED_FACE -> "Confirmed Facial Match (${(match.confidence * 100).toInt()}%)"
+            NodeCategory.LIKELY_FACE -> "Possible Facial Match (${(match.confidence * 100).toInt()}%)"
+            NodeCategory.ADULT_PLATFORM -> "Adult Network Hit"
+            NodeCategory.TINEYE_OCCURRENCE -> "Exact Image Occurrence"
+            NodeCategory.VISUAL_LEAD -> "Visual Lead Candidate"
+        }
+
+        nodes.add(
+            NetworkNode(
+                id = "${category.name}_${match.profileUrl}_${totalIndex}",
+                match = match,
+                category = category,
+                xOffsetDp = xOffset,
+                yOffsetDp = yOffset,
+                nodeColor = color,
+                connectionType = connectionType
+            )
+        )
     }
 
     return nodes

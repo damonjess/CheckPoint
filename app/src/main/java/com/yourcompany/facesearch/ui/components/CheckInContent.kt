@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SearchOff
@@ -96,6 +97,8 @@ fun LoadingContent(
     }
 }
 
+enum class ResultsViewMode { LIST, GRAPH }
+
 @Composable
 fun SuccessContent(
     uiState: CheckInUiState.Success,
@@ -105,6 +108,7 @@ fun SuccessContent(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    var viewMode by remember { mutableStateOf(ResultsViewMode.LIST) }
     val consoleScrollState = rememberScrollState()
     LaunchedEffect(uiState.logs.size) {
         consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
@@ -120,8 +124,6 @@ fun SuccessContent(
     }
     
     val hasStrongResults = (verifiedMatches.size + likelyMatches.size) > 0
-    
-    // NOTE: Removed the showReviewLeads toggle state here.
     
     val visualLeads = remember(uiState.matches) {
         uiState.matches.filterNot { it.isFaceVerified || it.isLikelyFaceMatch }
@@ -145,182 +147,257 @@ fun SuccessContent(
                 color = Color.Black
             )
 
-            IconButton(onClick = {
-                val summary = (uiState.matches + uiState.tinEyeMatches).take(10).joinToString("\n\n") {
-                    "${when {
-                        it.isFaceVerified -> "Verified face match"
-                        it.isLikelyFaceMatch -> "Possible face match — review manually"
-                        it.source.contains("TinEye", ignoreCase = true) -> "Exact image occurrence — TinEye"
-                        else -> "Unverified visual lead"
-                    }}: ${it.displayName} (${it.source})\n${it.profileUrl}"
-                }
-                val sendIntent = Intent().apply {
-                    action = Intent.ACTION_SEND
-                    putExtra(Intent.EXTRA_TEXT, "Sherlock visual-search results:\n\n$summary")
-                    type = "text/plain"
-                }
-                context.startActivity(Intent.createChooser(sendIntent, null))
-            }) {
-                Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.Gray, modifier = Modifier.size(20.dp))
-            }
-        }
-
-        if (verifiedMatches.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            verifiedMatches.forEachIndexed { index, match ->
-                MatchCard(
-                    match = match,
-                    isPrimary = index == 0,
-                    debugMode = debugMode,
-                    onLoadHighRes = { onLoadHighRes(match) },
-                    onClick = { onMatchClick(match) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-        }
-
-        if (likelyMatches.isNotEmpty()) {
-            if (verifiedMatches.isNotEmpty()) Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "POSSIBLE FACE MATCHES — REVIEW MANUALLY",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = Amber
-            )
-            Text(
-                text = "These candidates have local face similarity below the confirmation threshold. They are not confirmed matches.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.DarkGray
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            likelyMatches.forEach { match ->
-                MatchCard(
-                    match = match,
-                    isPrimary = false,
-                    debugMode = debugMode,
-                    onLoadHighRes = { onLoadHighRes(match) },
-                    onClick = { onMatchClick(match) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-        }
-
-        if (uiState.tinEyeMatches.isNotEmpty()) {
-            if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            Text(
-                text = "EXACT IMAGE OCCURRENCES — TINEYE",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = Amber
-            )
-            Text(
-                text = "The image or a related image was found on these webpages. These results are not filtered by local face similarity.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.DarkGray
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            uiState.tinEyeMatches.forEach { match ->
-                MatchCard(
-                    match = match,
-                    isPrimary = false,
-                    debugMode = debugMode,
-                    onLoadHighRes = { onLoadHighRes(match) },
-                    onClick = { onMatchClick(match) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-        }
-
-        if (uiState.adultMatches.isNotEmpty()) {
-            if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty() || uiState.tinEyeMatches.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            Text(
-                text = "ADULT PLATFORM HITS",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = Color(0xFFE53935) // Reddish for Adult
-            )
-            Text(
-                text = "These results were found on adult networks using identity dorks. They skip local face verification to ensure coverage.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.DarkGray
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            uiState.adultMatches.forEach { match ->
-                MatchCard(
-                    match = match,
-                    isPrimary = false,
-                    debugMode = debugMode,
-                    onLoadHighRes = { onLoadHighRes(match) },
-                    onClick = { onMatchClick(match) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-        }
-
-        if (visualLeads.isNotEmpty()) {
-            if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty() || uiState.tinEyeMatches.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            Text(
-                text = "IN-APP VISUAL CANDIDATES (${visualLeads.size})",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = Amber
-            )
-            Text(
-                text = "These candidates contain one visible face and passed source filtering. They are ranked by local similarity only and are not identity matches.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.DarkGray
-            )
-
-            if (!uiState.termuxAvailable) {
-                val tipColor = if (!hasStrongResults) Color(0xFFFFCCBC) else Color(0xFFFFF9C4)
-                val textColor = if (!hasStrongResults) Color(0xFFBF360C) else Color(0xFF5D4037)
-                
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = tipColor),
-                    shape = RoundedCornerShape(12.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = if (!hasStrongResults) 4.dp else 0.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // View Mode Toggle Pill (List vs Network Graph)
+                Surface(
+                    color = Color(0xFFE2E8F0),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Info,
-                            contentDescription = null,
-                            tint = textColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Tip: Start the Termux OSINT helper for 5x deeper coverage and more verified matches.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = textColor,
-                            fontWeight = FontWeight.Bold
-                        )
+                    Row(modifier = Modifier.padding(2.dp)) {
+                        Surface(
+                            onClick = { viewMode = ResultsViewMode.LIST },
+                            color = if (viewMode == ResultsViewMode.LIST) Color.White else Color.Transparent,
+                            shape = RoundedCornerShape(10.dp),
+                            shadowElevation = if (viewMode == ResultsViewMode.LIST) 2.dp else 0.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.List,
+                                    contentDescription = "List View",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = Color.Black
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("List", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            }
+                        }
+
+                        Surface(
+                            onClick = { viewMode = ResultsViewMode.GRAPH },
+                            color = if (viewMode == ResultsViewMode.GRAPH) Color(0xFF0F172A) else Color.Transparent,
+                            shape = RoundedCornerShape(10.dp),
+                            shadowElevation = if (viewMode == ResultsViewMode.GRAPH) 2.dp else 0.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Share,
+                                    contentDescription = "Graph View",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = if (viewMode == ResultsViewMode.GRAPH) Color(0xFF00E5FF) else Color.DarkGray
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "Graph",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (viewMode == ResultsViewMode.GRAPH) Color.White else Color.DarkGray
+                                )
+                            }
+                        }
                     }
                 }
-            }
 
-            // NOTE: Removed the TextButton toggle here. 
-            // All candidates will now render automatically.
-            Spacer(modifier = Modifier.height(12.dp))
-            
-            visualLeads.forEach { match ->
-                MatchCard(
-                    match = match,
-                    isPrimary = false,
-                    debugMode = debugMode,
-                    onLoadHighRes = { onLoadHighRes(match) },
-                    onClick = { onMatchClick(match) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+                IconButton(onClick = {
+                    val summary = (uiState.matches + uiState.tinEyeMatches).take(10).joinToString("\n\n") {
+                        "${when {
+                            it.isFaceVerified -> "Verified face match"
+                            it.isLikelyFaceMatch -> "Possible face match — review manually"
+                            it.source.contains("TinEye", ignoreCase = true) -> "Exact image occurrence — TinEye"
+                            else -> "Unverified visual lead"
+                        }}: ${it.displayName} (${it.source})\n${it.profileUrl}"
+                    }
+                    val sendIntent = Intent().apply {
+                        action = Intent.ACTION_SEND
+                        putExtra(Intent.EXTRA_TEXT, "Sherlock visual-search results:\n\n$summary")
+                        type = "text/plain"
+                    }
+                    context.startActivity(Intent.createChooser(sendIntent, null))
+                }) {
+                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.Gray, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (viewMode == ResultsViewMode.GRAPH) {
+            IdentityNetworkGraph(
+                targetFaceBitmap = uiState.isolatedFace,
+                verifiedMatches = verifiedMatches,
+                likelyMatches = likelyMatches,
+                visualLeads = visualLeads,
+                tinEyeMatches = uiState.tinEyeMatches,
+                adultMatches = uiState.adultMatches,
+                onMatchClick = onMatchClick,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            // --- LIST VIEW MODE ---
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (verifiedMatches.isNotEmpty()) {
+                    verifiedMatches.forEachIndexed { index, match ->
+                        MatchCard(
+                            match = match,
+                            isPrimary = index == 0,
+                            debugMode = debugMode,
+                            onLoadHighRes = { onLoadHighRes(match) },
+                            onClick = { onMatchClick(match) }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+
+                if (likelyMatches.isNotEmpty()) {
+                    if (verifiedMatches.isNotEmpty()) Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "POSSIBLE FACE MATCHES — REVIEW MANUALLY",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = Amber
+                    )
+                    Text(
+                        text = "These candidates have local face similarity below the confirmation threshold. They are not confirmed matches.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.DarkGray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    likelyMatches.forEach { match ->
+                        MatchCard(
+                            match = match,
+                            isPrimary = false,
+                            debugMode = debugMode,
+                            onLoadHighRes = { onLoadHighRes(match) },
+                            onClick = { onMatchClick(match) }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+
+                if (uiState.tinEyeMatches.isNotEmpty()) {
+                    if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                    Text(
+                        text = "EXACT IMAGE OCCURRENCES — TINEYE",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = Amber
+                    )
+                    Text(
+                        text = "The image or a related image was found on these webpages. These results are not filtered by local face similarity.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.DarkGray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    uiState.tinEyeMatches.forEach { match ->
+                        MatchCard(
+                            match = match,
+                            isPrimary = false,
+                            debugMode = debugMode,
+                            onLoadHighRes = { onLoadHighRes(match) },
+                            onClick = { onMatchClick(match) }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+
+                if (uiState.adultMatches.isNotEmpty()) {
+                    if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty() || uiState.tinEyeMatches.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                    Text(
+                        text = "ADULT PLATFORM HITS",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFFE53935)
+                    )
+                    Text(
+                        text = "These results were found on adult networks using identity dorks. They skip local face verification to ensure coverage.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.DarkGray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    uiState.adultMatches.forEach { match ->
+                        MatchCard(
+                            match = match,
+                            isPrimary = false,
+                            debugMode = debugMode,
+                            onLoadHighRes = { onLoadHighRes(match) },
+                            onClick = { onMatchClick(match) }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+
+                if (visualLeads.isNotEmpty()) {
+                    if (verifiedMatches.isNotEmpty() || likelyMatches.isNotEmpty() || uiState.tinEyeMatches.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                    Text(
+                        text = "IN-APP VISUAL CANDIDATES (${visualLeads.size})",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = Amber
+                    )
+                    Text(
+                        text = "These candidates contain one visible face and passed source filtering. They are ranked by local similarity only and are not identity matches.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.DarkGray
+                    )
+
+                    if (!uiState.termuxAvailable) {
+                        val tipColor = if (!hasStrongResults) Color(0xFFFFCCBC) else Color(0xFFFFF9C4)
+                        val textColor = if (!hasStrongResults) Color(0xFFBF360C) else Color(0xFF5D4037)
+                        
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            colors = CardDefaults.cardColors(containerColor = tipColor),
+                            shape = RoundedCornerShape(12.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = if (!hasStrongResults) 4.dp else 0.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = textColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Tip: Start the Termux OSINT helper for 5x deeper coverage and more verified matches.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = textColor,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    visualLeads.forEach { match ->
+                        MatchCard(
+                            match = match,
+                            isPrimary = false,
+                            debugMode = debugMode,
+                            onLoadHighRes = { onLoadHighRes(match) },
+                            onClick = { onMatchClick(match) }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
             }
         }
 

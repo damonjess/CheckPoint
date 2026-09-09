@@ -28,6 +28,13 @@ class NativeFaceCropper {
             .build()
     )
 
+    private val recoveryDetector = FaceDetection.getClient(
+        FaceDetectorOptions.Builder()
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setMinFaceSize(0.02f)
+            .build()
+    )
+
     data class FaceQualityResult(val isGood: Boolean, val message: String)
 
     suspend fun validateFaceQuality(bitmap: Bitmap): FaceQualityResult {
@@ -110,9 +117,14 @@ class NativeFaceCropper {
     suspend fun cropSocial(bitmap: Bitmap): Bitmap = prepareFaceForSearch(bitmap)
     suspend fun cropForSocialProfile(bitmap: Bitmap): Bitmap = prepareFaceForSearch(bitmap)
 
-    private suspend fun findLargestFace(bitmap: Bitmap): Face? =
-        detector.process(InputImage.fromBitmap(bitmap.asSoftwareBitmap(), 0)).await()
-            .maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+    private suspend fun findLargestFace(bitmap: Bitmap): Face? {
+        val inputImage = InputImage.fromBitmap(bitmap.asSoftwareBitmap(), 0)
+        var faces = detector.process(inputImage).await()
+        if (faces.isEmpty()) {
+            faces = recoveryDetector.process(inputImage).await()
+        }
+        return faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+    }
 
     private fun cropAround(source: Bitmap, centerX: Int, centerY: Int, width: Int, height: Int): Bitmap {
         val safeWidth = min(width.coerceAtLeast(1), source.width)
@@ -157,7 +169,10 @@ class NativeFaceCropper {
     private fun Bitmap.asSoftwareBitmap(): Bitmap =
         if (config == null || config == Bitmap.Config.HARDWARE) copy(Bitmap.Config.ARGB_8888, true) else this
 
-    fun release() = detector.close()
+    fun release() {
+        detector.close()
+        recoveryDetector.close()
+    }
 
     private companion object {
         const val MIN_FACE_PIXELS = 80

@@ -1,5 +1,6 @@
 package com.yourcompany.facesearch.ui.components
 
+import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.animation.core.*
 import androidx.compose.animation.animateContentSize
@@ -503,7 +504,8 @@ private fun parseImageModel(rawModel: Any?): Any? {
         if (trimmed.startsWith("data:image", ignoreCase = true)) {
             return try {
                 val base64Data = trimmed.substringAfter("base64,")
-                Base64.decode(base64Data, Base64.DEFAULT)
+                val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             } catch (_: Exception) {
                 null
             }

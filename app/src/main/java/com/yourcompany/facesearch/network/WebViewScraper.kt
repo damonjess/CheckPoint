@@ -431,9 +431,9 @@ class WebViewScraper private constructor(
 
                     passesDone++
                     
-                    // Short circuit optimization: If we already have 12 unique results early,
+                    // Short circuit optimization: If we already have 30 unique results early,
                     // we can finish and resume, no need to wait the remaining seconds!
-                    if (accumulated.size >= 12 && continuation.isActive) {
+                    if (accumulated.size >= 30 && continuation.isActive) {
                         clearScheduled()
                         handler.removeCallbacks(timeoutRunnable)
                         continuation.resume(accumulated.values.toList())

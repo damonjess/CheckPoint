@@ -958,10 +958,10 @@ class CheckInViewModel(
         )
         return results.asSequence()
             .filter { !it.link.isNullOrBlank() }
-            // Significantly relaxed filtering to show more "raw" results as requested by user
+            .filterNot(::isIrrelevantVisualResult)
+            .filterNot(::isLikelyProductResult)
             .filterNot { match -> 
                 val metadata = listOfNotNull(match.title, match.link, match.source).joinToString(" ").lowercase()
-                // Only filter the most obvious junk
                 metadata.contains("favicon") || metadata.contains("spacer.gif")
             }
             .distinctBy { match -> match.link } // Deduplicate by URL only, not thumbnail

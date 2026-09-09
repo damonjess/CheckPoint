@@ -696,6 +696,8 @@ class CheckInViewModel(
         val tinEyeOccurrences = allRawResults
             .filter(::isTinEyeResult)
             .filter { !it.link.isNullOrBlank() }
+            .filterNot(::isIrrelevantVisualResult)
+            .filterNot(::isLikelyProductResult)
             .filterNot { match ->
                 val host = try {
                     Uri.parse(match.link).host.orEmpty().lowercase(Locale.US)

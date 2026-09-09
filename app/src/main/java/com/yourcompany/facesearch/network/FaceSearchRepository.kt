@@ -282,6 +282,7 @@ class FaceSearchRepository(private val context: Context) {
             "image", "photo", "picture", "wallpaper", "visual", "match", "stock", "vector",
             "search", "engine", "google", "bing", "yandex", "lens", "the", "and", "for", "with",
             "amazon", "vest", "shirt", "apparel", "clothing", "style", "shop", "store",
+            "http", "https", "www", "com", "net", "org", "co", "uk",
             // Exclude entertainment databases
             "imdb", "wikipedia", "fandom", "themoviedb", "britannica", "wiki", "biography",
             "actor", "actress", "celebrity", "movie", "film", "cast", "character", "tv"

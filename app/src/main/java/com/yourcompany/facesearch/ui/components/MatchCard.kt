@@ -462,7 +462,9 @@ private fun SecondaryMatchContent(
 
             if (!match.isFaceVerified) {
                 Text(
-                    text = if (match.isLikelyFaceMatch) {
+                    text = if (match.source.contains("TinEye", ignoreCase = true) || match.source.contains("Adult", ignoreCase = true)) {
+                        "Exact image occurrence — bypassing local face verification"
+                    } else if (match.isLikelyFaceMatch) {
                         "Possible face match — review manually; it did not meet the confirmation threshold"
                     } else if (match.confidence >= 0.45f) {
                         "Review lead — ${(match.confidence * 100).toInt()}% local similarity; not identity verified"

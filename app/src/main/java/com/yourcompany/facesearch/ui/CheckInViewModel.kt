@@ -18,6 +18,7 @@ import com.yourcompany.facesearch.network.AdultSiteConfig
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.FreeImageHost
 import com.yourcompany.facesearch.network.LocalServer
+import com.yourcompany.facesearch.network.SerpApiKeyManager
 import com.yourcompany.facesearch.network.SerpVisualMatch
 import com.yourcompany.facesearch.network.SocialMediaDetector
 import com.yourcompany.facesearch.network.ThumbnailUtils
@@ -111,6 +112,14 @@ class CheckInViewModel(
 
     fun onTargetHintChange(newHint: String) {
         targetHint = newHint
+    }
+
+    var serpApiKey by mutableStateOf(SerpApiKeyManager.getApiKey(getApplication()))
+        private set
+
+    fun onSerpApiKeyChange(newKey: String) {
+        serpApiKey = newKey
+        SerpApiKeyManager.saveApiKey(getApplication(), newKey)
     }
 
     private var termuxWs: WebSocket? = null
@@ -564,7 +573,7 @@ class CheckInViewModel(
         coroutineScope {
             // Independent SerpApi path - should run regardless of Termux if key is configured
             val serpApiFallbackDeferred = async {
-                if (com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
+                if (SerpApiKeyManager.hasApiKey(getApplication())) {
                     val serpProbeUrl = publicSceneUrl ?: publicUrl
                     if (!serpProbeUrl.isNullOrBlank()) {
                         try {

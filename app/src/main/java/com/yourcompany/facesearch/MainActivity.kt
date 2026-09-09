@@ -136,7 +136,9 @@ class MainActivity : ComponentActivity() {
                         onConfirmSearch = { face, scene -> checkInViewModel.onConfirmSearch(face, scene) },
                         onConfirmFreeSearch = { checkInViewModel.onConfirmFreeSearch(it) },
                         onTinEyeExactSearch = { checkInViewModel.onTinEyeExactSearch(it) },
-                        onLoadHighRes = { checkInViewModel.loadHighRes(it) }
+                        onLoadHighRes = { checkInViewModel.loadHighRes(it) },
+                        serpApiKey = checkInViewModel.serpApiKey,
+                        onSerpApiKeyChange = { checkInViewModel.onSerpApiKeyChange(it) }
                     )
 
                     Screen.CAMERA -> CameraCaptureScreen(

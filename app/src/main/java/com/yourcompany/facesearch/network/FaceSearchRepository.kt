@@ -10,6 +10,7 @@ import okhttp3.Request
 import com.yourcompany.facesearch.network.model.ServerSearchRequest
 import com.yourcompany.facesearch.network.model.ServerSearchResponse
 import com.yourcompany.facesearch.vision.NativeFaceCropper
+import retrofit2.HttpException
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
@@ -161,7 +162,7 @@ class FaceSearchRepository(private val context: Context) {
                         })
                     }
 
-                    if (com.yourcompany.facesearch.BuildConfig.SERP_API_KEY.isNotBlank()) {
+                    if (SerpApiKeyManager.hasApiKey(context)) {
                         jobs.add(async {
                             val matches = performSerpApiSearch(probeUrl, includeExactLensMatches, onLog)
                             allResults.addAll(matches)
@@ -363,15 +364,19 @@ class FaceSearchRepository(private val context: Context) {
         includeExactMatches: Boolean = false,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
-        val apiKey = com.yourcompany.facesearch.BuildConfig.SERP_API_KEY
+        val apiKey = SerpApiKeyManager.getApiKey(context)
         if (apiKey.isBlank()) return@withContext emptyList()
 
+        onLog("Requesting Google Lens visual matches via SerpApi...")
         try {
             val visualResponse = RetrofitClient.getSerpApi().googleLensSearch(
                 url = imageUrl,
                 type = "visual_matches",
                 apiKey = apiKey
             )
+            if (!visualResponse.error.isNullOrBlank()) {
+                onLog("⚠ SerpApi error: ${visualResponse.error}")
+            }
             val visualMatches = visualResponse.visualMatches.orEmpty().map { match ->
                 SerpVisualMatch(
                     title = match.title,
@@ -420,6 +425,17 @@ class FaceSearchRepository(private val context: Context) {
 
             onLog("✓ SerpApi found ${combined.size} candidate(s)")
             combined
+        } catch (e: HttpException) {
+            val code = e.code()
+            val errorBody = e.response()?.errorBody()?.string().orEmpty()
+            if (code == 401) {
+                onLog("⚠ SerpApi 401 Unauthorized: The API key is invalid, missing, or inactive. Please check/re-enter your SerpApi key in Settings.")
+            } else if (code == 429) {
+                onLog("⚠ SerpApi 429 Rate Limit: Monthly search limit reached or too many requests.")
+            } else {
+                onLog("⚠ SerpApi HTTP $code Error: ${errorBody.ifBlank { e.message() }}")
+            }
+            emptyList()
         } catch (e: Exception) {
             onLog("⚠ SerpApi search error: ${e.message}")
             emptyList()

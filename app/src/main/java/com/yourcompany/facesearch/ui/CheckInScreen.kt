@@ -9,6 +9,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.yourcompany.facesearch.ui.components.*
@@ -46,7 +51,9 @@ fun CheckInScreen(
     onConfirmSearch: (Bitmap, Bitmap) -> Unit,
     onConfirmFreeSearch: (Bitmap) -> Unit,
     onTinEyeExactSearch: (Bitmap) -> Unit,
-    onLoadHighRes: (WebMatchDisplay) -> Unit
+    onLoadHighRes: (WebMatchDisplay) -> Unit,
+    serpApiKey: String = "",
+    onSerpApiKeyChange: (String) -> Unit = {}
 ) {
     var activeInAppUrl by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -148,6 +155,64 @@ fun CheckInScreen(
                             Switch(
                                 checked = broadenLensCoverage,
                                 onCheckedChange = onBroadenLensCoverageChange
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "SerpApi Key (Google Lens)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                if (serpApiKey.isNotBlank()) {
+                                    Text(
+                                        "✓ Configured",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF388E3C)
+                                    )
+                                } else {
+                                    Text(
+                                        "⚠ Key Missing",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = Amber
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            var showKey by remember { mutableStateOf(false) }
+                            OutlinedTextField(
+                                value = serpApiKey,
+                                onValueChange = onSerpApiKeyChange,
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Paste SerpApi key here...") },
+                                singleLine = true,
+                                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(onClick = { showKey = !showKey }) {
+                                        Icon(
+                                            imageVector = if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = if (showKey) "Hide Key" else "Show Key"
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            Text(
+                                "Required for Google Lens visual search matches. Saved locally on device.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.DarkGray,
+                                modifier = Modifier.padding(top = 4.dp)
                             )
                         }
 

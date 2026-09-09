@@ -1,5 +1,7 @@
 package com.yourcompany.facesearch.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +51,7 @@ fun ProfileDiscoveryScreen(
     viewModel: ProfileDiscoveryViewModel,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val profile = viewModel.profile
     var activeInAppUrl by remember { mutableStateOf<String?>(null) }
     val focusManager = LocalFocusManager.current
@@ -189,7 +193,14 @@ fun ProfileDiscoveryScreen(
                 }
                 item {
                     OutlinedButton(
-                        onClick = { activeInAppUrl = viewModel.webQueries.first() },
+                        onClick = { 
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(viewModel.webQueries.first()))
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                activeInAppUrl = viewModel.webQueries.first()
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Launch, contentDescription = null)
@@ -209,7 +220,14 @@ fun ProfileDiscoveryScreen(
                 items(viewModel.leads.size, key = { index -> viewModel.leads[index].url }) { index ->
                     ProfileLeadCard(
                         lead = viewModel.leads[index],
-                        onOpen = { activeInAppUrl = viewModel.leads[index].url }
+                        onOpen = { 
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(viewModel.leads[index].url))
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                activeInAppUrl = viewModel.leads[index].url
+                            }
+                        }
                     )
                 }
             }

@@ -1,6 +1,8 @@
 package com.yourcompany.facesearch.ui
 
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,6 +49,7 @@ fun CheckInScreen(
     onLoadHighRes: (WebMatchDisplay) -> Unit
 ) {
     var activeInAppUrl by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
     val isLoading = uiState is CheckInUiState.Loading || isSearching
 
     Scaffold(
@@ -253,7 +257,14 @@ fun CheckInScreen(
                             uiState = uiState,
                             debugMode = debugMode,
                             onLoadHighRes = onLoadHighRes,
-                            onMatchClick = { match -> activeInAppUrl = match.profileUrl }
+                            onMatchClick = { match ->
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(match.profileUrl))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    activeInAppUrl = match.profileUrl
+                                }
+                            }
                         )
                     }
 

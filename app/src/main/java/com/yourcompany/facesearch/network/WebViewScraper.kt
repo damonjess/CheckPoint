@@ -213,6 +213,15 @@ class WebViewScraper private constructor(
                         var title = a.innerText || '';
                         addItem(title, a.href, thumb);
                     });
+                } else if(hostname.indexOf('sogou.com') >= 0){
+                    document.querySelectorAll('.vr-resultItem, .vr-resultItem a').forEach(function(el){
+                        var a = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
+                        var img = el.querySelector('img');
+                        if(a){
+                            var thumb = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
+                            addItem(a.innerText || a.title || 'Visual Candidate', a.href, thumb);
+                        }
+                    });
                 } else if(hostname.indexOf('tineye.com') >= 0){
                     document.querySelectorAll('.match, .result, .match-thumb, div[class*="match"], div[class*="result"], .image-result').forEach(function(el){
                         var a = el.querySelector('a[href^="http"]');
@@ -281,28 +290,34 @@ class WebViewScraper private constructor(
         """
     }
 
+    suspend fun scrapeSogou(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
+        url = "https://pic.sogou.com/ris?query=${URLEncoder.encode(imageUrl, "UTF-8")}&flag=1",
+        engineName = "Sogou",
+        delayMs = 4500
+    )
+
     suspend fun scrapeGoogle(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://lens.google.com/uploadbyurl?url=${URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Google",
-        delayMs = 7000
+        delayMs = 3500
     )
 
     suspend fun scrapeBing(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${URLEncoder.encode(imageUrl, "UTF-8")}&adlt=off",
         engineName = "Bing",
-        delayMs = 9000
+        delayMs = 4500
     )
 
     suspend fun scrapeTinEye(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://tineye.com/search?url=${URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "TinEye",
-        delayMs = 6000
+        delayMs = 3000
     )
 
     suspend fun scrapeYandex(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
         url = "https://yandex.com/images/search?rpt=imageview&url=${URLEncoder.encode(imageUrl, "UTF-8")}&family=no",
         engineName = "Yandex",
-        delayMs = 9000
+        delayMs = 4500
     )
 
     suspend fun scrapeSocialDork(
@@ -415,6 +430,16 @@ class WebViewScraper private constructor(
                     } catch (_: Exception) {}
 
                     passesDone++
+                    
+                    // Short circuit optimization: If we already have 12 unique results early,
+                    // we can finish and resume, no need to wait the remaining seconds!
+                    if (accumulated.size >= 12 && continuation.isActive) {
+                        clearScheduled()
+                        handler.removeCallbacks(timeoutRunnable)
+                        continuation.resume(accumulated.values.toList())
+                        return
+                    }
+
                     if (passesDone >= totalPasses) {
                         // Reload once if the provider initially served an
                         // interstitial that produced no candidates.
@@ -460,14 +485,14 @@ class WebViewScraper private constructor(
                         view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight/3);", null)
                         view?.evaluateJavascript(extractJs, null)
                     }
-                    postExtract(delayMs + 2000, gen) {
+                    postExtract(delayMs + 1500, gen) {
                         view?.evaluateJavascript("window.scrollTo(0, document.body.scrollHeight);", null)
                         view?.evaluateJavascript(extractJs, null)
                     }
-                    postExtract(delayMs + 4000, gen) {
+                    postExtract(delayMs + 3000, gen) {
                         view?.evaluateJavascript(extractJs, null)
                     }
-                    postExtract(delayMs + 6500, gen) {
+                    postExtract(delayMs + 4500, gen) {
                         view?.evaluateJavascript(extractJs, null)
                     }
                 }

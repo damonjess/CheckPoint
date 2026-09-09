@@ -86,7 +86,7 @@ const UNIVERSAL_EXTRACT_JS = `
             }
 
             href = href.split('#')[0];
-            if(seen.has(href) || href.indexOf('google.') >= 0 || href.indexOf('bing.com') >= 0 || href.indexOf('yandex.') >= 0) return;
+            if(seen.has(href) || href.indexOf('google.') >= 0 || href.indexOf('bing.com') >= 0 || href.indexOf('yandex.') >= 0 || href.indexOf('tineye.com') >= 0 || href.indexOf('sogou.com') >= 0) return;
 
             var img = a.querySelector('img');
             if (!img) {
@@ -157,6 +157,12 @@ const ADULT_EXTRACT_JS = `
 `;
 
 const ENGINES = [
+  {
+    name: 'TinEye',
+    urlFor: (url) => `https://tineye.com/search?url=${encodeURIComponent(url)}`,
+    extractJs: UNIVERSAL_EXTRACT_JS,
+    waitUntil: 'domcontentloaded'
+  },
   {
     name: 'Sogou Visual',
     urlFor: (url) => `https://pic.sogou.com/ris?query=${encodeURIComponent(url)}&flag=1`,
@@ -257,12 +263,23 @@ app.post('/api/search', async (req, res) => {
   try {
     const allMatches = [];
 
-    // Run sequentially to prevent CPU throttling on device
-    for (const engine of ENGINES) {
-      console.log(`[${engine.name}] Loading...`);
-      const matches = await scrapeEngine(engine, targetImage);
-      allMatches.push(...matches);
-    }
+    // Run concurrently with a concurrency limit of 2 to speed up the search
+    // dramatically without crashing Termux due to high RAM/CPU usage.
+    const queue = [...ENGINES];
+    const maxConcurrency = 2;
+
+    console.log(`[Search] Launching engines with concurrency of ${maxConcurrency}...`);
+
+    const workers = Array(maxConcurrency).fill(null).map(async () => {
+      while (queue.length > 0) {
+        const engine = queue.shift();
+        console.log(`[${engine.name}] Loading...`);
+        const matches = await scrapeEngine(engine, targetImage);
+        allMatches.push(...matches);
+      }
+    });
+
+    await Promise.all(workers);
 
     const uniqueMatches = [];
     const seenUrls = new Set();

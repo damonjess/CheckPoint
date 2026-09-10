@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -108,7 +110,7 @@ fun SuccessContent(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    var viewMode by remember { mutableStateOf(ResultsViewMode.LIST) }
+    var viewMode by rememberSaveable { mutableStateOf(ResultsViewMode.LIST) }
     val consoleScrollState = rememberScrollState()
     LaunchedEffect(uiState.logs.size) {
         consoleScrollState.animateScrollTo(consoleScrollState.maxValue)
@@ -189,7 +191,7 @@ fun SuccessContent(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    Icons.Default.Share,
+                                    Icons.Default.Hub,
                                     contentDescription = "Graph View",
                                     modifier = Modifier.size(14.dp),
                                     tint = if (viewMode == ResultsViewMode.GRAPH) Color(0xFF00E5FF) else Color.DarkGray
@@ -207,11 +209,12 @@ fun SuccessContent(
                 }
 
                 IconButton(onClick = {
-                    val summary = (uiState.matches + uiState.tinEyeMatches).take(10).joinToString("\n\n") {
+                    val summary = (uiState.matches + uiState.tinEyeMatches + uiState.adultMatches).take(10).joinToString("\n\n") {
                         "${when {
                             it.isFaceVerified -> "Verified face match"
                             it.isLikelyFaceMatch -> "Possible face match — review manually"
                             it.source.contains("TinEye", ignoreCase = true) -> "Exact image occurrence — TinEye"
+                            it in uiState.adultMatches -> "Adult platform hit"
                             else -> "Unverified visual lead"
                         }}: ${it.displayName} (${it.source})\n${it.profileUrl}"
                     }

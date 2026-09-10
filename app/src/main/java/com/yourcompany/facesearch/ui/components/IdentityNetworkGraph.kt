@@ -10,7 +10,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -237,7 +239,8 @@ fun IdentityNetworkGraph(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(12.dp)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
         ) {
             GraphFilter.entries.forEach { filter ->
@@ -560,7 +563,7 @@ private fun buildNetworkNodes(
             ringCapacity.coerceAtMost(allPairs.size - startIndexForRing)
         }.coerceAtLeast(1)
 
-        val indexInRing = totalIndex % ringCapacity
+        val indexInRing = totalIndex - startIndexForRing
         // Stagger outer rings slightly (+22.5 deg) to prevent overlap with inner ring nodes
         val ringAngleOffset = ringIndex * 22.5f
         val angleDeg = (indexInRing * (360f / itemsInThisRing) + ringAngleOffset) % 360f

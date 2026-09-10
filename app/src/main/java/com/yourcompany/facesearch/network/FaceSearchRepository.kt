@@ -52,18 +52,25 @@ class FaceSearchRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             val allResults = java.util.Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
 
-            val searchBitmap = faceBitmap ?: NativeFaceCropper().prepareFaceForSearch(bitmap)
+            val cropper = NativeFaceCropper()
+            val searchBitmap = faceBitmap ?: cropper.prepareFaceForSearch(bitmap)
+            val expandedBitmap = cropper.getExpandedHeadAndShouldersProbe(bitmap)
+
             val stream = ByteArrayOutputStream()
-            // This must be 92 (high quality) instead of a low number! (The 15 KB Issue Fix)
             searchBitmap.compress(Bitmap.CompressFormat.JPEG, 92, stream)
             val byteArray = stream.toByteArray()
 
             val probeUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
                 imageUrl
             } else {
-                onLog("Uploading strict face probe (${byteArray.size / 1024} KB) to prevent clothing matches...")
+                onLog("Uploading primary face probe (${byteArray.size / 1024} KB)...")
                 freeHost.upload(searchBitmap, onLog)
             }
+
+            val expandedProbeUrl = if (expandedBitmap != null && (imageUrl == null || !imageUrl.startsWith("http"))) {
+                onLog("Uploading secondary expanded probe (head & shoulders)...")
+                freeHost.upload(expandedBitmap, onLog)
+            } else sceneUrl ?: imageUrl
 
             if (probeUrl == null) {
                 onLog("✗ Image upload failed. Cannot perform visual search.")
@@ -107,7 +114,11 @@ class FaceSearchRepository(private val context: Context) {
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches = s.scrapeSogou(probeUrl)
-                                onLog("Sogou found ${matches.size} candidate(s)")
+                                if (matches.isNotEmpty()) {
+                                    onLog("✓ Sogou found ${matches.size} candidate(s)")
+                                } else {
+                                    onLog("ℹ Sogou: 0 candidates found")
+                                }
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
@@ -119,7 +130,11 @@ class FaceSearchRepository(private val context: Context) {
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches = s.scrapeTinEye(probeUrl)
-                                onLog("TinEye found ${matches.size} candidate(s)")
+                                if (matches.isNotEmpty()) {
+                                    onLog("✓ TinEye found ${matches.size} candidate(s)")
+                                } else {
+                                    onLog("ℹ TinEye: 0 candidates found")
+                                }
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
@@ -131,7 +146,11 @@ class FaceSearchRepository(private val context: Context) {
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches = s.scrapeGoogle(probeUrl)
-                                onLog("Google found ${matches.size} candidate(s)")
+                                if (matches.isNotEmpty()) {
+                                    onLog("✓ Google found ${matches.size} candidate(s)")
+                                } else {
+                                    onLog("ℹ Google: 0 candidates found")
+                                }
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
@@ -143,7 +162,11 @@ class FaceSearchRepository(private val context: Context) {
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches = s.scrapeBing(probeUrl)
-                                onLog("Bing found ${matches.size} candidate(s)")
+                                if (matches.isNotEmpty()) {
+                                    onLog("✓ Bing found ${matches.size} candidate(s)")
+                                } else {
+                                    onLog("ℹ Bing: 0 candidates found")
+                                }
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
@@ -155,16 +178,28 @@ class FaceSearchRepository(private val context: Context) {
                             val s = WebViewScraper.create(context)
                             try {
                                 val matches = s.scrapeYandex(probeUrl)
-                                onLog("Yandex found ${matches.size} candidate(s)")
+                                if (expandedProbeUrl != null && expandedProbeUrl != probeUrl) {
+                                    val secondary = s.scrapeYandex(expandedProbeUrl)
+                                    allResults.addAll(secondary)
+                                }
+                                if (matches.isNotEmpty()) {
+                                    onLog("✓ Yandex found ${matches.size} candidate(s)")
+                                } else {
+                                    onLog("ℹ Yandex: 0 candidates found")
+                                }
                                 allResults.addAll(matches)
                                 Unit
                             } finally { s.destroy() }
                         })
                     }
 
-                    if (SerpApiKeyManager.hasApiKey(context)) {
+                    if ("SerpApi" !in enginesToSkip && SerpApiKeyManager.hasApiKey(context)) {
                         jobs.add(async {
                             val matches = performSerpApiSearch(probeUrl, includeExactLensMatches, onLog)
+                            if (expandedProbeUrl != null && expandedProbeUrl != probeUrl) {
+                                val secondary = performSerpApiSearch(expandedProbeUrl, includeExactLensMatches)
+                                allResults.addAll(secondary)
+                            }
                             allResults.addAll(matches)
                             Unit
                         })
@@ -234,6 +269,19 @@ class FaceSearchRepository(private val context: Context) {
                         // ==========================================
                         onLog("Discovered identity hint: '$primaryName'. Running UK & global profile lookup...")
                         
+                        // Concurrent Live Username Handle Scanner across 10 social platforms
+                        val directHandles = UsernameScanner.scanUsername(primaryName, onLog)
+                        allResults.addAll(directHandles)
+
+                        // Concurrent DuckDuckGo OSINT Dorking for major social networks
+                        val ddgDomains = listOf("facebook.com", "instagram.com", "linkedin.com", "twitter.com", "tiktok.com", "github.com")
+                        coroutineScope {
+                            val ddgJobs = ddgDomains.map { domain ->
+                                async { DuckDuckGoDorker.dork(domain, primaryName, onLog) }
+                            }
+                            allResults.addAll(ddgJobs.awaitAll().flatten())
+                        }
+
                         // Core Social Networks
                         allResults.addAll(scraper.scrapeSocialDork("facebook.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("instagram.com", primaryName, onLog))
@@ -374,8 +422,12 @@ class FaceSearchRepository(private val context: Context) {
                 type = "visual_matches",
                 apiKey = apiKey
             )
-            if (!visualResponse.error.isNullOrBlank()) {
-                onLog("⚠ SerpApi error: ${visualResponse.error}")
+            val rawErr = visualResponse.error.orEmpty()
+            if (rawErr.isNotBlank()) {
+                if (!rawErr.contains("hasn't returned any results", ignoreCase = true) &&
+                    !rawErr.contains("no results", ignoreCase = true)) {
+                    onLog("⚠ SerpApi warning: $rawErr")
+                }
             }
             val visualMatches = visualResponse.visualMatches.orEmpty().map { match ->
                 SerpVisualMatch(
@@ -423,15 +475,19 @@ class FaceSearchRepository(private val context: Context) {
                 .filter { !it.link.isNullOrBlank() }
                 .distinctBy { it.link }
 
-            onLog("✓ SerpApi found ${combined.size} candidate(s)")
+            if (combined.isNotEmpty()) {
+                onLog("✓ SerpApi (Google Lens) found ${combined.size} candidate(s)")
+            } else {
+                onLog("ℹ SerpApi (Google Lens): 0 candidates found")
+            }
             combined
         } catch (e: HttpException) {
             val code = e.code()
             val errorBody = e.response()?.errorBody()?.string().orEmpty()
             if (code == 401) {
-                onLog("⚠ SerpApi 401 Unauthorized: The API key is invalid, missing, or inactive. Please check/re-enter your SerpApi key in Settings.")
+                onLog("⚠ SerpApi 401 Unauthorized: Invalid API key. Check settings.")
             } else if (code == 429) {
-                onLog("⚠ SerpApi 429 Rate Limit: Monthly search limit reached or too many requests.")
+                onLog("⚠ SerpApi 429 Rate Limit: Monthly search limit reached.")
             } else {
                 onLog("⚠ SerpApi HTTP $code Error: ${errorBody.ifBlank { e.message() }}")
             }

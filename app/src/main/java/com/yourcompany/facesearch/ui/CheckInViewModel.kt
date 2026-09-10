@@ -22,6 +22,7 @@ import com.yourcompany.facesearch.network.SerpApiKeyManager
 import com.yourcompany.facesearch.network.SerpVisualMatch
 import com.yourcompany.facesearch.network.SocialMediaDetector
 import com.yourcompany.facesearch.network.ThumbnailUtils
+import com.yourcompany.facesearch.network.UsernameScanner
 import com.yourcompany.facesearch.network.model.Match
 import com.yourcompany.facesearch.ui.models.WebMatchDisplay
 import com.yourcompany.facesearch.vision.FaceDetectionResult
@@ -97,9 +98,12 @@ class CheckInViewModel(
     private var currentProgress = 0.1f
 
     private fun addLog(msg: String, progress: Float? = null) {
-        currentLogs.add(msg)
+        val trimmed = msg.trim()
+        if (trimmed.isBlank()) return
+        if (currentLogs.lastOrNull() == trimmed) return
+        currentLogs.add(trimmed)
         if (progress != null) currentProgress = progress
-        Log.e("CheckIn", "CONSOLE_LOG: $msg")
+        Log.e("CheckIn", "CONSOLE_LOG: $trimmed")
         uiState = when (val previous = uiState) {
             is CheckInUiState.Success -> previous.copy(logs = currentLogs.toList())
             is CheckInUiState.NoMatch -> previous.copy(logs = currentLogs.toList())
@@ -571,6 +575,22 @@ class CheckInViewModel(
             return
         }
         coroutineScope {
+            // Live Handle Scanner for user target hint
+            val usernameScanDeferred = async {
+                if (!combinedHint.isNullOrBlank()) {
+                    try {
+                        UsernameScanner.scanUsername(
+                            rawUsername = combinedHint,
+                            onLog = { msg: String -> handleScraperLog(msg) }
+                        )
+                    } catch (_: Exception) {
+                        emptyList<SerpVisualMatch>()
+                    }
+                } else {
+                    emptyList<SerpVisualMatch>()
+                }
+            }
+
             // Independent SerpApi path - should run regardless of Termux if key is configured
             val serpApiFallbackDeferred = async {
                 if (SerpApiKeyManager.hasApiKey(getApplication())) {
@@ -617,11 +637,13 @@ class CheckInViewModel(
             val webDeferred = async {
                 delay(500)
                 try {
-                    // If Termux is available, skip the engines it handles to avoid redundant work
-                    val enginesToSkip = if (useTermux) {
-                        setOf("Google", "Bing", "Yandex", "TinEye")
-                    } else {
-                        emptySet()
+                    // Skip engines already handled elsewhere to avoid duplicate execution and logs
+                    val enginesToSkip = mutableSetOf<String>()
+                    if (useTermux) {
+                        enginesToSkip.addAll(setOf("Google", "Bing", "Yandex", "TinEye"))
+                    }
+                    if (SerpApiKeyManager.hasApiKey(getApplication())) {
+                        enginesToSkip.add("SerpApi")
                     }
                     
                     addLog("Executing recursive identity discovery...")
@@ -695,9 +717,16 @@ class CheckInViewModel(
                 emptyList<SerpVisualMatch>()
             }
 
+            val usernameScanResults = try {
+                usernameScanDeferred.await()
+            } catch (_: Exception) {
+                emptyList<SerpVisualMatch>()
+            }
+
             allRawResults.addAll(termuxResults)
             allRawResults.addAll(webResults)
             allRawResults.addAll(serpApiFallbackResults)
+            allRawResults.addAll(usernameScanResults)
         }
 
         // Correct TinEye fix: Identify and retain external TinEye results separately

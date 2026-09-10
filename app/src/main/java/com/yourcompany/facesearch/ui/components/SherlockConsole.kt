@@ -30,8 +30,15 @@ fun SherlockConsole(
     scrollState: ScrollState = rememberScrollState()
 ) {
     val clipboardManager = LocalClipboardManager.current
+
+    LaunchedEffect(logs.size) {
+        if (logs.isNotEmpty()) {
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+    }
+
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color.Black),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0D0D11)),
         modifier = modifier,
         shape = RoundedCornerShape(8.dp),
     ) {
@@ -42,19 +49,23 @@ fun SherlockConsole(
                     .verticalScroll(scrollState)
                     .padding(12.dp)
             ) {
-                logs.forEach { log ->
+                logs.forEach { rawLog ->
+                    val textColor = getLogColor(rawLog)
+                    val formattedText = formatLogPrefix(rawLog)
                     Text(
-                        text = "> $log",
-                        color = if (log.contains("SUCCESS", true) || log.contains("MATCH", true)) Color.Green 
-                                else if (log.contains("ERROR", true) || log.contains("FAIL", true)) Color.Red 
-                                else Amber,
+                        text = formattedText,
+                        color = textColor,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
-                        lineHeight = 14.sp
+                        lineHeight = 15.sp,
+                        modifier = Modifier.padding(vertical = 1.dp)
                     )
                 }
                 if (showCursor) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
                         Text(
                             text = "> ",
                             color = Amber,
@@ -70,9 +81,58 @@ fun SherlockConsole(
                 onClick = { clipboardManager.setText(AnnotatedString(logs.joinToString("\n"))) },
                 modifier = Modifier.align(Alignment.TopEnd)
             ) {
-                Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs", tint = Amber.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                Icon(
+                    Icons.Default.ContentCopy,
+                    contentDescription = "Copy logs",
+                    tint = Amber.copy(alpha = 0.5f),
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
+    }
+}
+
+private fun formatLogPrefix(log: String): String {
+    val trimmed = log.trim()
+    return when {
+        trimmed.startsWith("✓") ||
+        trimmed.startsWith("⚠") ||
+        trimmed.startsWith("✗") ||
+        trimmed.startsWith("ℹ") ||
+        trimmed.startsWith(">") -> trimmed
+        trimmed.startsWith("STEP") -> "> $trimmed"
+        else -> "> $trimmed"
+    }
+}
+
+private fun getLogColor(log: String): Color {
+    val trimmed = log.trim()
+    return when {
+        // Errors / Failures
+        trimmed.startsWith("✗") || 
+        trimmed.contains("ERROR", true) || 
+        trimmed.contains("FAILED", true) -> Color(0xFFEF5350) // Soft Red
+
+        // Warnings / Tips
+        trimmed.startsWith("⚠") || 
+        trimmed.contains("Tip:", true) -> Color(0xFFFFB74D) // Orange/Amber Warning
+
+        // Success / Matches found
+        trimmed.startsWith("✓") || 
+        trimmed.contains("SUCCESS", true) || 
+        (trimmed.contains("found", true) && !trimmed.contains("0 candidate", true) && !trimmed.contains("0 candidate(s)", true)) ||
+        trimmed.contains("verified match", true) -> Color(0xFF4CAF50) // Emerald Green
+
+        // Info / 0 Candidates / Neutral Notices
+        trimmed.startsWith("ℹ") || 
+        trimmed.contains("0 candidates found", true) || 
+        trimmed.contains("0 candidate(s)", true) -> Color(0xFF81D4FA) // Light Blue/Cyan
+
+        // Step headers
+        trimmed.startsWith("STEP", true) -> Color(0xFFFFD54F) // Bright Yellow
+
+        // Default terminal amber
+        else -> Amber
     }
 }
 
@@ -80,7 +140,7 @@ fun SherlockConsole(
 private fun BlinkingCursor() {
     val infiniteTransition = rememberInfiniteTransition(label = "cursor")
     val alpha by infiniteTransition.animateFloat(
-        initialValue = 0f,
+        initialValue = 0.2f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(500, easing = LinearEasing),
@@ -90,8 +150,7 @@ private fun BlinkingCursor() {
     )
     Box(
         modifier = Modifier
-            .size(width = 8.dp, height = 12.dp)
-            .padding(top = 2.dp)
+            .size(width = 7.dp, height = 12.dp)
             .background(Amber.copy(alpha = alpha))
     )
 }

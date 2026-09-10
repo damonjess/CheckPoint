@@ -1,7 +1,11 @@
 package com.yourcompany.facesearch.vision
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Rect
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
@@ -56,23 +60,66 @@ class NativeFaceCropper {
      * Returns a natural portrait for optional external reverse-image search.
      * The application’s primary flow sends a normalized original photo instead.
      */
-    suspend fun prepareFaceForSearch(original: Bitmap): Bitmap =
-        cropAndAlignFace(original, fullJawline = true)?.let(::scaleToMaxDimension) ?: scaleToMaxDimension(original)
+    suspend fun prepareFaceForSearch(original: Bitmap): Bitmap {
+        val cropped = cropAndAlignFace(original, fullJawline = true) ?: original
+        val enhanced = upscaleAndEnhanceSmallFace(cropped)
+        return scaleToMaxDimension(enhanced)
+    }
 
-    suspend fun getTightFaceCrop(bitmap: Bitmap): Bitmap? {
+    /**
+     * Generates an expanded head-and-shoulders probe preserving hair, upper torso,
+     * and head contours for multi-probe visual engine searching.
+     */
+    suspend fun getExpandedHeadAndShouldersProbe(bitmap: Bitmap): Bitmap? {
         val source = bitmap.asSoftwareBitmap()
         val face = findLargestFace(source) ?: return null
         val box = face.boundingBox.clampTo(source.width, source.height)
-        // FIX: Reduced padding from 0.08f to 0.02f to eliminate clothing
-        val paddingX = (box.width() * 0.02f).toInt()
-        val paddingY = (box.height() * 0.02f).toInt()
-        return cropAround(
+
+        val widthScale = 2.20f
+        val heightScale = 2.80f
+
+        val crop = cropAround(
             source = source,
             centerX = box.centerX(),
-            centerY = box.centerY(),
-            width = box.width() + 2 * paddingX,
-            height = box.height() + 2 * paddingY
+            centerY = (box.centerY() + box.height() * 0.15f).toInt(),
+            width = max(box.width(), (box.width() * widthScale).toInt()),
+            height = max(box.height(), (box.height() * heightScale).toInt())
         )
+        return scaleToMaxDimension(upscaleAndEnhanceSmallFace(crop))
+    }
+
+    /**
+     * Upscales low-resolution face crops (< 200px) smoothly to ensure visual search engines
+     * (Google Lens, Yandex, TinEye) receive sufficient pixel density for feature extraction.
+     */
+    fun upscaleAndEnhanceSmallFace(source: Bitmap): Bitmap {
+        val safe = source.asSoftwareBitmap()
+        val minDimension = min(safe.width, safe.height)
+        if (minDimension >= 220) return safe
+
+        val scaleFactor = 400f / minDimension.toFloat()
+        val targetWidth = (safe.width * scaleFactor).toInt().coerceAtLeast(1)
+        val targetHeight = (safe.height * scaleFactor).toInt().coerceAtLeast(1)
+
+        val upscaled = Bitmap.createScaledBitmap(safe, targetWidth, targetHeight, true)
+
+        // Contrast and brightness boost for low-res face crops
+        val paint = Paint().apply {
+            colorFilter = ColorMatrixColorFilter(
+                ColorMatrix(
+                    floatArrayOf(
+                        1.08f, 0f, 0f, 0f, 5f,
+                        0f, 1.08f, 0f, 0f, 5f,
+                        0f, 0f, 1.08f, 0f, 5f,
+                        0f, 0f, 0f, 1.00f, 0f
+                    )
+                )
+            )
+        }
+        val result = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+        canvas.drawBitmap(upscaled, 0f, 0f, paint)
+        return result
     }
 
     /**
@@ -85,8 +132,8 @@ class NativeFaceCropper {
         val box = face.boundingBox.clampTo(source.width, source.height)
         
         // FIX: Match FaceDetectorHelper EXACTLY to ensure source and result embeddings map correctly
-        val widthScale = 1.25f
-        val heightScale = 1.55f
+        val widthScale = 1.50f
+        val heightScale = 1.80f
         
         val crop = cropAround(
             source = source,

@@ -233,12 +233,29 @@ class WebViewScraper private constructor(
                         }
                     });
                 } else if(hostname.indexOf('tineye.com') >= 0){
-                    document.querySelectorAll('.match, .result, .match-thumb, div[class*="match"], div[class*="result"], .image-result, .match-item, .results-container a').forEach(function(el){
-                        var a = el.querySelector('a[href^="http"]');
+                    // TinEye: extract match links and thumbnails
+                    document.querySelectorAll('.match, .result, .match-thumb, div[class*="match"], div[class*="result"], .image-result, .match-item, .results-container a, .match-item a, .result a, a[href*="/search/"]').forEach(function(el){
+                        var a = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
+                        if(!a) return;
+                        var href = a.href;
+                        // TinEye wraps results in their own domain sometimes
+                        if(href.indexOf('tineye.com') >= 0) return;
                         var img = el.querySelector('img');
-                        if(a){
-                            var thumb = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
-                            addItem(a.innerText || a.title || 'Visual Candidate', a.href, thumb);
+                        var thumb = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('src')) : null;
+                        // For TinEye, accept results even without thumbnails
+                        if(href && href.indexOf('http') === 0){
+                            var real = unwrap(href);
+                            if(!real || real.indexOf('http') !== 0) return;
+                            if(isInternal(real)) return;
+                            if(isProbe(real)) return;
+                            if(seen.has(real)) return;
+                            seen.add(real);
+                            items.push({
+                                title: (a.innerText || a.title || 'TinEye Match').replace(/\s+/g,' ').trim().substring(0, 120),
+                                link: real,
+                                thumbnail: thumb || '',
+                                score: 150
+                            });
                         }
                     });
                 }
@@ -370,7 +387,7 @@ class WebViewScraper private constructor(
         val bingResults = scrapeEngine(
             url = targetUrl,
             engineName = AdultSiteConfig.labelFor(site),
-            delayMs = 3000,
+            delayMs = 2000,
             extractJs = DORK_EXTRACT_JS,
             onLog = onLog
         )
@@ -383,7 +400,7 @@ class WebViewScraper private constructor(
         return scrapeEngine(
             url = googleUrl,
             engineName = "Google (${AdultSiteConfig.labelFor(site)})",
-            delayMs = 3000,
+            delayMs = 2000,
             extractJs = DORK_EXTRACT_JS,
             onLog = onLog
         )

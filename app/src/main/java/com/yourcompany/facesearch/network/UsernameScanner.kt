@@ -68,9 +68,28 @@ object UsernameScanner {
             .replace(Regex("[^a-z0-9._-]"), "")
             .trim()
 
-        if (username.length < 3 || username.all { it.isDigit() }) return@withContext emptyList()
+        // Validation: reject URLs, garbage, and too-long usernames
+        if (username.length < 3 || username.length > 30) {
+            onLog("⚠ Username '$username' is too short or too long — skipping scan.")
+            return@withContext emptyList()
+        }
+        if (username.all { it.isDigit() }) return@withContext emptyList()
+        if (username.contains("http") || username.contains("www") || 
+            username.contains("shutterstock") || username.contains("gettyimages") ||
+            username.contains("alamy") || username.contains("istockphoto")) {
+            onLog("⚠ Username looks like a URL or stock photo reference — skipping scan.")
+            return@withContext emptyList()
+        }
 
         onLog("Scanning username handles for '@$username' across ${platforms.size} social networks...")
+
+        // Platforms known to return 200 for non-existent profiles (soft 404s)
+        // These need body content checking, not just status code
+        val softNotFoundPlatforms = setOf(
+            "Instagram", "Facebook", "TikTok", "X / Twitter", "LinkedIn",
+            "Pinterest", "Threads", "Medium", "OnlyFans", "Fansly",
+            "Snapchat", "Spotify", "Roblox"
+        )
 
         val activeProfiles = platforms.map { target ->
             async {
@@ -79,20 +98,54 @@ object UsernameScanner {
                     val request = Request.Builder()
                         .url(profileUrl)
                         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                         .head()
                         .build()
 
                     fastClient.newCall(request).execute().use { response ->
                         if (response.code in target.expectedMinStatus..target.expectedMaxStatus) {
-                            val platform = SocialMediaDetector.detectPlatform(profileUrl)
-                            onLog("✓ Active profile handle found on ${target.name}: @$username")
-                            SerpVisualMatch(
-                                title = "${target.name} Profile (@$username)",
-                                link = profileUrl,
-                                source = "${target.name} (Direct Handle)",
-                                thumbnail = null,
-                                score = platform.baseScore + 500
-                            )
+                            // For platforms with soft 404s, do a GET and check body
+                            if (target.name in softNotFoundPlatforms) {
+                                val getRequest = Request.Builder()
+                                    .url(profileUrl)
+                                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                                    .get()
+                                    .build()
+                                fastClient.newCall(getRequest).execute().use { getResponse ->
+                                    val body = getResponse.body?.string()?.lowercase()?.take(5000) ?: ""
+                                    val notFoundPhrases = listOf(
+                                        "page not found", "user not found", "sorry, this page",
+                                        "profile not found", "doesn't exist", "does not exist",
+                                        "not available", "no longer available", "account suspended",
+                                        "this profile is not available", "page isn't available",
+                                        "content unavailable", "couldn't find", "this account doesn't exist",
+                                        "the page you were looking for", "not found"
+                                    )
+                                    if (notFoundPhrases.any { body.contains(it) }) {
+                                        null // Soft 404 — profile doesn't exist
+                                    } else {
+                                        val platform = SocialMediaDetector.detectPlatform(profileUrl)
+                                        onLog("✓ Active profile handle found on ${target.name}: @$username")
+                                        SerpVisualMatch(
+                                            title = "${target.name} Profile (@$username)",
+                                            link = profileUrl,
+                                            source = "${target.name} (Direct Handle)",
+                                            thumbnail = null,
+                                            score = platform.baseScore + 500
+                                        )
+                                    }
+                                }
+                            } else {
+                                val platform = SocialMediaDetector.detectPlatform(profileUrl)
+                                onLog("✓ Active profile handle found on ${target.name}: @$username")
+                                SerpVisualMatch(
+                                    title = "${target.name} Profile (@$username)",
+                                    link = profileUrl,
+                                    source = "${target.name} (Direct Handle)",
+                                    thumbnail = null,
+                                    score = platform.baseScore + 500
+                                )
+                            }
                         } else null
                     }
                 } catch (_: Exception) {

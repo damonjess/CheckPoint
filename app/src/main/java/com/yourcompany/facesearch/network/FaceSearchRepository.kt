@@ -269,69 +269,75 @@ class FaceSearchRepository(private val context: Context) {
                         // ==========================================
                         onLog("Discovered identity hint: '$primaryName'. Running UK & global profile lookup...")
                         
-                        // Concurrent Live Username Handle Scanner across 10 social platforms
-                        val directHandles = UsernameScanner.scanUsername(primaryName, onLog)
-                        allResults.addAll(directHandles)
+                        // Validate the identity hint before using it
+                        val isUrl = primaryName.startsWith("http") || primaryName.contains("://") || primaryName.contains("www.")
+                        val isTooLong = primaryName.length > 50
+                        val isGarbage = primaryName.contains("shutterstock") || primaryName.contains("gettyimages") || primaryName.contains("alamy")
+                        
+                        if (isUrl || isTooLong || isGarbage) {
+                            onLog("⚠ Identity hint looks like a URL or stock photo reference — skipping social dorking.")
+                        } else {
+                            // Concurrent Live Username Handle Scanner across 34 social platforms
+                            val directHandles = UsernameScanner.scanUsername(primaryName, onLog)
+                            allResults.addAll(directHandles)
 
-                        // Concurrent DuckDuckGo OSINT Dorking for major social networks
-                        val ddgDomains = listOf(
-                            "facebook.com", "instagram.com", "linkedin.com", "twitter.com",
-                            "tiktok.com", "github.com", "reddit.com", "threads.net",
-                            "bsky.app", "mastodon.social", "vk.com", "tumblr.com",
-                            "flickr.com", "pinterest.com", "youtube.com", "twitch.tv",
-                            "onlyfans.com", "fansly.com", "patreon.com", "soundcloud.com",
-                            "spotify.com", "behance.net", "dribbble.com", "keybase.io",
-                            "linktr.ee", "vsco.co", "substack.com", "medium.com"
-                        )
-                        coroutineScope {
-                            val ddgJobs = ddgDomains.map { domain ->
-                                async { DuckDuckGoDorker.dork(domain, primaryName, onLog) }
+                            // Concurrent DuckDuckGo OSINT Dorking for major social networks
+                            val ddgDomains = listOf(
+                                "facebook.com", "instagram.com", "linkedin.com", "twitter.com",
+                                "tiktok.com", "github.com", "reddit.com", "threads.net",
+                                "bsky.app", "mastodon.social", "vk.com", "tumblr.com",
+                                "flickr.com", "pinterest.com", "youtube.com", "twitch.tv",
+                                "onlyfans.com", "fansly.com", "patreon.com", "soundcloud.com",
+                                "spotify.com", "behance.net", "dribbble.com", "keybase.io",
+                                "linktr.ee", "vsco.co", "substack.com", "medium.com"
+                            )
+                            coroutineScope {
+                                val ddgJobs = ddgDomains.map { domain ->
+                                    async { DuckDuckGoDorker.dork(domain, primaryName, onLog) }
+                                }
+                                allResults.addAll(ddgJobs.awaitAll().flatten())
                             }
-                            allResults.addAll(ddgJobs.awaitAll().flatten())
-                        }
 
-                        // Core Social Networks (Bing dorking)
-                        allResults.addAll(scraper.scrapeSocialDork("facebook.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("instagram.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("linkedin.com/in", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("twitter.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("tiktok.com/@", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("threads.net", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("bsky.app", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("mastodon.social", primaryName, onLog))
-                        
-                        // UK & Regional Directories
-                        allResults.addAll(scraper.scrapeSocialDork("192.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("thegazette.co.uk", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("grimsbytelegraph.co.uk", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("scunthorpetelegraph.co.uk", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("yell.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("companieshouse.gov.uk", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("findmypast.co.uk", primaryName, onLog))
-                        
-                        // Image & Creator Platforms
-                        allResults.addAll(scraper.scrapeSocialDork("reddit.com/user", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("pinterest.co.uk", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("flickr.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("tumblr.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("vsco.co", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("vk.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("linktr.ee", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("twitch.tv", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("youtube.com/@", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("soundcloud.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("behance.net", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("dribbble.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("patreon.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("substack.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("medium.com/@", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("keybase.io", primaryName, onLog))
-                        
-                        // Professional & Tech Platforms
-                        allResults.addAll(scraper.scrapeSocialDork("github.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("gitlab.com", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("stackoverflow.com/users", primaryName, onLog))
-                        allResults.addAll(scraper.scrapeSocialDork("producthunt.com/@", primaryName, onLog))
+                            // ALL Social Dorking — parallelized with coroutines for speed
+                            val socialDorkSites = listOf(
+                                "facebook.com", "instagram.com", "linkedin.com/in", "twitter.com",
+                                "tiktok.com/@", "threads.net", "bsky.app", "mastodon.social",
+                                // UK & Regional Directories
+                                "192.com", "thegazette.co.uk", "grimsbytelegraph.co.uk",
+                                "scunthorpetelegraph.co.uk", "yell.com", "companieshouse.gov.uk",
+                                "findmypast.co.uk",
+                                // Image & Creator Platforms
+                                "reddit.com/user", "pinterest.co.uk", "flickr.com", "tumblr.com",
+                                "vsco.co", "vk.com", "linktr.ee", "twitch.tv", "youtube.com/@",
+                                "soundcloud.com", "behance.net", "dribbble.com", "patreon.com",
+                                "substack.com", "medium.com/@", "keybase.io",
+                                // Professional & Tech Platforms
+                                "github.com", "gitlab.com", "stackoverflow.com/users", "producthunt.com/@"
+                            )
+                            
+                            onLog("Parallel social dorking across ${socialDorkSites.size} sites...")
+                            coroutineScope {
+                                // Process in batches of 8 to balance speed vs WebView resource limits
+                                socialDorkSites.chunked(8).forEachIndexed { batchIdx, batch ->
+                                    val batchJobs = batch.map { site ->
+                                        async {
+                                            val s = WebViewScraper.create(context)
+                                            try {
+                                                s.scrapeSocialDork(site, primaryName, onLog)
+                                            } finally {
+                                                s.destroy()
+                                            }
+                                        }
+                                    }
+                                    val batchResults = batchJobs.awaitAll().flatten()
+                                    allResults.addAll(batchResults)
+                                    if (batchResults.isNotEmpty()) {
+                                        onLog("✓ Dork batch #${batchIdx + 1}: ${batchResults.size} result(s)")
+                                    }
+                                }
+                            }
+                            onLog("Social dorking complete.")
+                        }
                     }
                 } finally {
                     scraper.destroy()
@@ -346,9 +352,28 @@ class FaceSearchRepository(private val context: Context) {
     }
 
     private fun harvestSearchHints(matches: List<SerpVisualMatch>): List<String> {
-        val candidates = matches.filter { 
-            val title = it.title?.lowercase() ?: ""
-            title.isNotBlank() && title != "visual match" && title != "visual candidate" && title != "visual matches"
+        // Reject titles that are URLs, image links, or file paths.
+        val urlPattern = Regex("(?i)^https?://|^www\\.|\\.(com|net|org|co\.uk|io|ru|de|fr|jpg|jpeg|png|gif|webp|html?|php|aspx?)$|/pic-|/images?/|/photo|/uploads?/|/assets?/|/static/|cdn\\.")
+        // Reject titles containing multiple URLs (e.g. "https://site1 https://site2")
+        val multiUrlPattern = Regex("(?i)https?://")
+
+        val candidates = matches.filter {
+            val title = it.title?.trim() ?: ""
+            title.isNotBlank() &&
+            title != "visual match" &&
+            title != "visual candidate" &&
+            title != "visual matches" &&
+            !urlPattern.containsMatchIn(title) &&
+            multiUrlPattern.findAll(title).count() <= 1 &&
+            !title.startsWith("http") &&
+            !title.contains("shutterstock.com") &&
+            !title.contains("gettyimages") &&
+            !title.contains("alamy.com") &&
+            !title.contains("istockphoto") &&
+            !title.contains("pinterest.com/pin/") &&
+            !title.contains("pinimg.com") &&
+            !title.contains("fotocdn") &&
+            !title.contains("vivoo.ru")
         }
         if (candidates.isEmpty()) return emptyList()
 
@@ -361,11 +386,22 @@ class FaceSearchRepository(private val context: Context) {
             "http", "https", "www", "com", "net", "org", "co", "uk",
             // Exclude entertainment databases
             "imdb", "wikipedia", "fandom", "themoviedb", "britannica", "wiki", "biography",
-            "actor", "actress", "celebrity", "movie", "film", "cast", "character", "tv"
+            "actor", "actress", "celebrity", "movie", "film", "cast", "character", "tv",
+            // Exclude stock photo / generic terms
+            "shutterstock", "getty", "alamy", "istock", "stock", "royalty", "free",
+            "download", "buy", "price", "license", "editorial", "creative",
+            // Exclude tech/education that clutters results
+            "cloudflare", "geeksforgeeks", "hostinger", "mcafee", "tutorial",
+            "explain", "working", "what", "why", "how", "learn", "guide"
         )
 
         candidates.forEach { match ->
             val title = match.title.orEmpty()
+            
+            // Skip if title looks like a URL or file path
+            if (title.startsWith("http") || title.contains("://") || title.matches(Regex(".*\\.(jpg|png|gif|webp|html?)", RegexOption.IGNORE_CASE))) {
+                return@forEach
+            }
             
             // Try extracting a name from the title
             val cleanTitle = title
@@ -377,6 +413,7 @@ class FaceSearchRepository(private val context: Context) {
             val words = cleanTitle.split(Regex("\\s+")).filter { it.isNotBlank() }
             
             if (cleanTitle.all { it.isDigit() || it.isWhitespace() }) return@forEach
+            if (cleanTitle.length < 2) return@forEach
 
             // Accept 2+ word titles where most words aren't stop words
             if (words.size >= 2 && words.count { it.lowercase() in stopWords } == 0) {

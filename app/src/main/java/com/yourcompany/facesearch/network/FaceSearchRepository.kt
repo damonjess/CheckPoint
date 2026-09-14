@@ -195,9 +195,9 @@ class FaceSearchRepository(private val context: Context) {
 
                     if ("SerpApi" !in enginesToSkip && SerpApiKeyManager.hasApiKey(context)) {
                         jobs.add(async {
-                            val matches = performSerpApiSearch(probeUrl, includeExactLensMatches, onLog)
+                            val matches = performSerpApiSearch(probeUrl, includeExactLensMatches, searchBitmap, onLog)
                             if (expandedProbeUrl != null && expandedProbeUrl != probeUrl) {
-                                val secondary = performSerpApiSearch(expandedProbeUrl, includeExactLensMatches)
+                                val secondary = performSerpApiSearch(expandedProbeUrl, includeExactLensMatches, expandedBitmap)
                                 allResults.addAll(secondary)
                             }
                             allResults.addAll(matches)
@@ -482,76 +482,98 @@ class FaceSearchRepository(private val context: Context) {
 
     suspend fun performSerpApiSearch(
         imageUrl: String,
-        includeExactMatches: Boolean = false,
+        @Suppress("UNUSED_PARAMETER") includeExactMatches: Boolean = false,
+        bitmap: Bitmap? = null,
         onLog: (String) -> Unit = {}
     ): List<SerpVisualMatch> = withContext(Dispatchers.IO) {
         val apiKey = SerpApiKeyManager.getApiKey(context)
         if (apiKey.isBlank()) return@withContext emptyList()
 
-        onLog("Requesting Google Lens visual matches via SerpApi...")
-        try {
-            val visualResponse = RetrofitClient.getSerpApi().googleLensSearch(
-                url = imageUrl,
-                type = "visual_matches",
-                apiKey = apiKey
-            )
-            val rawErr = visualResponse.error.orEmpty()
-            if (rawErr.isNotBlank()) {
-                if (!rawErr.contains("hasn't returned any results", ignoreCase = true) &&
-                    !rawErr.contains("no results", ignoreCase = true)) {
-                    onLog("⚠ SerpApi warning: $rawErr")
+        var effectiveUrl = imageUrl
+        if (effectiveUrl.isBlank() || effectiveUrl.contains("127.0.0.1") || effectiveUrl.contains("localhost")) {
+            if (bitmap != null) {
+                onLog("Uploading probe to public host for SerpApi...")
+                val uploaded = freeHost.upload(bitmap, onLog)
+                if (!uploaded.isNullOrBlank()) {
+                    effectiveUrl = uploaded
                 }
             }
-            val visualMatches = visualResponse.visualMatches.orEmpty().map { match ->
+        }
+
+        if (effectiveUrl.isBlank() || effectiveUrl.contains("127.0.0.1") || effectiveUrl.contains("localhost")) {
+            onLog("⚠ SerpApi requires a publicly accessible image URL. (Localhost probe URLs cannot be reached by SerpApi).")
+            return@withContext emptyList()
+        }
+
+        onLog("Requesting Google Lens visual matches via SerpApi...")
+        try {
+            val response = RetrofitClient.getSerpApi().googleLensSearch(
+                url = effectiveUrl,
+                apiKey = apiKey
+            )
+
+            val rawErr = response.error.orEmpty()
+            if (rawErr.isNotBlank()) {
+                if (rawErr.contains("Invalid API key", ignoreCase = true) || rawErr.contains("API key", ignoreCase = true)) {
+                    onLog("⚠ SerpApi Error: Invalid API key. Please check your key in settings.")
+                    return@withContext emptyList()
+                } else if (rawErr.contains("search limit", ignoreCase = true) || rawErr.contains("quota", ignoreCase = true) || rawErr.contains("out of searches", ignoreCase = true)) {
+                    onLog("⚠ SerpApi Error: Monthly search limit reached for this API key.")
+                    return@withContext emptyList()
+                } else if (!rawErr.contains("hasn't returned any results", ignoreCase = true) &&
+                    !rawErr.contains("no results", ignoreCase = true)) {
+                    onLog("⚠ SerpApi notice: $rawErr")
+                }
+            }
+
+            val visualMatches = response.visualMatches.orEmpty().map { match ->
                 SerpVisualMatch(
-                    title = match.title,
+                    title = match.title ?: "Google Lens Visual Match",
                     link = match.link,
-                    source = "Google Lens",
-                    thumbnail = match.thumbnail,
+                    source = match.source ?: "Google Lens",
+                    thumbnail = match.bestThumbnail,
                     score = 800
                 )
             }
-            val exactFromVisual = visualResponse.exactMatches.orEmpty().map { match ->
+
+            val exactMatches = response.exactMatches.orEmpty().map { match ->
                 SerpVisualMatch(
-                    title = match.title,
+                    title = match.title ?: "Google Lens Exact Match",
                     link = match.link,
-                    source = "Google Lens (Exact)",
-                    thumbnail = match.thumbnail,
+                    source = match.source ?: "Google Lens (Exact)",
+                    thumbnail = match.bestThumbnail,
                     score = 900
                 )
             }
 
-            val exactMatches = if (includeExactMatches) {
-                try {
-                    val exactResponse = RetrofitClient.getSerpApi().googleLensSearch(
-                        url = imageUrl,
-                        type = "exact_matches",
-                        apiKey = apiKey
-                    )
-                    exactResponse.exactMatches.orEmpty().map { match ->
-                        SerpVisualMatch(
-                            title = match.title,
-                            link = match.link,
-                            source = "Google Lens (Exact)",
-                            thumbnail = match.thumbnail,
-                            score = 900
-                        )
-                    }
-                } catch (_: Exception) {
-                    emptyList()
-                }
-            } else {
-                emptyList()
+            val knowledgeMatches = response.knowledgeGraph.orEmpty().map { match ->
+                SerpVisualMatch(
+                    title = match.title ?: "Google Lens Knowledge Match",
+                    link = match.link,
+                    source = match.source ?: "Google Knowledge Graph",
+                    thumbnail = match.bestThumbnail,
+                    score = 850
+                )
             }
 
-            val combined = (exactMatches + exactFromVisual + visualMatches)
+            val organicMatches = response.organicResults.orEmpty().map { match ->
+                SerpVisualMatch(
+                    title = match.title ?: "Google Search Result",
+                    link = match.link,
+                    source = match.source ?: "Google Search",
+                    thumbnail = match.bestThumbnail,
+                    score = 750
+                )
+            }
+
+            val combined = (exactMatches + visualMatches + knowledgeMatches + organicMatches)
                 .filter { !it.link.isNullOrBlank() }
                 .distinctBy { it.link }
 
             if (combined.isNotEmpty()) {
                 onLog("✓ SerpApi (Google Lens) found ${combined.size} candidate(s)")
             } else {
-                onLog("ℹ SerpApi (Google Lens): 0 candidates found")
+                onLog("ℹ SerpApi (Google Lens): 0 candidates found for this image probe")
             }
             combined
         } catch (e: HttpException) {

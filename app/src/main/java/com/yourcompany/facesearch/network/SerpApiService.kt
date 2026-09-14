@@ -9,7 +9,6 @@ interface SerpApiService {
     suspend fun googleLensSearch(
         @Query("engine") engine: String = "google_lens",
         @Query("url") url: String,
-        @Query("type") type: String? = "visual_matches",
         @Query("api_key") apiKey: String
     ): SerpResponse
 }

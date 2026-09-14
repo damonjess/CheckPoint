@@ -8,13 +8,21 @@ object SerpApiKeyManager {
     private const val KEY_SERP_API_KEY = "serp_api_key"
 
     fun cleanKey(rawKey: String): String {
-        return rawKey
+        val cleaned = rawKey
             .trim()
             .removePrefix("\"")
             .removeSuffix("\"")
             .removePrefix("'")
             .removeSuffix("'")
             .trim()
+
+        if (cleaned.equals("YOUR_SERPAPI_KEY_HERE", ignoreCase = true) ||
+            cleaned.equals("your_key_here", ignoreCase = true) ||
+            cleaned.equals("null", ignoreCase = true) ||
+            cleaned.equals("none", ignoreCase = true)) {
+            return ""
+        }
+        return cleaned
     }
 
     fun getApiKey(context: Context): String {

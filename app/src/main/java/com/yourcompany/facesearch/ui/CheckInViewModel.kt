@@ -23,7 +23,6 @@ import com.yourcompany.facesearch.network.SerpVisualMatch
 import com.yourcompany.facesearch.network.SocialMediaDetector
 import com.yourcompany.facesearch.network.ThumbnailUtils
 import com.yourcompany.facesearch.network.UsernameScanner
-import com.yourcompany.facesearch.network.model.Match
 import com.yourcompany.facesearch.ui.models.WebMatchDisplay
 import com.yourcompany.facesearch.vision.FaceDetectionResult
 import com.yourcompany.facesearch.vision.FaceDetectorHelper
@@ -46,6 +45,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
 class CheckInViewModel(
     application: Application
@@ -594,19 +594,16 @@ class CheckInViewModel(
             // Independent SerpApi path - should run regardless of Termux if key is configured
             val serpApiFallbackDeferred = async {
                 if (SerpApiKeyManager.hasApiKey(getApplication())) {
-                    val serpProbeUrl = publicSceneUrl ?: publicUrl
-                    if (!serpProbeUrl.isNullOrBlank()) {
-                        try {
-                            faceSearchRepository.performSerpApiSearch(
-                                imageUrl = serpProbeUrl,
-                                includeExactMatches = broadenLensCoverage,
-                                onLog = { message -> handleScraperLog(message) }
-                            )
-                        } catch (e: Exception) {
-                            addLog("⚠ SerpApi fallback failed: ${e.message}")
-                            emptyList()
-                        }
-                    } else {
+                    val serpProbeUrl = publicSceneUrl ?: publicUrl.orEmpty()
+                    try {
+                        faceSearchRepository.performSerpApiSearch(
+                            imageUrl = serpProbeUrl,
+                            includeExactMatches = broadenLensCoverage,
+                            bitmap = faceBitmap,
+                            onLog = { message -> handleScraperLog(message) }
+                        )
+                    } catch (e: Exception) {
+                        addLog("⚠ SerpApi fallback failed: ${e.message}")
                         emptyList()
                     }
                 } else {
@@ -1365,7 +1362,28 @@ class CheckInViewModel(
                 .allowHardware(false) 
                 .build()
             val result = getApplication<Application>().imageLoader.execute(request)
-            result.image?.toBitmap()
+            val coilBitmap = result.image?.toBitmap()
+            if (coilBitmap != null) return@withContext coilBitmap
+
+            // Fallback: download via OkHttp with browser headers
+            val client = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build()
+            val httpReq = Request.Builder()
+                .url(trimmed)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
+                .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                .build()
+            client.newCall(httpReq).execute().use { response ->
+                if (response.isSuccessful) {
+                    val bytes = response.body?.bytes()
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    }
+                }
+            }
+            null
         } catch (e: Exception) {
             null
         }

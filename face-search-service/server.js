@@ -75,7 +75,7 @@ async function getBrowser() {
 
 const UNIVERSAL_EXTRACT_JS = `
     var items = [], seen = new Set();
-    var badThumb = ['1x1.gif', 'pixel.gif', 'spacer.gif', 'transparent.png', 'favicon', 'default_avatar', 'no_profile', 'blank_profile', 'shutterstock', 'istock', 'data:image/gif'];
+    var badThumb = ['1x1.gif', 'pixel.gif', 'spacer.gif', 'transparent.png', 'favicon', 'default_avatar', 'no_profile', 'blank_profile', 'shutterstock', 'istock', 'data:image/gif', 'blank.gif', 'placeholder'];
 
     document.querySelectorAll('a[href^="http"]').forEach(function(a){
         try {
@@ -84,17 +84,21 @@ const UNIVERSAL_EXTRACT_JS = `
                 var match = href.match(/url\\?q=([^&]+)/);
                 if (match) href = decodeURIComponent(match[1]);
             }
+            if (href.indexOf('google.com/imgres?') >= 0) {
+                var imgMatch = href.match(/imgurl=([^&]+)/);
+                if (imgMatch) href = decodeURIComponent(imgMatch[1]);
+            }
 
             href = href.split('#')[0];
-            if(seen.has(href) || href.indexOf('google.') >= 0 || href.indexOf('bing.com') >= 0 || href.indexOf('yandex.') >= 0 || href.indexOf('tineye.com') >= 0 || href.indexOf('sogou.com') >= 0) return;
+            if(seen.has(href) || href.indexOf('google.') >= 0 || href.indexOf('bing.com') >= 0 || href.indexOf('yandex.') >= 0 || href.indexOf('tineye.com') >= 0 || href.indexOf('sogou.com') >= 0 || href.indexOf('duckduckgo.com') >= 0) return;
 
             var img = a.querySelector('img');
             if (!img) {
-                var div = a.closest('div');
+                var div = a.closest('div, li, article, figure');
                 if (div) img = div.querySelector('img');
             }
 
-            var imgSrc = img ? (img.src || img.getAttribute('data-src')) : null;
+            var imgSrc = img ? (img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('src')) : null;
             if(!imgSrc || imgSrc.length < 15) return;
 
             var lowSrc = imgSrc.toLowerCase();
@@ -104,8 +108,8 @@ const UNIVERSAL_EXTRACT_JS = `
             }
             if(isBad) return;
 
-            var title = (a.innerText || a.title || 'Visual Candidate').replace(/\\s+/g,' ').trim().slice(0, 100);
-            if (title.toLowerCase().indexOf('sign in') >= 0 || title.length < 3) return;
+            var title = (a.innerText || a.title || 'Visual Candidate').replace(/\\s+/g,' ').trim().slice(0, 120);
+            if (title.toLowerCase().indexOf('sign in') >= 0 || title.toLowerCase().indexOf('log in') >= 0 || title.length < 3) return;
 
             seen.add(href);
             items.push({
@@ -186,6 +190,12 @@ const ENGINES = [
     urlFor: (url) => `https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(url)}`,
     extractJs: UNIVERSAL_EXTRACT_JS,
     waitUntil: 'domcontentloaded'
+  },
+  {
+    name: 'Yandex RU',
+    urlFor: (url) => `https://yandex.ru/images/search?rpt=imageview&url=${encodeURIComponent(url)}`,
+    extractJs: UNIVERSAL_EXTRACT_JS,
+    waitUntil: 'domcontentloaded'
   }
 ];
 
@@ -213,20 +223,34 @@ async function scrapeEngine(engine, imageUrl) {
       const consentSelectors = [
         '#L2AGLb', '#bnp_btn_accept', '#accept-all',
         'button[aria-label*="Accept"]', 'button[aria-label*="Agree"]',
-        'a#adlt_set_off', '.bnp_btn_accept'
+        'a#adlt_set_off', '.bnp_btn_accept', '.js-accept',
+        '.consent-accept', '.cookie-consent-accept',
+        '[data-testid="cookie-policy-dialog-accept-button"]',
+        'div[role="dialog"] button'
       ];
       consentSelectors.forEach(s => {
         const el = document.querySelector(s);
         if (el) el.click();
+        document.querySelectorAll(s).forEach(e => { try { e.click(); } catch(_){} });
       });
     }).catch(() => {});
 
     // Allow dynamic results to settle in the DOM
     await new Promise(r => setTimeout(r, 4500));
 
-    // Scroll to trigger lazy loading of thumbnail grids
+    // Multiple scroll passes to trigger lazy loading of thumbnail grids
+    await page.evaluate(() => window.scrollBy(0, 400)).catch(() => {});
+    await new Promise(r => setTimeout(r, 1500));
     await page.evaluate(() => window.scrollBy(0, 600)).catch(() => {});
+    await new Promise(r => setTimeout(r, 1500));
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2)).catch(() => {});
+    await new Promise(r => setTimeout(r, 1500));
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
     await new Promise(r => setTimeout(r, 2000));
+
+    // Scroll back up to catch any lazy-loaded images above the fold
+    await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+    await new Promise(r => setTimeout(r, 1000));
 
     const pageTitle = await page.title();
     console.log(`[${engine.name}] Page loaded: "${pageTitle.slice(0, 50)}"`);
@@ -236,6 +260,30 @@ async function scrapeEngine(engine, imageUrl) {
     }, engine.extractJs);
 
     console.log(`[${engine.name}] Extracted ${matches.length} candidate(s)`);
+
+    // Retry with a page reload if no results were found
+    if (matches.length === 0) {
+      console.log(`[${engine.name}] No results on first pass. Reloading and retrying...`);
+      await page.reload({ waitUntil: engine.waitUntil || 'networkidle2', timeout: ENGINE_TIMEOUT_MS }).catch(() => {});
+      await new Promise(r => setTimeout(r, 4000));
+      
+      await page.evaluate(() => {
+        const consentSelectors = ['#L2AGLb', '#bnp_btn_accept', '#accept-all', 'a#adlt_set_off', '.bnp_btn_accept'];
+        consentSelectors.forEach(s => { const el = document.querySelector(s); if (el) el.click(); });
+      }).catch(() => {});
+      
+      await page.evaluate(() => window.scrollBy(0, 600)).catch(() => {});
+      await new Promise(r => setTimeout(r, 2000));
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+      await new Promise(r => setTimeout(r, 2000));
+
+      const retryMatches = await page.evaluate((js) => {
+        try { return new Function(js)(); } catch(e) { return []; }
+      }, engine.extractJs);
+      console.log(`[${engine.name}] Retry extracted ${retryMatches.length} candidate(s)`);
+      return retryMatches.map(m => ({ ...m, source: engine.name }));
+    }
+
     return matches.map(m => ({ ...m, source: engine.name }));
 
   } catch (err) {
@@ -287,7 +335,7 @@ app.post('/api/search', async (req, res) => {
     for (const match of allMatches) {
       if (match.link && !seenUrls.has(match.link)) {
         seenUrls.add(match.link);
-        const isSocial = /(instagram|facebook|twitter|tiktok|linkedin|reddit|youtube|x\.com|threads|pinterest|vk\.com)/i.test(match.link);
+        const isSocial = /(instagram|facebook|twitter|tiktok|linkedin|reddit|youtube|x\.com|threads|pinterest|vk\.com|tumblr|flickr|snapchat|bsky|mastodon|quora|behance|dribbble|soundcloud|spotify|keybase|twitch|patreon|substack|medium|dev\.to|gitlab|stackoverflow|producthunt|onlyfans|fansly)/i.test(match.link);
         uniqueMatches.push({ ...match, isSocial });
       }
     }

@@ -33,7 +33,31 @@ object UsernameScanner {
         TargetPlatform("Pinterest", "https://www.pinterest.com/%s/"),
         TargetPlatform("Medium", "https://medium.com/@%s"),
         TargetPlatform("Twitch", "https://www.twitch.tv/%s"),
-        TargetPlatform("Linktree", "https://linktr.ee/%s")
+        TargetPlatform("Linktree", "https://linktr.ee/%s"),
+        TargetPlatform("Threads", "https://www.threads.net/@%s"),
+        TargetPlatform("Bluesky", "https://bsky.app/profile/%s.bsky.social"),
+        TargetPlatform("Mastodon", "https://mastodon.social/@%s"),
+        TargetPlatform("Snapchat", "https://www.snapchat.com/add/%s"),
+        TargetPlatform("Quora", "https://www.quora.com/profile/%s"),
+        TargetPlatform("Behance", "https://www.behance.net/%s"),
+        TargetPlatform("Dev.to", "https://dev.to/%s"),
+        TargetPlatform("SoundCloud", "https://soundcloud.com/%s"),
+        TargetPlatform("Spotify", "https://open.spotify.com/user/%s"),
+        TargetPlatform("Keybase", "https://keybase.io/%s"),
+        TargetPlatform("YouTube", "https://www.youtube.com/@%s"),
+        TargetPlatform("Flickr", "https://www.flickr.com/people/%s"),
+        TargetPlatform("Tumblr", "https://%s.tumblr.com"),
+        TargetPlatform("VK", "https://vk.com/%s"),
+        TargetPlatform("VSCO", "https://vsco.co/%s"),
+        TargetPlatform("Patreon", "https://www.patreon.com/%s"),
+        TargetPlatform("Substack", "https://%s.substack.com"),
+        TargetPlatform("GitLab", "https://gitlab.com/%s"),
+        TargetPlatform("Stack Overflow", "https://stackoverflow.com/users/%s"),
+        TargetPlatform("HackerNews", "https://news.ycombinator.com/user?id=%s"),
+        TargetPlatform("Product Hunt", "https://www.producthunt.com/@%s"),
+        TargetPlatform("Dribbble", "https://dribbble.com/%s"),
+        TargetPlatform("OnlyFans", "https://onlyfans.com/%s"),
+        TargetPlatform("Fansly", "https://fansly.com/%s")
     )
 
     suspend fun scanUsername(
@@ -46,7 +70,7 @@ object UsernameScanner {
 
         if (username.length < 3 || username.all { it.isDigit() }) return@withContext emptyList()
 
-        onLog("Scanning username handles for '@$username' across 10 social networks...")
+        onLog("Scanning username handles for '@$username' across ${platforms.size} social networks...")
 
         val activeProfiles = platforms.map { target ->
             async {

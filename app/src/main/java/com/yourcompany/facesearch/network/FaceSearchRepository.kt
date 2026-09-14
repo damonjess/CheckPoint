@@ -274,7 +274,15 @@ class FaceSearchRepository(private val context: Context) {
                         allResults.addAll(directHandles)
 
                         // Concurrent DuckDuckGo OSINT Dorking for major social networks
-                        val ddgDomains = listOf("facebook.com", "instagram.com", "linkedin.com", "twitter.com", "tiktok.com", "github.com")
+                        val ddgDomains = listOf(
+                            "facebook.com", "instagram.com", "linkedin.com", "twitter.com",
+                            "tiktok.com", "github.com", "reddit.com", "threads.net",
+                            "bsky.app", "mastodon.social", "vk.com", "tumblr.com",
+                            "flickr.com", "pinterest.com", "youtube.com", "twitch.tv",
+                            "onlyfans.com", "fansly.com", "patreon.com", "soundcloud.com",
+                            "spotify.com", "behance.net", "dribbble.com", "keybase.io",
+                            "linktr.ee", "vsco.co", "substack.com", "medium.com"
+                        )
                         coroutineScope {
                             val ddgJobs = ddgDomains.map { domain ->
                                 async { DuckDuckGoDorker.dork(domain, primaryName, onLog) }
@@ -282,19 +290,24 @@ class FaceSearchRepository(private val context: Context) {
                             allResults.addAll(ddgJobs.awaitAll().flatten())
                         }
 
-                        // Core Social Networks
+                        // Core Social Networks (Bing dorking)
                         allResults.addAll(scraper.scrapeSocialDork("facebook.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("instagram.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("linkedin.com/in", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("twitter.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("tiktok.com/@", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("threads.net", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("bsky.app", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("mastodon.social", primaryName, onLog))
                         
                         // UK & Regional Directories
                         allResults.addAll(scraper.scrapeSocialDork("192.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("thegazette.co.uk", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("grimsbytelegraph.co.uk", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("scunthorpetelegraph.co.uk", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("yell.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("companieshouse.gov.uk", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("findmypast.co.uk", primaryName, onLog))
                         
                         // Image & Creator Platforms
                         allResults.addAll(scraper.scrapeSocialDork("reddit.com/user", primaryName, onLog))
@@ -305,6 +318,20 @@ class FaceSearchRepository(private val context: Context) {
                         allResults.addAll(scraper.scrapeSocialDork("vk.com", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("linktr.ee", primaryName, onLog))
                         allResults.addAll(scraper.scrapeSocialDork("twitch.tv", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("youtube.com/@", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("soundcloud.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("behance.net", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("dribbble.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("patreon.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("substack.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("medium.com/@", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("keybase.io", primaryName, onLog))
+                        
+                        // Professional & Tech Platforms
+                        allResults.addAll(scraper.scrapeSocialDork("github.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("gitlab.com", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("stackoverflow.com/users", primaryName, onLog))
+                        allResults.addAll(scraper.scrapeSocialDork("producthunt.com/@", primaryName, onLog))
                     }
                 } finally {
                     scraper.destroy()
@@ -328,7 +355,7 @@ class FaceSearchRepository(private val context: Context) {
         val hints = mutableSetOf<String>()
         
         val stopWords = setOf(
-            "image", "photo", "picture", "wallpaper", "visual", "match", "stock", "vector",
+            "image", "photo", "picture", "wallpaper", "visual", "match", "candidate", "matches",
             "search", "engine", "google", "bing", "yandex", "lens", "the", "and", "for", "with",
             "amazon", "vest", "shirt", "apparel", "clothing", "style", "shop", "store",
             "http", "https", "www", "com", "net", "org", "co", "uk",
@@ -340,8 +367,10 @@ class FaceSearchRepository(private val context: Context) {
         candidates.forEach { match ->
             val title = match.title.orEmpty()
             
+            // Try extracting a name from the title
             val cleanTitle = title
                 .replace(Regex("(?i)[|\\-–—:(\\[].*"), "")
+                .replace(Regex("(?i)\s+(profile|page|account|user|official)\s*"), " ")
                 .replace(Regex("[^a-zA-Z0-9\\s]"), "")
                 .trim()
 
@@ -349,8 +378,15 @@ class FaceSearchRepository(private val context: Context) {
             
             if (cleanTitle.all { it.isDigit() || it.isWhitespace() }) return@forEach
 
-            if (words.size >= 2 && words.none { it.lowercase() in stopWords }) {
+            // Accept 2+ word titles where most words aren't stop words
+            if (words.size >= 2 && words.count { it.lowercase() in stopWords } == 0) {
                 hints.add(cleanTitle)
+            } else if (words.size >= 2 && words.count { it.lowercase() in stopWords } <= 1) {
+                // Allow one stop word if we have 3+ words total
+                val filtered = words.filter { it.lowercase() !in stopWords }
+                if (filtered.size >= 2) {
+                    hints.add(filtered.joinToString(" "))
+                }
             } else if (words.size == 1 && words[0].length > 3 && words[0].lowercase() !in stopWords) {
                 hints.add(words[0])
             }

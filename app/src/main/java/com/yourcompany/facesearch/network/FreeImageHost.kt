@@ -34,7 +34,9 @@ class FreeImageHost {
         val hosts = listOf(
             ::imgbb,
             ::freeimageHost,
-            ::fileCoffee
+            ::fileCoffee,
+            ::catboxHost,
+            ::nullPointerHost
         )
 
         for (hostFunc in hosts) {
@@ -171,6 +173,55 @@ class FreeImageHost {
                 }
             }
         } catch (e: Exception) { onLog("⚠️ File.coffee Error: ${e.message}") }
+        null
+    }
+
+    private suspend fun catboxHost(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("reqtype", "fileupload")
+            .addFormDataPart("fileToUpload", "probe.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
+            .build()
+
+        val req = Request.Builder()
+            .url("https://catbox.moe/user/api.php")
+            .header("User-Agent", ua)
+            .post(body)
+            .build()
+
+        try {
+            client.newCall(req).execute().use { res ->
+                val text = res.body?.string().orEmpty().trim()
+                if (res.isSuccessful && text.startsWith("http") && text.contains("catbox.moe")) {
+                    onLog("✓ Catbox.moe Active")
+                    return@withContext text
+                }
+            }
+        } catch (e: Exception) { onLog("⚠️ Catbox.moe Error: ${e.message}") }
+        null
+    }
+
+    private suspend fun nullPointerHost(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", "probe.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
+            .build()
+
+        val req = Request.Builder()
+            .url("https://0x0.st")
+            .header("User-Agent", ua)
+            .post(body)
+            .build()
+
+        try {
+            client.newCall(req).execute().use { res ->
+                val text = res.body?.string().orEmpty().trim()
+                if (res.isSuccessful && text.startsWith("http")) {
+                    onLog("✓ 0x0.st Active")
+                    return@withContext text
+                }
+            }
+        } catch (e: Exception) { onLog("⚠️ 0x0.st Error: ${e.message}") }
         null
     }
 }

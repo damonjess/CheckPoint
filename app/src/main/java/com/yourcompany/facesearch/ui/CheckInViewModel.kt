@@ -994,7 +994,13 @@ class CheckInViewModel(
         val socialHosts = listOf(
             "instagram.com", "facebook.com", "linkedin.com", "x.com", "twitter.com",
             "tiktok.com", "youtube.com", "reddit.com", "onlyfans.com", "fansly.com",
-            "pornhub.com", "xvideos.com", "xnxx.com", "xhamster.com"
+            "pornhub.com", "xvideos.com", "xnxx.com", "xhamster.com",
+            "threads.net", "bsky.app", "mastodon.social", "snapchat.com",
+            "quora.com", "behance.net", "dribbble.com", "soundcloud.com",
+            "spotify.com", "keybase.io", "patreon.com", "substack.com",
+            "medium.com", "dev.to", "twitch.tv", "tumblr.com", "flickr.com",
+            "vsco.co", "vk.com", "linktr.ee", "gitlab.com",
+            "stackoverflow.com", "producthunt.com"
         )
         return results.asSequence()
             .filter { !it.link.isNullOrBlank() }

@@ -185,14 +185,24 @@ class WebViewScraper private constructor(
                 }
 
                 if(hostname.indexOf('google.') >= 0){
-                    document.querySelectorAll('a[href], div[role="link"], div[role="article"]').forEach(function(a){
+                    // Google Lens and Google Images: try multiple selector patterns
+                    document.querySelectorAll('a[href], div[role="link"], div[role="article"], .vis-label, .yuRUbf, .G19kAf, .rQMQod, .IsZvec').forEach(function(a){
                         var href = a.href || a.getAttribute('href');
                         var thumb = imgOf(a);
                         var title = a.innerText || a.getAttribute('aria-label') || '';
                         if(href && thumb) addItem(title, href, thumb);
                     });
+                    // Google Lens visual matches are often in specific containers
+                    document.querySelectorAll('.EF2BQc, .Vd970b, .R5H3j, .GQrDse').forEach(function(el){
+                        var a = el.querySelector('a[href]');
+                        if(a){
+                            var thumb = imgOf(el);
+                            var title = el.innerText || el.getAttribute('aria-label') || '';
+                            if(thumb) addItem(title, a.href, thumb);
+                        }
+                    });
                 } else if(hostname.indexOf('bing.com') >= 0){
-                    document.querySelectorAll('.imgpt a, .iusc, .richImgLnk, .imgpt, a.inflnk, .mimg').forEach(function(a){
+                    document.querySelectorAll('.imgpt a, .iusc, .richImgLnk, .imgpt, a.inflnk, .mimg, .newsitem, .b_algo').forEach(function(a){
                         var href = a.href || a.getAttribute('href') || '';
                         var thumb = imgOf(a);
                         var title = a.innerText || a.getAttribute('aria-label') || '';
@@ -207,14 +217,14 @@ class WebViewScraper private constructor(
                         }
                         if(href && thumb) addItem(title, href, thumb);
                     });
-                } else if(hostname.indexOf('yandex.') >= 0){
-                    document.querySelectorAll('.CbirItem-Title a, .serp-item__link, .serp-item a, .other-sites a, .item a').forEach(function(a){
+                } else if(hostname.indexOf('yandex.com') >= 0 || hostname.indexOf('yandex.ru') >= 0){
+                    document.querySelectorAll('.CbirItem-Title a, .serp-item__link, .serp-item a, .other-sites a, .item a, .Sites-Title a, .Other-Sites-Image a').forEach(function(a){
                         var thumb = imgOf(a);
                         var title = a.innerText || '';
                         addItem(title, a.href, thumb);
                     });
                 } else if(hostname.indexOf('sogou.com') >= 0){
-                    document.querySelectorAll('.vr-resultItem, .vr-resultItem a').forEach(function(el){
+                    document.querySelectorAll('.vr-resultItem, .vr-resultItem a, .img-result a, .pic-result a').forEach(function(el){
                         var a = el.tagName === 'A' ? el : el.querySelector('a[href^="http"]');
                         var img = el.querySelector('img');
                         if(a){
@@ -223,7 +233,7 @@ class WebViewScraper private constructor(
                         }
                     });
                 } else if(hostname.indexOf('tineye.com') >= 0){
-                    document.querySelectorAll('.match, .result, .match-thumb, div[class*="match"], div[class*="result"], .image-result').forEach(function(el){
+                    document.querySelectorAll('.match, .result, .match-thumb, div[class*="match"], div[class*="result"], .image-result, .match-item, .results-container a').forEach(function(el){
                         var a = el.querySelector('a[href^="http"]');
                         var img = el.querySelector('img');
                         if(a){
@@ -253,19 +263,20 @@ class WebViewScraper private constructor(
             (function(){
                 function extract(){
                     var items = [], seen = new Set();
-                    var rows = document.querySelectorAll('li.b_algo, .b_algo, .result, .result__body, .g, .dg_u, .vr_items');
+                    // Google, Bing, and generic result selectors
+                    var rows = document.querySelectorAll('li.b_algo, .b_algo, .result, .result__body, .g, .dg_u, .vr_items, .tF2Cxc, .yuRUbf, .MjjYud');
                     if(!rows.length) rows = document.querySelectorAll('a[href^="http"]');
 
                     rows.forEach(function(row){
                         try {
-                            var a = row.tagName === 'A' ? row : row.querySelector('h2 a, .result__a, .b_title a, a[href^="http"]');
+                            var a = row.tagName === 'A' ? row : row.querySelector('h2 a, .result__a, .b_title a, a[href^="http"], h3 a');
                             if(!a) a = row.closest('a') || row.querySelector('a');
                             if(!a) return;
                             var href = a.href.split('#')[0];
                             if(!href || href.indexOf('http') !== 0 || seen.has(href)) return;
 
                             var lowHref = href.toLowerCase();
-                            if (lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('google.') >= 0 || lowHref.indexOf('microsoft.com') >= 0) return;
+                            if (lowHref.indexOf('bing.com') >= 0 || lowHref.indexOf('google.') >= 0 || lowHref.indexOf('microsoft.com') >= 0 || lowHref.indexOf('duckduckgo.com') >= 0) return;
 
                             var title = (a.innerText || a.textContent || '').replace(/\s+/g,' ').trim();
                             if(title.length < 3) return;
@@ -290,35 +301,55 @@ class WebViewScraper private constructor(
         """
     }
 
-    suspend fun scrapeSogou(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
+    suspend fun scrapeSogou(imageUrl: String): List<SerpVisualMatch> = scrapeEngineWithRetry(
         url = "https://pic.sogou.com/ris?query=${URLEncoder.encode(imageUrl, "UTF-8")}&flag=1",
         engineName = "Sogou",
         delayMs = 4500
     )
 
-    suspend fun scrapeGoogle(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
+    suspend fun scrapeGoogle(imageUrl: String): List<SerpVisualMatch> = scrapeEngineWithRetry(
         url = "https://lens.google.com/uploadbyurl?url=${URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "Google",
         delayMs = 3500
     )
 
-    suspend fun scrapeBing(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
+    suspend fun scrapeBing(imageUrl: String): List<SerpVisualMatch> = scrapeEngineWithRetry(
         url = "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=${URLEncoder.encode(imageUrl, "UTF-8")}&adlt=off",
         engineName = "Bing",
         delayMs = 4500
     )
 
-    suspend fun scrapeTinEye(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
+    suspend fun scrapeTinEye(imageUrl: String): List<SerpVisualMatch> = scrapeEngineWithRetry(
         url = "https://tineye.com/search?url=${URLEncoder.encode(imageUrl, "UTF-8")}",
         engineName = "TinEye",
         delayMs = 3000
     )
 
-    suspend fun scrapeYandex(imageUrl: String): List<SerpVisualMatch> = scrapeEngine(
+    suspend fun scrapeYandex(imageUrl: String): List<SerpVisualMatch> = scrapeEngineWithRetry(
         url = "https://yandex.com/images/search?rpt=imageview&url=${URLEncoder.encode(imageUrl, "UTF-8")}&family=no",
         engineName = "Yandex",
         delayMs = 4500
     )
+
+    /**
+     * Wraps scrapeEngine with a single retry if the first attempt returns zero results.
+     * This significantly improves yield on engines that intermittently serve
+     * interstitials or rate-limit pages.
+     */
+    private suspend fun scrapeEngineWithRetry(
+        url: String,
+        engineName: String,
+        delayMs: Long,
+        extractJs: String = VISUAL_EXTRACT_JS,
+        onLog: (String) -> Unit = {}
+    ): List<SerpVisualMatch> {
+        val firstAttempt = scrapeEngine(url, engineName, delayMs, extractJs, onLog)
+        if (firstAttempt.isNotEmpty()) return firstAttempt
+
+        // Retry once with a fresh WebView
+        onLog("$engineName: retrying after empty first pass...")
+        return scrapeEngine(url, engineName, delayMs, extractJs, onLog)
+    }
 
     suspend fun scrapeSocialDork(
         site: String,
@@ -336,9 +367,22 @@ class WebViewScraper private constructor(
         val encodedQuery = URLEncoder.encode("site:$site $formattedQuery", "UTF-8")
         val targetUrl = "https://www.bing.com/search?q=$encodedQuery&adlt=off&safesearch=0"
 
-        return scrapeEngine(
+        val bingResults = scrapeEngine(
             url = targetUrl,
             engineName = AdultSiteConfig.labelFor(site),
+            delayMs = 3000,
+            extractJs = DORK_EXTRACT_JS,
+            onLog = onLog
+        )
+
+        // If Bing found results, return them. Otherwise try Google as fallback.
+        if (bingResults.isNotEmpty()) return bingResults
+
+        // Google fallback for broader coverage
+        val googleUrl = "https://www.google.com/search?q=$encodedQuery"
+        return scrapeEngine(
+            url = googleUrl,
+            engineName = "Google (${AdultSiteConfig.labelFor(site)})",
             delayMs = 3000,
             extractJs = DORK_EXTRACT_JS,
             onLog = onLog

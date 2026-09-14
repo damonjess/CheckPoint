@@ -124,7 +124,7 @@ fun ProfileDiscoveryScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F7F3)) {
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F7F3))) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("Your local identity card", fontWeight = FontWeight.Bold)
                         Text(
@@ -324,10 +324,10 @@ fun ProfileDiscoveryScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                items(viewModel.webQueries.size, key = { it }) { index ->
+                items(viewModel.webQueries.size, key = { index -> "web_${viewModel.webQueries[index].first}_$index" }) { index ->
+                    val (label, url) = viewModel.webQueries[index]
                     OutlinedButton(
                         onClick = {
-                            val url = viewModel.webQueries[index]
                             try {
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                 context.startActivity(intent)
@@ -339,7 +339,7 @@ fun ProfileDiscoveryScreen(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Launch, contentDescription = null)
                         Text(
-                            "Web Search ${index + 1}: ${viewModel.webQueries[index].substringAfter("q=").take(40)}...",
+                            label,
                             modifier = Modifier.padding(start = 8.dp),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -358,7 +358,7 @@ fun ProfileDiscoveryScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                items(viewModel.emailQueries.size, key = { it }) { index ->
+                items(viewModel.emailQueries.size, key = { index -> "email_${viewModel.emailQueries[index].first}" }) { index ->
                     val (label, url) = viewModel.emailQueries[index]
                     OutlinedButton(
                         onClick = {
@@ -387,7 +387,7 @@ fun ProfileDiscoveryScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                items(viewModel.phoneQueries.size, key = { it }) { index ->
+                items(viewModel.phoneQueries.size, key = { index -> "phone_${viewModel.phoneQueries[index].first}" }) { index ->
                     val (label, url) = viewModel.phoneQueries[index]
                     OutlinedButton(
                         onClick = {
@@ -416,7 +416,7 @@ fun ProfileDiscoveryScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                items(filteredLeads.size, key = { index -> filteredLeads[index].url }) { index ->
+                items(filteredLeads.size, key = { index -> "lead_${filteredLeads[index].platform}_${filteredLeads[index].handle}" }) { index ->
                     ProfileLeadCard(
                         lead = filteredLeads[index],
                         onOpen = {

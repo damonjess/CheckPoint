@@ -3,6 +3,7 @@ package com.yourcompany.facesearch.data
 import android.content.Context
 import com.google.gson.Gson
 import java.io.File
+import java.net.URLEncoder
 import java.util.Locale
 
 /**
@@ -63,8 +64,8 @@ object PublicProfileLeadGenerator {
 
     private data class PlatformTemplate(
         val name: String,
-        val urlFor: (String) -> String,
-        val checkPath: String = "" // path used for HTTP existence check if different
+        val checkPath: String = "",
+        val urlFor: (String) -> String
     )
 
     private val platforms = listOf(
@@ -170,7 +171,7 @@ object PublicProfileLeadGenerator {
         return leads.distinctBy { it.url }
     }
 
-    fun generateWebQueries(profile: IdentityProfile): List<String> {
+    fun generateWebQueries(profile: IdentityProfile): List<Pair<String, String>> {
         val terms = buildList {
             profile.fullName.trim().takeIf { it.length >= 2 }?.let { add(it) }
             splitValues(profile.aliases).filter { it.length >= 2 }.forEach { add(it) }
@@ -178,24 +179,23 @@ object PublicProfileLeadGenerator {
             profile.email.trim().takeIf { it.isNotBlank() }?.let { add(it) }
         }.distinct().take(MAX_VARIANTS)
 
-        val siteList = listOf(
-            "instagram.com", "facebook.com", "tiktok.com", "snapchat.com",
-            "x.com", "twitter.com", "linkedin.com", "github.com",
-            "youtube.com", "reddit.com", "threads.net", "bsky.app",
-            "mastodon.social", "quora.com", "behance.net", "soundcloud.com",
-            "flickr.com", "tumblr.com", "vk.com", "patreon.com",
-            "substack.com", "gitlab.com", "medium.com", "linktr.ee",
-            "twitch.tv", "onlyfans.com", "dribbble.com"
-        ).joinToString(" OR ") { "site:$it" }
+        val siteGroups = listOf(
+            "Social" to listOf("instagram.com", "facebook.com", "x.com", "tiktok.com", "threads.net", "youtube.com"),
+            "Professional & Code" to listOf("linkedin.com", "github.com", "reddit.com", "medium.com", "gitlab.com")
+        )
 
         val searchEngine = "https://duckduckgo.com/?q="
 
-        return terms.map { term ->
-            searchEngine + java.net.URLEncoder.encode(
-                "\"$term\" ($siteList)",
-                "UTF-8"
-            )
+        val queries = mutableListOf<Pair<String, String>>()
+        terms.forEach { term ->
+            siteGroups.forEach { (groupName, sites) ->
+                val siteList = sites.joinToString(" OR ") { "site:$it" }
+                val queryStr = "\"$term\" ($siteList)"
+                val url = searchEngine + URLEncoder.encode(queryStr, "UTF-8")
+                queries.add("Search: \"$term\" ($groupName)" to url)
+            }
         }
+        return queries
     }
 
     /**
@@ -228,18 +228,40 @@ object PublicProfileLeadGenerator {
     }
 
     /**
-     * Generate phone-based OSINT queries.
+     * Generate phone-based OSINT queries (PhoneInfoga & Phonia style).
      */
     fun generatePhoneQueries(profile: IdentityProfile): List<Pair<String, String>> {
         if (profile.phone.isBlank()) return emptyList()
-        val phone = profile.phone.trim()
+        val rawPhone = profile.phone.trim()
+        val digitsOnly = rawPhone.replace(Regex("[^0-9]"), "")
+        if (digitsOnly.length < 7) return emptyList()
+
+        val e164 = if (rawPhone.startsWith("+")) "+$digitsOnly" else "+$digitsOnly"
         val results = mutableListOf<Pair<String, String>>()
 
-        results.add("Google: Phone Search" to "https://www.google.com/search?q=" +
-            java.net.URLEncoder.encode("\"$phone\"", "UTF-8"))
+        // Direct Messaging & OSINT Lookups
+        results.add("WhatsApp Profile (wa.me)" to "https://wa.me/$digitsOnly")
+        results.add("Telegram Direct Link" to "https://t.me/+$digitsOnly")
+        results.add("TrueCaller Caller ID" to "https://www.truecaller.com/search")
+        results.add("NumLookup (Carrier & Owner)" to "https://www.numlookup.com/")
+        results.add("FreeCarrierLookup (Line Type)" to "https://freecarrierlookup.com/")
+        results.add("ShouldIAnswer Reputation" to "https://www.shouldianswer.com/phone-number/+$digitsOnly")
+
+        // Search Engine Dorks (PhoneInfoga / Phonia style)
+        val termQuery = "\"$e164\" OR \"$digitsOnly\""
+        results.add("Google Dork: Exact Number" to "https://www.google.com/search?q=" +
+            URLEncoder.encode(termQuery, "UTF-8"))
+
+        val socialDork = "\"$e164\" (site:whatsapp.com OR site:t.me OR site:facebook.com OR site:linkedin.com)"
+        results.add("Google Dork: Messaging & Social" to "https://www.google.com/search?q=" +
+            URLEncoder.encode(socialDork, "UTF-8"))
+
+        val documentDork = "\"$e164\" (filetype:pdf OR filetype:txt OR filetype:csv OR site:pastebin.com)"
+        results.add("Google Dork: Document Leaks" to "https://www.google.com/search?q=" +
+            URLEncoder.encode(documentDork, "UTF-8"))
+
         results.add("DuckDuckGo: Phone Search" to "https://duckduckgo.com/?q=" +
-            java.net.URLEncoder.encode("\"$phone\"", "UTF-8"))
-        results.add("TrueCaller" to "https://www.truecaller.com/search")
+            URLEncoder.encode("\"$e164\"", "UTF-8"))
 
         return results
     }
@@ -314,7 +336,7 @@ object PublicProfileLeadGenerator {
                     val last = words.last()
                     add("$first$last")
                     add("$first.$last")
-                    add("$first_$last")
+                    add("${first}_$last")
                     add("$first-$last")
                     add(first.first().toString() + last)
                     add("$first${last.first()}")
@@ -325,7 +347,7 @@ object PublicProfileLeadGenerator {
                     add("$first$last" + "1")
                     add("$first$last" + "99")
                     add("$first.$last" + "1")
-                    add("$first_$last" + "1")
+                    add("${first}_$last" + "1")
                     // Reversed
                     add("$last$first")
                     add("$last.$first")

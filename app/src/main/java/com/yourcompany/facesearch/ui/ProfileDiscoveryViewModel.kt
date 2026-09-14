@@ -26,7 +26,7 @@ class ProfileDiscoveryViewModel(application: Application) : AndroidViewModel(app
     var leads by mutableStateOf(emptyList<PublicProfileLead>())
         private set
 
-    var webQueries by mutableStateOf(emptyList<String>())
+    var webQueries by mutableStateOf(emptyList<Pair<String, String>>())
         private set
 
     var emailQueries by mutableStateOf(emptyList<Pair<String, String>>())

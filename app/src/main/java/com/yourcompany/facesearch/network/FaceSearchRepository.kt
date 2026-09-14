@@ -353,7 +353,7 @@ class FaceSearchRepository(private val context: Context) {
 
     private fun harvestSearchHints(matches: List<SerpVisualMatch>): List<String> {
         // Reject titles that are URLs, image links, or file paths.
-        val urlPattern = Regex("(?i)^https?://|^www\\.|\\.(com|net|org|co\.uk|io|ru|de|fr|jpg|jpeg|png|gif|webp|html?|php|aspx?)$|/pic-|/images?/|/photo|/uploads?/|/assets?/|/static/|cdn\\.")
+        val urlPattern = Regex("(?i)^https?://|^www\\.|\\.(com|net|org|co\\\\.uk|io|ru|de|fr|jpg|jpeg|png|gif|webp|html?|php|aspx?)$|/pic-|/images?/|/photo|/uploads?/|/assets?/|/static/|cdn\\.")
         // Reject titles containing multiple URLs (e.g. "https://site1 https://site2")
         val multiUrlPattern = Regex("(?i)https?://")
 
@@ -406,7 +406,7 @@ class FaceSearchRepository(private val context: Context) {
             // Try extracting a name from the title
             val cleanTitle = title
                 .replace(Regex("(?i)[|\\-–—:(\\[].*"), "")
-                .replace(Regex("(?i)\s+(profile|page|account|user|official)\s*"), " ")
+                .replace(Regex("(?i)\\s+(profile|page|account|user|official)\\s*"), " ")
                 .replace(Regex("[^a-zA-Z0-9\\s]"), "")
                 .trim()
 

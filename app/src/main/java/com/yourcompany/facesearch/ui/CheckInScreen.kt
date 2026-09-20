@@ -251,18 +251,29 @@ fun CheckInScreen(
                                 value = serpApiKey,
                                 onValueChange = onSerpApiKeyChange,
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("Paste SerpApi key here...") },
+                                placeholder = { Text("Paste SerpApi key here...", color = Color.Gray) },
                                 singleLine = true,
                                 visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
                                 trailingIcon = {
                                     IconButton(onClick = { showKey = !showKey }) {
                                         Icon(
                                             imageVector = if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                            contentDescription = if (showKey) "Hide Key" else "Show Key"
+                                            contentDescription = if (showKey) "Hide Key" else "Show Key",
+                                            tint = Color.DarkGray
                                         )
                                     }
                                 },
-                                shape = RoundedCornerShape(16.dp)
+                                shape = RoundedCornerShape(16.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.Black,
+                                    unfocusedTextColor = Color.Black,
+                                    focusedContainerColor = Color.White,
+                                    unfocusedContainerColor = Color.White,
+                                    focusedBorderColor = CyberGreen,
+                                    unfocusedBorderColor = Color.Gray,
+                                    focusedPlaceholderColor = Color.Gray,
+                                    unfocusedPlaceholderColor = Color.Gray
+                                )
                             )
                             Text(
                                 "Required for Google Lens visual search matches. Saved locally on device.",

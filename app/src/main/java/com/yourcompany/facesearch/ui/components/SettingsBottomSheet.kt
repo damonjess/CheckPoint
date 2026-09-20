@@ -127,28 +127,75 @@ fun SettingsBottomSheet(
             HorizontalDivider(color = Color.LightGray)
             Spacer(modifier = Modifier.height(24.dp))
 
-            // SerpApi Key Section
-            Text("SerpApi Google Lens Key", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.DarkGray)
-            Spacer(modifier = Modifier.height(8.dp))
+            // API Keys Section
+            Text("API Keys (Optional)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.DarkGray)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("The app uses free direct web scrapers by default. You can optionally add SerpApi or ImgBB keys below.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = apiKeyText,
                 onValueChange = { apiKeyText = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("API Key") },
+                label = { Text("SerpApi Key (Google Lens)") },
+                placeholder = { Text("Leave empty to use direct scrapers") },
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Default.Key, contentDescription = null) },
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.Black,
+                    unfocusedTextColor = Color.Black,
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White,
+                    focusedBorderColor = Color(0xFF6750A4),
+                    unfocusedBorderColor = Color.Gray,
+                    focusedLabelColor = Color.Black,
+                    unfocusedLabelColor = Color.DarkGray,
+                    focusedPlaceholderColor = Color.Gray,
+                    unfocusedPlaceholderColor = Color.Gray
+                )
             )
-            Spacer(modifier = Modifier.height(8.dp))
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            var imgbbKeyText by remember { mutableStateOf(sharedPrefs.getString("imgbb_api_key", "").orEmpty()) }
+
+            OutlinedTextField(
+                value = imgbbKeyText,
+                onValueChange = { imgbbKeyText = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("ImgBB API Key") },
+                placeholder = { Text("Leave empty for public FreeImage.host") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Default.Key, contentDescription = null) },
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.Black,
+                    unfocusedTextColor = Color.Black,
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White,
+                    focusedBorderColor = Color(0xFF6750A4),
+                    unfocusedBorderColor = Color.Gray,
+                    focusedLabelColor = Color.Black,
+                    unfocusedLabelColor = Color.DarkGray,
+                    focusedPlaceholderColor = Color.Gray,
+                    unfocusedPlaceholderColor = Color.Gray
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             Button(
                 onClick = {
                     SerpApiKeyManager.saveApiKey(context, apiKeyText)
-                    Toast.makeText(context, "SerpApi Key Saved", Toast.LENGTH_SHORT).show()
+                    sharedPrefs.edit().putString("imgbb_api_key", imgbbKeyText.trim()).apply()
+                    Toast.makeText(context, "API Keys Saved", Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.align(Alignment.End),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Save Key")
+                Text("Save Keys")
             }
 
             Spacer(modifier = Modifier.height(24.dp))

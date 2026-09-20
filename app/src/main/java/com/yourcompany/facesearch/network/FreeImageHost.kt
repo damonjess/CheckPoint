@@ -52,7 +52,6 @@ class FreeImageHost {
     private suspend fun imgbb(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.IMGBB_API_KEY
         if (apiKey.isBlank()) {
-            onLog("ℹ ImgBB key not set in local.properties, using fallback image hosts...")
             return@withContext null
         }
         

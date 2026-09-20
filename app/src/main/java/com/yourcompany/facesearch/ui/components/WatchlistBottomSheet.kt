@@ -171,7 +171,13 @@ fun WatchlistBottomSheet(
                             onValueChange = { newTargetName = it },
                             label = { Text("Target Name / Alias") },
                             singleLine = true,
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(8.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.Black,
+                                unfocusedTextColor = Color.Black,
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White
+                            )
                         )
                         if (capturedBitmap == null) {
                             Spacer(modifier = Modifier.height(8.dp))

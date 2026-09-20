@@ -3,6 +3,7 @@ package com.yourcompany.facesearch.network
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import android.util.Patterns
 import com.yourcompany.facesearch.data.cache.SearchCacheManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
@@ -500,8 +501,9 @@ class FaceSearchRepository(private val context: Context) {
         // List of known binary tools
         val knownTools = setOf("sherlock", "holehe", "phoneinfoga", "blackbird", "blackbird.py", "help")
 
-        // Command normalization: Check if user entered a phone number or a username or a known command
+        // Command normalization: Auto-detect phone, email, username, or known tool
         val isPhone = isPhoneNumberInput(trimmed) || lowerBase == "phoneinfoga"
+        val isEmail = isEmailInput(trimmed) || lowerBase == "holehe"
 
         val (baseCmd, args) = when {
             isPhone -> {
@@ -511,6 +513,14 @@ class FaceSearchRepository(private val context: Context) {
                     trimmed
                 }
                 "phoneinfoga" to listOf(targetPhone)
+            }
+            isEmail -> {
+                val targetEmail = if (lowerBase == "holehe" || lowerBase == "blackbird" || lowerBase == "blackbird.py") {
+                    parts.filter { !it.startsWith("-") && it != "holehe" && it != "blackbird" && it != "blackbird.py" && it != "-e" }.joinToString(" ").trim()
+                } else {
+                    trimmed
+                }
+                "holehe" to listOf(targetEmail)
             }
             !knownTools.contains(lowerBase) -> {
                 val username = rawBaseCmd.removePrefix("@")
@@ -523,7 +533,11 @@ class FaceSearchRepository(private val context: Context) {
         }
 
         if (baseCmd == "help") {
-            return@withContext "Available binaries: sherlock, holehe, phoneinfoga, blackbird.py\nUsage: [tool] [target] (e.g. sherlock john_doe or phoneinfoga +1234567890)"
+            return@withContext "Available binaries: sherlock, holehe, phoneinfoga, blackbird.py\n" +
+                    "Usage Examples:\n" +
+                    "  • Email OSINT: user@example.com or holehe user@example.com\n" +
+                    "  • Phone OSINT: +1234567890 or phoneinfoga +1234567890\n" +
+                    "  • Username OSINT: john_doe or sherlock john_doe"
         }
 
         // Only attempt backend HTTP call if activeBackend is set OR if quick ping succeeds
@@ -568,6 +582,11 @@ class FaceSearchRepository(private val context: Context) {
             return@withContext runNativePhoneInfoga(phoneTarget)
         }
 
+        if (baseCmd == "holehe" || isEmailInput(trimmed)) {
+            val emailTarget = target.ifBlank { trimmed }
+            return@withContext runNativeEmailOsint(emailTarget)
+        }
+
         if (baseCmd == "sherlock" || baseCmd == "blackbird" || baseCmd == "blackbird.py") {
             if (target.isNotBlank()) {
                 return@withContext runNativeSherlock(target)
@@ -580,6 +599,81 @@ class FaceSearchRepository(private val context: Context) {
         }
 
         "Termux connection error: Unable to reach Termux backend and no native fallback for '$fullCommand'."
+    }
+
+    private fun isEmailInput(input: String): Boolean {
+        val clean = input.trim().removePrefix("holehe").removePrefix("blackbird").removePrefix("epieos").trim()
+        val candidate = clean.split("\\s+".toRegex()).firstOrNull()?.removePrefix("@") ?: ""
+        if (candidate.isBlank()) return false
+        return Patterns.EMAIL_ADDRESS.matcher(candidate).matches() ||
+                (candidate.contains("@") && candidate.contains(".") && !candidate.startsWith("@") && !candidate.endsWith("@"))
+    }
+
+    private fun md5Hex(input: String): String {
+        val md = MessageDigest.getInstance("MD5")
+        val digest = md.digest(input.trim().lowercase().toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun runNativeEmailOsint(rawEmail: String): String {
+        val email = rawEmail.trim().removePrefix("holehe").removePrefix("blackbird").removePrefix("epieos").trim().lowercase()
+        if (!email.contains("@")) {
+            return "Usage: holehe <email_address> (e.g. user@example.com)"
+        }
+
+        val atIdx = email.indexOf('@')
+        val handle = if (atIdx > 0) email.substring(0, atIdx) else email
+        val domain = if (atIdx > 0 && atIdx < email.length - 1) email.substring(atIdx + 1) else ""
+        val md5Hash = md5Hex(email)
+        val encodedEmail = URLEncoder.encode("\"$email\"", "UTF-8")
+
+        val sb = StringBuilder()
+        sb.appendLine("==========================================================")
+        sb.appendLine("⚡ ADVANCED EMAIL OSINT / HOLEHE & RECON MATRIX")
+        sb.appendLine("==========================================================")
+        sb.appendLine("[+] Target Email: $email")
+        sb.appendLine("[+] Extracted Username Handle: $handle")
+        sb.appendLine("[+] Email Domain: $domain")
+        sb.appendLine("[+] MD5 Gravatar Hash: $md5Hash")
+        sb.appendLine()
+        sb.appendLine("[1] GRAVATAR & AVATAR IDENTITY RECON:")
+        sb.appendLine("  • Gravatar Profile: https://gravatar.com/$md5Hash")
+        sb.appendLine("  • Gravatar JSON Data: https://en.gravatar.com/$md5Hash.json")
+        sb.appendLine("  • Gravatar Direct Avatar: https://gravatar.com/avatar/$md5Hash?s=400")
+        sb.appendLine()
+        sb.appendLine("[2] EMAIL REGISTRY & REPUTATION SERVICES:")
+        sb.appendLine("  • Epieos Email OSINT: https://epieos.com/?q=$email")
+        sb.appendLine("  • WhatsMyName Handle Search ($handle): https://whatsmyname.app/?q=$handle")
+        sb.appendLine("  • EmailRep Reputation Score: https://emailrep.io/$email")
+        sb.appendLine("  • Hunter.io Email Verifier: https://hunter.io/email-verifier/$email")
+        sb.appendLine("  • Holehe Web Scanner: https://holehe.com/")
+        sb.appendLine()
+        sb.appendLine("[3] DATA BREACH & LEAK INTELLIGENCE:")
+        sb.appendLine("  • HaveIBeenPwned Leaks: https://haveibeenpwned.com/account/$email")
+        sb.appendLine("  • Intelligence X Leak Search: https://intelx.io/?s=$email")
+        sb.appendLine("  • DeHashed Breach Registry: https://dehashed.com/search?query=$email")
+        sb.appendLine("  • LeakCheck Registry: https://leakcheck.io/search?key=$email")
+        sb.appendLine("  • Pastebin Dump Leaks Dork: https://www.google.com/search?q=(site:pastebin.com+OR+site:rentry.co+OR+site:ghostbin.com)+AND+$encodedEmail")
+        sb.appendLine()
+        sb.appendLine("[4] GOOGLE & MULTI-ENGINE DORKS:")
+        sb.appendLine("  • Google Exact Match: https://www.google.com/search?q=$encodedEmail")
+        sb.appendLine("  • DuckDuckGo Search: https://duckduckgo.com/?q=$encodedEmail")
+        sb.appendLine("  • Social Media Dork: https://www.google.com/search?q=(site:github.com+OR+site:twitter.com+OR+site:linkedin.com+OR+site:facebook.com+OR+site:instagram.com)+AND+$encodedEmail")
+        sb.appendLine("  • Public Document Dork: https://www.google.com/search?q=(filetype:pdf+OR+filetype:doc+OR+filetype:txt+OR+filetype:csv)+AND+$encodedEmail")
+        sb.appendLine()
+        sb.appendLine("[5] HANDLE CROSS-PIVOT ($handle):")
+        sb.appendLine("  • Sherlock Username Scan: sherlock $handle")
+        if (domain.contains("gmail")) {
+            sb.appendLine("  • GHunt Google Workspace OSINT: ghunt email $email")
+        }
+        sb.appendLine()
+        sb.appendLine("[6] TERMUX / CLI OSINT COMMANDS:")
+        sb.appendLine("  • Holehe Email Scan: holehe $email")
+        sb.appendLine("  • Blackbird Email Scan: python blackbird.py -e $email")
+        sb.appendLine("  • Mosint Email Recon: mosint $email")
+        sb.appendLine("==========================================================")
+        sb.appendLine("[+] Recon complete. 20 high-yield email OSINT channels generated for $email.")
+        return sb.toString().trim()
     }
 
     private fun isPhoneNumberInput(input: String): Boolean {

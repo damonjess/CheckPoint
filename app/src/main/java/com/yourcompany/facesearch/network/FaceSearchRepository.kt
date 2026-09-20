@@ -523,7 +523,7 @@ class FaceSearchRepository(private val context: Context) {
         }
 
         if (baseCmd == "help") {
-            return@withContext "Available binaries: sherlock, holehe, phoneinfoga, blackbird.py\nUsage: [tool] [target] (e.g. sherlock damonjess or phoneinfoga 07795504158)"
+            return@withContext "Available binaries: sherlock, holehe, phoneinfoga, blackbird.py\nUsage: [tool] [target] (e.g. sherlock john_doe or phoneinfoga +1234567890)"
         }
 
         // Only attempt backend HTTP call if activeBackend is set OR if quick ping succeeds
@@ -595,7 +595,7 @@ class FaceSearchRepository(private val context: Context) {
 
     private fun runNativePhoneInfoga(rawPhone: String): String {
         val digitsOnly = rawPhone.replace(Regex("[^0-9]"), "")
-        if (digitsOnly.length < 7) return "Usage: phoneinfoga scan -n <phone_number> (e.g. 07795504158 or +447795504158)"
+        if (digitsOnly.length < 7) return "Usage: phoneinfoga scan -n <phone_number> (e.g. +1234567890)"
 
         val e164 = normalizePhoneE164(rawPhone)
         val cleanDigits = e164.replace(Regex("[^0-9]"), "")

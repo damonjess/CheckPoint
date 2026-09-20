@@ -37,8 +37,8 @@ fun TerminalConsoleScreen(
     var isExecuting by remember { mutableStateOf(false) }
     val consoleLogs = remember { mutableStateListOf<TerminalLogEntry>(
         TerminalLogEntry("CheckPoint OSINT Terminal v1.0. Connected.", LogType.SYSTEM),
-        TerminalLogEntry("Type 'help' for commands, or enter a username directly (e.g. 'damonjess' or '@damonjess').", LogType.INFO),
-        TerminalLogEntry("Examples:\n  • damonjess\n  • sherlock damonjess\n  • blackbird -u damonjess", LogType.INFO)
+        TerminalLogEntry("Type 'help' for commands, or enter a username directly (e.g. 'john_doe' or '@john_doe').", LogType.INFO),
+        TerminalLogEntry("Examples:\n  • john_doe\n  • sherlock john_doe\n  • blackbird -u john_doe", LogType.INFO)
     )}
     
     val listState = rememberLazyListState()
@@ -148,7 +148,7 @@ fun TerminalConsoleScreen(
                 OutlinedTextField(
                     value = commandInput,
                     onValueChange = { commandInput = it },
-                    placeholder = { Text("Enter command or username (e.g. damonjess)", color = Color.DarkGray) },
+                    placeholder = { Text("Enter command or username (e.g. john_doe)", color = Color.DarkGray) },
                     singleLine = true,
                     enabled = !isExecuting,
                     textStyle = LocalTextStyle.current.copy(

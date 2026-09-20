@@ -1,4 +1,0 @@
-- [x] Add `searchMyPhotoDirect` to `FreeFaceSearchHelper.kt`
-- [x] Update `onConfirmFreeSearch` in `CheckInViewModel.kt` to use direct search for FREE mode
-- [x] Ensure `isSearching` flag is correctly managed
-- [x] Verify browser tabs open sequentially in FREE mode

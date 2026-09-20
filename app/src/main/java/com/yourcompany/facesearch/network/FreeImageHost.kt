@@ -50,7 +50,11 @@ class FreeImageHost {
     }
 
     private suspend fun imgbb(bytes: ByteArray, onLog: (String) -> Unit): String? = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.IMGBB_API_KEY.ifBlank { "752a049b4efdbb31dc4a517ee2da39f8" }
+        val apiKey = BuildConfig.IMGBB_API_KEY
+        if (apiKey.isBlank()) {
+            onLog("ℹ ImgBB key not set in local.properties, using fallback image hosts...")
+            return@withContext null
+        }
         
         // Try Binary upload first
         val body = MultipartBody.Builder()

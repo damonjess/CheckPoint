@@ -1,0 +1,4 @@
+- [x] Fix Scanning Loop and Result Display
+- [x] Add Bing Support to Termux Scanner
+- [x] Prevent Double Scanning in Repository
+- [x] Improve Backend Discovery

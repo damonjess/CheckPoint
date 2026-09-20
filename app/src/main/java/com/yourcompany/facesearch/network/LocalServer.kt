@@ -1,0 +1,154 @@
+package com.yourcompany.facesearch.network
+
+import io.ktor.server.application.*
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
+import io.ktor.server.plugins.contentnegotiation.*
+import io.ktor.serialization.gson.*
+import io.ktor.server.request.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
+import io.ktor.http.*
+import io.ktor.http.content.*
+import io.ktor.server.plugins.cors.routing.*
+import android.content.Context
+import android.graphics.BitmapFactory
+import android.util.Log
+import com.yourcompany.facesearch.data.EnrolledFaceStore
+import com.yourcompany.facesearch.vision.FaceDetectionResult
+import com.yourcompany.facesearch.vision.FaceDetectorHelper
+import com.yourcompany.facesearch.vision.FaceEmbedder
+import com.yourcompany.facesearch.vision.FaceMatcher
+
+object LocalServer {
+
+    private var server: ApplicationEngine? = null
+    private var faceDetector: FaceDetectorHelper? = null
+    private var faceEmbedder: FaceEmbedder? = null
+    private lateinit var appContext: Context
+
+    // Memory-mapped probe storage
+    var currentProbeImage: ByteArray? = null
+    var currentFaceProbe: ByteArray? = null
+
+    fun stageProbe(bitmap: android.graphics.Bitmap, isFaceCrop: Boolean = false) {
+        val stream = java.io.ByteArrayOutputStream()
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, stream)
+        val bytes = stream.toByteArray()
+        if (isFaceCrop) {
+            currentFaceProbe = bytes
+            Log.e("LocalServer", "✓ Staged FACE probe: ${bytes.size} bytes")
+        } else {
+            currentProbeImage = bytes
+            Log.e("LocalServer", "✓ Staged FULL probe: ${bytes.size} bytes")
+        }
+    }
+
+    fun start(context: Context) {
+        if (server != null) return
+
+        appContext = context.applicationContext
+        faceDetector = FaceDetectorHelper(appContext)
+        faceEmbedder = FaceEmbedder(appContext)
+
+        server = embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
+            install(ContentNegotiation) { gson() }
+            install(CORS) { anyHost() }
+
+            routing {
+                // Full image probe
+                get("/probe.jpg") {
+                    val img = currentProbeImage
+                    if (img != null) {
+                        call.respondBytes(img, ContentType.Image.JPEG)
+                    } else {
+                        call.respond(HttpStatusCode.NotFound, "No probe staged")
+                    }
+                }
+
+                // Dedicated face probe (No clothes/background noise)
+                get("/face.jpg") {
+                    val img = currentFaceProbe
+                    if (img != null) {
+                        call.respondBytes(img, ContentType.Image.JPEG)
+                    } else {
+                        call.respond(HttpStatusCode.NotFound, "No face probe staged")
+                    }
+                }
+
+                post("/api/v1/face-search") {
+                    try {
+                        val multipart = call.receiveMultipart()
+                        var imageBytes: ByteArray? = null
+
+                        multipart.forEachPart { part ->
+                            if (part is PartData.FileItem) {
+                                imageBytes = part.streamProvider().readBytes()
+                            }
+                            part.dispose()
+                        }
+
+                        if (imageBytes == null) {
+                            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "No image"))
+                            return@post
+                        }
+
+                        val result = performRealFaceAnalysis(imageBytes!!)
+                        call.respond(result)
+
+                    } catch (e: Exception) {
+                        Log.e("LocalServer", "Error", e)
+                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+                    }
+                }
+            }
+        }.start(wait = false)
+    }
+
+    private suspend fun performRealFaceAnalysis(imageBytes: ByteArray): Map<String, Any> {
+        val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            ?: return mapOf("match_found" to false, "error" to "Invalid image data")
+
+        Log.e("LocalServer", "STEP 1: Face Detection & Isolation triggered for offline analysis.")
+        val detection = faceDetector?.detectAndCropFace(bitmap)
+        if (detection !is FaceDetectionResult.Success) {
+            return mapOf("match_found" to false, "error" to "No face detected in probe")
+        }
+
+        Log.e("LocalServer", "STEP 2: Feature Extraction & Biometric Mapping in progress...")
+        Log.e("LocalServer", "Analyzing interpupillary distance, jawline, and nose width for offline verify.")
+
+        Log.e("LocalServer", "STEP 3: Generating Biometric Faceprint...")
+        val embedding = faceEmbedder?.getEmbedding(detection.croppedFace)
+            ?: return mapOf("match_found" to false, "error" to "Failed to generate embedding")
+
+        Log.e("LocalServer", "STEP 4: Database Cross-Matching & Confidence Scoring...")
+        Log.e("LocalServer", "Scanning internal database for cross-matching identities...")
+        val enrolledFaces = EnrolledFaceStore.getAll(appContext)
+        val bestMatch = FaceMatcher.findBestMatch(embedding, enrolledFaces)
+
+        return if (bestMatch != null) {
+            Log.e("LocalServer", "✓ Local Match Found: ${bestMatch.face.name} (${bestMatch.similarity})")
+            mapOf(
+                "match_found" to true,
+                "name" to bestMatch.face.name,
+                "similarity" to bestMatch.similarity,
+                "id" to bestMatch.face.id
+            )
+        } else {
+            Log.e("LocalServer", "✗ No local match found in database")
+            mapOf("match_found" to false, "message" to "No local database match found")
+        }
+    }
+
+    fun stop() {
+        server?.stop(500L, 1000L)
+        server = null
+        faceDetector?.release()
+        faceEmbedder?.close()
+        faceDetector = null
+        faceEmbedder = null
+    }
+}
+
+

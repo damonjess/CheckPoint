@@ -1,0 +1,462 @@
+package com.yourcompany.facesearch.ui
+
+import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.yourcompany.facesearch.ui.components.*
+import com.yourcompany.facesearch.ui.models.WebMatchDisplay
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CheckInScreen(
+    capturedBitmap: Bitmap?,
+    uiState: CheckInUiState,
+    searchMode: SearchMode,
+    broadenLensCoverage: Boolean,
+    sensitivity: Float,
+    fullFaceMode: Boolean,
+    isSearching: Boolean,
+    targetHint: String,
+    debugMode: Boolean,
+    onTargetHintChange: (String) -> Unit,
+    onBroadenLensCoverageChange: (Boolean) -> Unit,
+    onSearchModeChange: (SearchMode) -> Unit,
+    onSensitivityChange: (Float) -> Unit,
+    onFullFaceModeChange: (Boolean) -> Unit,
+    onDebugModeChange: (Boolean) -> Unit,
+    onCapturePhotoClick: () -> Unit,
+    onProfileDiscoveryClick: () -> Unit,
+    onSelectGalleryClick: () -> Unit,
+    onRetryClick: () -> Unit,
+    onConfirmSearch: (Bitmap, Bitmap) -> Unit,
+    onConfirmFreeSearch: (Bitmap) -> Unit,
+    onTinEyeExactSearch: (Bitmap) -> Unit,
+    onLoadHighRes: (WebMatchDisplay) -> Unit,
+    onOpenForensicsClick: () -> Unit,
+    serpApiKey: String = "",
+    onSerpApiKeyChange: (String) -> Unit = {},
+    onOpenWatchlist: () -> Unit = {},
+    onExecuteCommand: suspend (String) -> String = { "root@checkpoint: no command handler registered" }
+) {
+    var activeInAppUrl by remember { mutableStateOf<String?>(null) }
+    var showSettingsSheet by remember { mutableStateOf(false) }
+    var showTerminal by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val isLoading = uiState is CheckInUiState.Loading || isSearching
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = Color(0xFFFBFBFB),
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { 
+                    Text(
+                        "CheckPoint // OSINT Suite", 
+                        fontWeight = FontWeight.Black, 
+                        fontSize = 18.sp,
+                        color = Color.Black
+                    ) 
+                },
+                navigationIcon = {
+                    IconButton(onClick = onRetryClick) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack, 
+                            contentDescription = "Back",
+                            modifier = Modifier.size(20.dp),
+                            tint = Color.Gray
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = { showTerminal = true },
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = Color(0xFF0F172A),
+                            contentColor = Color(0xFF00FF66)
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = "Open Terminal Console",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(onClick = { showSettingsSheet = true }) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            modifier = Modifier.size(20.dp),
+                            tint = Color.Gray
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = Color.Transparent
+                )
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            item {
+                val showSettings = !isLoading && (uiState is CheckInUiState.Idle || uiState is CheckInUiState.Error || uiState is CheckInUiState.NoFaceDetected)
+                
+                if (!isLoading) {
+                    val displayBitmap = when (uiState) {
+                        is CheckInUiState.Success -> uiState.isolatedFace ?: capturedBitmap
+                        else -> capturedBitmap
+                    }
+                    PhotoPreview(
+                        bitmap = displayBitmap,
+                        isScanning = false,
+                        size = if (uiState is CheckInUiState.Success || uiState is CheckInUiState.NoMatch) 80.dp else 180.dp
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (showSettings) {
+                        PhotoCaptureActions(
+                            hasPhoto = capturedBitmap != null,
+                            isLoading = false,
+                            onCapturePhotoClick = onCapturePhotoClick,
+                            onSelectGalleryClick = onSelectGalleryClick
+                        )
+
+                        OutlinedButton(
+                            onClick = onProfileDiscoveryClick,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Text(
+                                "Find My Public Profiles",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+
+                        if (capturedBitmap != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = onOpenForensicsClick,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "Inspect Image Forensics (EXIF)",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            OsintHintField(
+                                value = targetHint,
+                                onValueChange = onTargetHintChange,
+                                isEnabled = true
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Broader Lens coverage", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(
+                                    "Also request exact-image candidates when a SerpApi key is configured.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.DarkGray
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Switch(
+                                checked = broadenLensCoverage,
+                                onCheckedChange = onBroadenLensCoverageChange
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "SerpApi Key (Google Lens)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                if (serpApiKey.isNotBlank()) {
+                                    Text(
+                                        "✓ Configured",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = Color.Black
+                                    )
+                                } else {
+                                    Text(
+                                        "⚠ Key Missing",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = Amber
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            var showKey by remember { mutableStateOf(false) }
+                            OutlinedTextField(
+                                value = serpApiKey,
+                                onValueChange = onSerpApiKeyChange,
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Paste SerpApi key here...") },
+                                singleLine = true,
+                                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(onClick = { showKey = !showKey }) {
+                                        Icon(
+                                            imageVector = if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = if (showKey) "Hide Key" else "Show Key"
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            Text(
+                                "Required for Google Lens visual search matches. Saved locally on device.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.DarkGray,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        SearchModeSelector(
+                            searchMode = searchMode,
+                            sensitivity = sensitivity,
+                            fullFaceMode = fullFaceMode,
+                            debugMode = debugMode,
+                            isLoading = false,
+                            onSearchModeChange = onSearchModeChange,
+                            onSensitivityChange = onSensitivityChange,
+                            onFullFaceModeChange = onFullFaceModeChange,
+                            onDebugModeChange = onDebugModeChange
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                    } else if (uiState is CheckInUiState.Success || uiState is CheckInUiState.NoMatch) {
+                        OutlinedButton(
+                            onClick = {
+                                showSettingsSheet = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Text(
+                                "Adjust Search & Settings",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+                }
+
+                val isFreeMode = searchMode == SearchMode.FREE || 
+                                 searchMode == SearchMode.AGGRESSIVE || 
+                                 searchMode == SearchMode.HYPER ||
+                                 searchMode == SearchMode.DEEP_CRAWL ||
+                                 searchMode == SearchMode.ADULT
+                
+                if (showSettings && isFreeMode && capturedBitmap != null) {
+                    Button(
+                        onClick = { onConfirmFreeSearch(capturedBitmap) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .padding(bottom = 8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66BB6A)),
+                        shape = RoundedCornerShape(28.dp),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Bolt, 
+                            contentDescription = null, 
+                            tint = Color.Black,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = when (searchMode) {
+                                SearchMode.FREE -> "Search Social Media"
+                                SearchMode.AGGRESSIVE -> "Launch Biometric Scan"
+                                SearchMode.HYPER -> "Execute Deep OSINT Search"
+                                SearchMode.DEEP_CRAWL -> "Execute Deep OSINT Search"
+                                else -> "Launch Social Search"
+                            },
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.Black
+                        )
+                    }
+                }
+            }
+
+            // Main Content Area
+            item {
+                when (uiState) {
+                    is CheckInUiState.Idle -> {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(200.dp), 
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Select mode & scan to begin search",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+
+                    is CheckInUiState.Loading -> {
+                        LoadingContent(
+                            uiState = uiState,
+                            capturedBitmap = capturedBitmap
+                        )
+                    }
+
+                    is CheckInUiState.Confirming -> {
+                        FaceSearchConfirmScreen(
+                            croppedBitmap = uiState.faceBitmap,
+                            nameHint = targetHint,
+                            searchMode = searchMode,
+                            onConfirm = { onConfirmSearch(uiState.faceBitmap, uiState.sceneBitmap) },
+                            onTinEyeExactSearch = { onTinEyeExactSearch(uiState.faceBitmap) },
+                            onCancel = onRetryClick
+                        )
+                    }
+
+                    is CheckInUiState.Success -> {
+                        SuccessContent(
+                            uiState = uiState,
+                            debugMode = debugMode,
+                            onLoadHighRes = onLoadHighRes,
+                            onMatchClick = { match ->
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(match.profileUrl))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    activeInAppUrl = match.profileUrl
+                                }
+                            }
+                        )
+                    }
+
+                    is CheckInUiState.NoFaceDetected -> {
+                        NoFaceContent(
+                            reasons = uiState.reasons,
+                            logs = uiState.logs,
+                            onRetryClick = onRetryClick
+                        )
+                    }
+
+                    is CheckInUiState.NoMatch -> {
+                        NoMatchContent(
+                            uiState = uiState,
+                            targetHint = targetHint,
+                            onRetryClick = onRetryClick,
+                            onTinEyeExactSearch = { capturedBitmap?.let { onTinEyeExactSearch(it) } },
+                            onConfirmFreeSearch = { capturedBitmap?.let { onConfirmFreeSearch(it) } }
+                        )
+                    }
+
+                    is CheckInUiState.Error -> {
+                        ErrorContent(
+                            message = uiState.message,
+                            logs = uiState.logs,
+                            onRetryClick = onRetryClick
+                        )
+                    }
+                }
+            }
+            
+            item {
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
+
+        activeInAppUrl?.let { url ->
+            InAppWebViewSheet(
+                url = url,
+                onDismiss = { activeInAppUrl = null }
+            )
+        }
+
+        if (showSettingsSheet) {
+            SettingsBottomSheet(
+                onOpenWatchlist = {
+                    showSettingsSheet = false
+                    onOpenWatchlist()
+                },
+                onDismiss = { showSettingsSheet = false }
+            )
+        }
+    }
+
+    // Fullscreen Terminal Console Overlay
+    if (showTerminal) {
+        BackHandler {
+            showTerminal = false
+        }
+        
+        TerminalConsoleScreen(
+            onExecuteCommand = onExecuteCommand,
+            onClose = { showTerminal = false }
+        )
+    }
+}
+}

@@ -1,8 +1,11 @@
 package com.yourcompany.facesearch.ui.components
 
 import android.graphics.Bitmap
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -16,65 +19,57 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
-import com.yourcompany.facesearch.R
-import com.yourcompany.facesearch.ui.Amber
 import com.yourcompany.facesearch.ui.models.WebMatchDisplay
+import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
+
+private data class GraphNode(
+    val id: String,
+    val match: WebMatchDisplay,
+    val x: Float,
+    val y: Float,
+    val color: Color,
+    val tierName: String,
+)
 
 enum class GraphFilter(val label: String) {
     ALL("All Nodes"),
     VERIFIED("Verified"),
-    SOCIALS("Socials"),
+    LIKELY("Likely"),
     TINEYE("TinEye"),
-    ADULT("Adult Platform")
-}
-
-data class NetworkNode(
-    val id: String,
-    val match: WebMatchDisplay,
-    val category: NodeCategory,
-    val xOffsetDp: Dp,
-    val yOffsetDp: Dp,
-    val nodeColor: Color,
-    val connectionType: String
-)
-
-enum class NodeCategory {
-    VERIFIED_FACE,
-    LIKELY_FACE,
-    VISUAL_LEAD,
-    TINEYE_OCCURRENCE,
-    ADULT_PLATFORM
+    ADULT("Adult")
 }
 
 @Composable
@@ -88,148 +83,189 @@ fun IdentityNetworkGraph(
     onMatchClick: (WebMatchDisplay) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var activeFilter by remember { mutableStateOf(GraphFilter.ALL) }
-    var selectedNode by remember { mutableStateOf<NetworkNode?>(null) }
-
-    // Gesture States: Pan & Zoom
+    // Interactive Pan & Zoom State
     var scale by remember { mutableFloatStateOf(1f) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var activeFilter by remember { mutableStateOf(GraphFilter.ALL) }
+    var selectedNode by remember { mutableStateOf<GraphNode?>(null) }
 
-    // Animation for pulsing central target glow
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseGlow by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.25f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glowPulse"
-    )
-
-    // Build the set of all nodes from all match buckets
+    // Pre-calculate radial positions for hardware-accelerated rendering
     val allNodes = remember(verifiedMatches, likelyMatches, visualLeads, tinEyeMatches, adultMatches) {
-        buildNetworkNodes(
-            verifiedMatches = verifiedMatches,
-            likelyMatches = likelyMatches,
-            visualLeads = visualLeads,
-            tinEyeMatches = tinEyeMatches,
-            adultMatches = adultMatches
-        )
+        val result = mutableListOf<GraphNode>()
+
+        fun addTier(matches: List<WebMatchDisplay>, radius: Float, color: Color, tierName: String) {
+            if (matches.isEmpty()) return
+            val angleStep = (2 * PI) / matches.size
+            matches.forEachIndexed { index, match ->
+                val angle = index * angleStep
+                val x = (radius * cos(angle)).toFloat()
+                val y = (radius * sin(angle)).toFloat()
+                val id = "${tierName}_${match.profileUrl}_$index"
+                result.add(GraphNode(id, match, x, y, color, tierName))
+            }
+        }
+
+        // Tiers expand outward based on confidence levels
+        addTier(verifiedMatches, radius = 400f, color = Color(0xFF00FF66), tierName = "Verified Face") // CyberGreen
+        addTier(likelyMatches, radius = 700f, color = Color(0xFFFFB000), tierName = "Likely Match")   // Amber
+        addTier(tinEyeMatches, radius = 1000f, color = Color(0xFF4285F4), tierName = "TinEye Occurrence")  // Blue
+        addTier(visualLeads, radius = 1300f, color = Color(0xFF94A3B8), tierName = "Visual Lead")    // Slate/Gray
+        addTier(adultMatches, radius = 1600f, color = Color(0xFFE53935), tierName = "Adult Network Hit")   // Red
+
+        result
     }
 
-    // Filter nodes based on selected chip
     val filteredNodes = remember(allNodes, activeFilter) {
         when (activeFilter) {
             GraphFilter.ALL -> allNodes
-            GraphFilter.VERIFIED -> allNodes.filter { 
-                it.category == NodeCategory.VERIFIED_FACE || it.category == NodeCategory.LIKELY_FACE 
-            }
-            GraphFilter.SOCIALS -> allNodes.filter { it.match.isSocial }
-            GraphFilter.TINEYE -> allNodes.filter { it.category == NodeCategory.TINEYE_OCCURRENCE }
-            GraphFilter.ADULT -> allNodes.filter { it.category == NodeCategory.ADULT_PLATFORM }
+            GraphFilter.VERIFIED -> allNodes.filter { it.tierName == "Verified Face" }
+            GraphFilter.LIKELY -> allNodes.filter { it.tierName == "Likely Match" }
+            GraphFilter.TINEYE -> allNodes.filter { it.tierName == "TinEye Occurrence" }
+            GraphFilter.ADULT -> allNodes.filter { it.tierName == "Adult Network Hit" }
         }
     }
 
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .height(520.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF0F172A)) // Sleek dark slate graph canvas background
+            .fillMaxSize()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0F172A)) // Tactical Slate Background
     ) {
-        // --- INTERACTIVE CANVAS AREA ---
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(0.6f, 2.5f)
-                        offsetX += pan.x
-                        offsetY += pan.y
+                        scale = (scale * zoom).coerceIn(0.2f, 3f)
+                        offset += pan
                     }
-                },
-            contentAlignment = Alignment.Center
+                }
         ) {
             val density = LocalDensity.current
+            val centerX = with(density) { maxWidth.toPx() / 2f }
+            val centerY = with(density) { maxHeight.toPx() / 2f }
 
-            // Canvas drawing connecting lines (edges) between center face and match nodes
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val centerPxX = size.width / 2f + offsetX
-                val centerPxY = size.height / 2f + offsetY
-
-                filteredNodes.forEach { node ->
-                    val nodePxX = centerPxX + with(density) { node.xOffsetDp.toPx() } * scale
-                    val nodePxY = centerPxY + with(density) { node.yOffsetDp.toPx() } * scale
-
-                    val strokeWidth = when (node.category) {
-                        NodeCategory.VERIFIED_FACE -> 3.5f * scale
-                        NodeCategory.LIKELY_FACE -> 2.5f * scale
-                        NodeCategory.ADULT_PLATFORM -> 2.5f * scale
-                        else -> 1.5f * scale
-                    }
-
-                    val pathEffect = if (node.category == NodeCategory.VISUAL_LEAD || node.category == NodeCategory.TINEYE_OCCURRENCE) {
-                        PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
-                    } else null
-
-                    drawLine(
-                        color = node.nodeColor.copy(alpha = 0.65f),
-                        start = Offset(centerPxX, centerPxY),
-                        end = Offset(nodePxX, nodePxY),
-                        strokeWidth = strokeWidth,
-                        pathEffect = pathEffect
-                    )
-                }
-            }
-
-            // Render Nodes
-            filteredNodes.forEach { node ->
-                val xDp = node.xOffsetDp * scale + with(density) { offsetX.toDp() }
-                val yDp = node.yOffsetDp * scale + with(density) { offsetY.toDp() }
-
-                Box(
-                    modifier = Modifier
-                        .offset(x = xDp, y = yDp)
-                        .clickable { selectedNode = node },
-                    contentAlignment = Alignment.Center
-                ) {
-                    NodeBubble(
-                        node = node,
-                        isSelected = selectedNode?.id == node.id
-                    )
-                }
-            }
-
-            // --- CENTRAL TARGET FACE NODE ---
+            // The transformable master container
             Box(
                 modifier = Modifier
-                    .offset(
-                        x = with(density) { offsetX.toDp() },
-                        y = with(density) { offsetY.toDp() }
-                    )
-                    .size((90 * scale).dp)
-                    .shadow(12.dp * scale, CircleShape)
-                    .background(Color(0xFF00E5FF).copy(alpha = 0.25f * pulseGlow), CircleShape)
-                    .border(3.dp, Color(0xFF00E5FF), CircleShape)
-                    .clip(CircleShape),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offset.x
+                        translationY = offset.y
+                    }
             ) {
-                if (targetFaceBitmap != null) {
-                    Image(
-                        bitmap = targetFaceBitmap.asImageBitmap(),
-                        contentDescription = "Target Face",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Target",
-                        tint = Color.White,
-                        modifier = Modifier.size(44.dp)
-                    )
+                // 1. Draw Connecting Edges (Lines)
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val centerOffset = Offset(centerX, centerY)
+                    filteredNodes.forEach { node ->
+                        drawLine(
+                            color = node.color.copy(alpha = 0.4f),
+                            start = centerOffset,
+                            end = Offset(centerX + node.x, centerY + node.y),
+                            strokeWidth = 2.dp.toPx()
+                        )
+                    }
+                }
+
+                // 2. Draw Target Node (Center)
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (centerX - 40.dp.toPx()).roundToInt(),
+                                (centerY - 40.dp.toPx()).roundToInt()
+                            )
+                        }
+                        .size(80.dp)
+                        .border(3.dp, Color.White, CircleShape)
+                        .background(Color.DarkGray, CircleShape)
+                        .clip(CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (targetFaceBitmap != null) {
+                        Image(
+                            bitmap = targetFaceBitmap.asImageBitmap(),
+                            contentDescription = "Target Subject",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(Icons.Default.Person, contentDescription = null, tint = Color.White)
+                    }
+                }
+
+                // 3. Draw Web/OSINT Nodes (Satellites)
+                filteredNodes.forEach { node ->
+                    val isSelected = selectedNode?.id == node.id
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(
+                                    (centerX + node.x - 30.dp.toPx()).roundToInt(),
+                                    (centerY + node.y - 30.dp.toPx()).roundToInt()
+                                )
+                            }
+                            .size(60.dp)
+                            .clickable {
+                                if (selectedNode?.id == node.id) {
+                                    onMatchClick(node.match)
+                                } else {
+                                    selectedNode = node
+                                }
+                            }
+                            .border(if (isSelected) 4.dp else 2.dp, if (isSelected) Color.White else node.color, CircleShape)
+                            .background(Color(0xFF1E293B), CircleShape)
+                            .clip(CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (node.match.imageUrl != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(node.match.imageUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = node.match.displayName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Text(
+                                text = node.match.source.take(1).uppercase(),
+                                color = node.color,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    // Node Label Overlay
+                    Surface(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(
+                                    (centerX + node.x - 45.dp.toPx()).roundToInt(),
+                                    (centerY + node.y + 35.dp.toPx()).roundToInt()
+                                )
+                            }
+                            .width(90.dp),
+                        color = Color.Black.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = node.match.displayName.ifBlank { node.match.source },
+                            color = Color.White,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
         }
@@ -280,8 +316,7 @@ fun IdentityNetworkGraph(
             SmallFloatingActionButton(
                 onClick = {
                     scale = 1f
-                    offsetX = 0f
-                    offsetY = 0f
+                    offset = Offset.Zero
                 },
                 containerColor = Color(0xFF1E293B),
                 contentColor = Color.White
@@ -290,7 +325,7 @@ fun IdentityNetworkGraph(
             }
         }
 
-        // --- SELECTED NODE DETAIL SHEET OVERLAY ---
+        // --- SELECTED NODE DETAIL CARD OVERLAY ---
         AnimatedVisibility(
             visible = selectedNode != null,
             enter = slideInVertically { it } + fadeIn(),
@@ -309,83 +344,12 @@ fun IdentityNetworkGraph(
 }
 
 @Composable
-private fun NodeBubble(
-    node: NetworkNode,
-    isSelected: Boolean
-) {
-    val nodeSize = when (node.category) {
-        NodeCategory.VERIFIED_FACE -> 54.dp
-        NodeCategory.LIKELY_FACE -> 48.dp
-        NodeCategory.ADULT_PLATFORM -> 48.dp
-        else -> 42.dp
-    }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(90.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(nodeSize)
-                .shadow(if (isSelected) 10.dp else 4.dp, CircleShape)
-                .background(Color(0xFF1E293B), CircleShape)
-                .border(
-                    width = if (isSelected) 3.dp else 2.dp,
-                    color = if (isSelected) Color.White else node.nodeColor,
-                    shape = CircleShape
-                )
-                .padding(3.dp)
-                .clip(CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            val imgUrl = node.match.imageUrl
-            if (imgUrl != null) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(imgUrl)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = node.match.displayName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Text(
-                    text = node.match.displayName.take(1).uppercase(),
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Label pill below bubble
-        Surface(
-            color = Color(0xFF0F172A).copy(alpha = 0.85f),
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, node.nodeColor.copy(alpha = 0.5f))
-        ) {
-            Text(
-                text = node.match.displayName,
-                color = Color.White,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-            )
-        }
-    }
-}
-
-@Composable
 private fun NodeDetailCard(
-    node: NetworkNode,
+    node: GraphNode,
     onOpenProfile: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
 
@@ -407,12 +371,12 @@ private fun NodeDetailCard(
                     Box(
                         modifier = Modifier
                             .size(10.dp)
-                            .background(node.nodeColor, CircleShape)
+                            .background(node.color, CircleShape)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = node.connectionType,
-                        color = node.nodeColor,
+                        text = "${node.tierName} (${(node.match.confidence * 100).toInt()}%)",
+                        color = node.color,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
@@ -433,12 +397,11 @@ private fun NodeDetailCard(
                     modifier = Modifier
                         .size(50.dp)
                         .clip(CircleShape)
-                        .border(2.dp, node.nodeColor, CircleShape)
+                        .border(2.dp, node.color, CircleShape)
                 ) {
-                    val imgUrl = node.match.imageUrl
-                    if (imgUrl != null) {
+                    if (node.match.imageUrl != null) {
                         AsyncImage(
-                            model = ImageRequest.Builder(context).data(imgUrl).crossfade(true).build(),
+                            model = ImageRequest.Builder(context).data(node.match.imageUrl).crossfade(true).build(),
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
@@ -499,7 +462,7 @@ private fun NodeDetailCard(
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Icon(
-                        Icons.Default.OpenInNew,
+                        Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = null,
                         tint = Color.Black,
                         modifier = Modifier.size(16.dp)
@@ -514,92 +477,11 @@ private fun NodeDetailCard(
                     },
                     modifier = Modifier.height(42.dp),
                     shape = RoundedCornerShape(10.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.Gray)
+                    border = BorderStroke(1.dp, Color.Gray)
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link", tint = Color.White, modifier = Modifier.size(16.dp))
                 }
             }
         }
     }
-}
-
-private fun buildNetworkNodes(
-    verifiedMatches: List<WebMatchDisplay>,
-    likelyMatches: List<WebMatchDisplay>,
-    visualLeads: List<WebMatchDisplay>,
-    tinEyeMatches: List<WebMatchDisplay>,
-    adultMatches: List<WebMatchDisplay>
-): List<NetworkNode> {
-    val nodes = mutableListOf<NetworkNode>()
-
-    val allBuckets = listOf(
-        verifiedMatches to NodeCategory.VERIFIED_FACE,
-        likelyMatches to NodeCategory.LIKELY_FACE,
-        adultMatches to NodeCategory.ADULT_PLATFORM,
-        tinEyeMatches to NodeCategory.TINEYE_OCCURRENCE,
-        visualLeads to NodeCategory.VISUAL_LEAD
-    )
-
-    // Flatten all matches with their assigned category into a single list
-    val allPairs = allBuckets.flatMap { (matches, category) ->
-        matches.map { match -> match to category }
-    }
-
-    if (allPairs.isEmpty()) return emptyList()
-
-    // Orbital distribution rings
-    val ringRadiiDp = listOf(110.dp, 160.dp, 210.dp)
-    val ringCapacity = 8
-
-    allPairs.forEachIndexed { totalIndex, (match, category) ->
-        val ringIndex = (totalIndex / ringCapacity).coerceAtMost(ringRadiiDp.lastIndex)
-        val radiusDp = ringRadiiDp[ringIndex]
-
-        // Calculate total items assigned to this specific ring
-        val startIndexForRing = ringIndex * ringCapacity
-        val itemsInThisRing = if (ringIndex == ringRadiiDp.lastIndex) {
-            allPairs.size - startIndexForRing
-        } else {
-            ringCapacity.coerceAtMost(allPairs.size - startIndexForRing)
-        }.coerceAtLeast(1)
-
-        val indexInRing = totalIndex - startIndexForRing
-        // Stagger outer rings slightly (+22.5 deg) to prevent overlap with inner ring nodes
-        val ringAngleOffset = ringIndex * 22.5f
-        val angleDeg = (indexInRing * (360f / itemsInThisRing) + ringAngleOffset) % 360f
-        val rad = Math.toRadians(angleDeg.toDouble())
-
-        val xOffset = (radiusDp.value * cos(rad)).dp
-        val yOffset = (radiusDp.value * sin(rad)).dp
-
-        val color = when (category) {
-            NodeCategory.VERIFIED_FACE -> Color(0xFF00E5FF) // Electric Cyan
-            NodeCategory.LIKELY_FACE -> Color(0xFFFFB74D) // Warm Amber
-            NodeCategory.ADULT_PLATFORM -> Color(0xFFEF4444) // Vibrant Red
-            NodeCategory.TINEYE_OCCURRENCE -> Color(0xFF3B82F6) // Bright Blue
-            NodeCategory.VISUAL_LEAD -> Color(0xFF94A3B8) // Slate Gray
-        }
-
-        val connectionType = when (category) {
-            NodeCategory.VERIFIED_FACE -> "Confirmed Facial Match (${(match.confidence * 100).toInt()}%)"
-            NodeCategory.LIKELY_FACE -> "Possible Facial Match (${(match.confidence * 100).toInt()}%)"
-            NodeCategory.ADULT_PLATFORM -> "Adult Network Hit"
-            NodeCategory.TINEYE_OCCURRENCE -> "Exact Image Occurrence"
-            NodeCategory.VISUAL_LEAD -> "Visual Lead Candidate"
-        }
-
-        nodes.add(
-            NetworkNode(
-                id = "${category.name}_${match.profileUrl}_${totalIndex}",
-                match = match,
-                category = category,
-                xOffsetDp = xOffset,
-                yOffsetDp = yOffset,
-                nodeColor = color,
-                connectionType = connectionType
-            )
-        )
-    }
-
-    return nodes
 }

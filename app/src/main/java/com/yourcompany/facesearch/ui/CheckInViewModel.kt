@@ -1100,12 +1100,38 @@ class CheckInViewModel(
     }
 
     private fun isLikelyProductResult(match: SerpVisualMatch): Boolean {
-        // Only exclude explicit invalid video shorts junk
-        val isYoutubeJunk = match.link?.contains("youtube.com") == true && 
-                (match.link.contains("watch?v=") || match.link.contains("shorts/")) &&
-                match.title?.contains("shorts", ignoreCase = true) == true
-        
-        return isYoutubeJunk
+        val title = (match.title ?: "").lowercase(Locale.US)
+        val link = (match.link ?: "").lowercase(Locale.US)
+        val source = (match.source ?: "").lowercase(Locale.US)
+        val metadata = "$title $link $source"
+
+        // 1. YouTube Shorts Junk
+        val isYoutubeJunk = link.contains("youtube.com") && 
+                (link.contains("watch?v=") || link.contains("shorts/")) &&
+                title.contains("shorts")
+        if (isYoutubeJunk) return true
+
+        // 2. Known E-Commerce / Shopping Domains
+        val shoppingDomains = listOf(
+            "amazon.", "ebay.", "faire.com", "iqueens.com", "aliexpress.", "etsy.com",
+            "walmart.com", "target.com", "poshmark.com", "depop.com", "mercari.com",
+            "taobao.com", "tmall.com", "shein.com", "asos.com", "nordstrom.com",
+            "macys.com", "zara.com", "hm.com", "urbanoutfitters.com", "ralphlauren.com",
+            "nike.com", "adidas.com", "puma.com", "underarmour.com", "shop.", "store."
+        )
+        if (shoppingDomains.any { metadata.contains(it) }) return true
+
+        // 3. E-Commerce & Apparel Keywords in Title / Metadata
+        val productKeywords = listOf(
+            "buy ", "sale", "price", "shipping", "in stock", "cart", "dollar", "usd", "inr", "eur",
+            "t-shirt", "t shirt", "tee", "shirt", "oversized", "unisex", "men's", "women's",
+            "hoodie", "sweater", "jacket", "coat", "pants", "jeans", "dress", "apparel",
+            "clothing", "wear", "outfit", "nwt", "wholesale", "fabric", "harlequin",
+            "shop", "boutique", "generation women", "harlequin tee"
+        )
+        if (productKeywords.any { title.contains(it) }) return true
+
+        return false
     }
 
     /** Excludes sources and metadata that are unsuitable as identity leads. */
@@ -1152,6 +1178,11 @@ class CheckInViewModel(
         }
         
         cleanTitle = cleanTitle.replace(Regex("#\\w+"), "").trim()
+
+        // NEW: Append the social media platform name to the title
+        if (isSocial && platform.name != "Web" && !cleanTitle.contains(platform.name, ignoreCase = true)) {
+            cleanTitle = "$cleanTitle (${platform.name})"
+        }
 
         // Detect suspicious thumbnails (very small URLs often indicate bad crops)
         val thumb = ThumbnailUtils.normalize(match.thumbnail, match.link)
@@ -1290,17 +1321,31 @@ class CheckInViewModel(
             async {
                 semaphore.withPermit {
                     try {
+                        // Immediately drop e-commerce/apparel product candidates
+                        if (isLikelyProductResult(match) || isIrrelevantVisualResult(match)) {
+                            excludedCounter.incrementAndGet()
+                            return@withPermit
+                        }
+
                         val thumbnailUrl = match.thumbnail
                             ?: if (match.link != null) faceSearchRepository.extractMetadataThumbnail(match.link) else null
                         
                         if (thumbnailUrl == null) {
-                            val fallbackMatch = match.copy(faceSimilarity = 0.05f)
-                            fallbackCandidates += fallbackMatch
+                            if (!isLikelyProductResult(match)) {
+                                val fallbackMatch = match.copy(faceSimilarity = 0.05f)
+                                fallbackCandidates += fallbackMatch
+                            } else {
+                                excludedCounter.incrementAndGet()
+                            }
                         } else {
                             val thumbnail = loadThumbnailBitmap(thumbnailUrl)
                             if (thumbnail == null) {
-                                val fallbackMatch = match.copy(faceSimilarity = 0.05f)
-                                fallbackCandidates += fallbackMatch
+                                if (!isLikelyProductResult(match)) {
+                                    val fallbackMatch = match.copy(faceSimilarity = 0.05f)
+                                    fallbackCandidates += fallbackMatch
+                                } else {
+                                    excludedCounter.incrementAndGet()
+                                }
                             } else {
                                 val faceCrop = try { nativeFaceCropper.cropAndAlignFace(thumbnail, fullJawline = false) } catch (_: Exception) { null }
                                 val result = try { faceVerifier.calculateSimilarityAndEmbedding(thumbnail, sourceEmbedding, thumbnailUrl) } catch (_: Exception) { null }
@@ -1328,24 +1373,37 @@ class CheckInViewModel(
                                             Log.d("CheckIn", "• FACE LEAD: ${"%.1f".format(similarity * 100f)}% - ${match.title ?: match.link}")
                                         }
                                         else -> {
-                                            fallbackCandidates += faceBearingMatch
-                                            Log.d("CheckIn", "• FALLBACK CANDIDATE: ${"%.1f".format(similarity * 100f)}% - ${match.title ?: match.link}")
+                                            if (!isLikelyProductResult(match)) {
+                                                fallbackCandidates += faceBearingMatch
+                                                Log.d("CheckIn", "• FALLBACK CANDIDATE: ${"%.1f".format(similarity * 100f)}% - ${match.title ?: match.link}")
+                                            } else {
+                                                excludedCounter.incrementAndGet()
+                                            }
                                         }
                                     }
                                 } else {
-                                    val fallbackMatch = match.copy(
-                                        thumbnail = thumbnailUrl,
-                                        faceSimilarity = 0.05f,
-                                        faceCrop = faceCrop ?: thumbnail
-                                    )
-                                    fallbackCandidates += fallbackMatch
-                                    Log.d("CheckIn", "• PRESERVED VISUAL LEAD: ${match.title ?: match.link}")
+                                    // Thumbnail does not contain a face or face verification failed
+                                    if (!isLikelyProductResult(match)) {
+                                        val fallbackMatch = match.copy(
+                                            thumbnail = thumbnailUrl,
+                                            faceSimilarity = 0.05f,
+                                            faceCrop = faceCrop ?: thumbnail
+                                        )
+                                        fallbackCandidates += fallbackMatch
+                                        Log.d("CheckIn", "• PRESERVED VISUAL LEAD: ${match.title ?: match.link}")
+                                    } else {
+                                        excludedCounter.incrementAndGet()
+                                    }
                                 }
                             }
                         }
                     } catch (error: Exception) {
-                        val fallbackMatch = match.copy(faceSimilarity = 0.05f)
-                        fallbackCandidates += fallbackMatch
+                        if (!isLikelyProductResult(match)) {
+                            val fallbackMatch = match.copy(faceSimilarity = 0.05f)
+                            fallbackCandidates += fallbackMatch
+                        } else {
+                            excludedCounter.incrementAndGet()
+                        }
                         Log.w("CheckIn", "Candidate review error for ${match.link}, preserved as fallback lead", error)
                     }
                 }

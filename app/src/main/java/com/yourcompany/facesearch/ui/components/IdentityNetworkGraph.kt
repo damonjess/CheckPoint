@@ -125,155 +125,15 @@ fun IdentityNetworkGraph(
         }
     }
 
-    Box(
+    Column(
         modifier = modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF0F172A)) // Tactical Slate Background
     ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(0.2f, 3f)
-                        offset += pan
-                    }
-                }
-        ) {
-            val density = LocalDensity.current
-            val centerX = with(density) { maxWidth.toPx() / 2f }
-            val centerY = with(density) { maxHeight.toPx() / 2f }
-
-            // The transformable master container
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = offset.x
-                        translationY = offset.y
-                    }
-            ) {
-                // 1. Draw Connecting Edges (Lines)
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val centerOffset = Offset(centerX, centerY)
-                    filteredNodes.forEach { node ->
-                        drawLine(
-                            color = node.color.copy(alpha = 0.4f),
-                            start = centerOffset,
-                            end = Offset(centerX + node.x, centerY + node.y),
-                            strokeWidth = 2.dp.toPx()
-                        )
-                    }
-                }
-
-                // 2. Draw Target Node (Center)
-                Box(
-                    modifier = Modifier
-                        .offset {
-                            IntOffset(
-                                (centerX - 40.dp.toPx()).roundToInt(),
-                                (centerY - 40.dp.toPx()).roundToInt()
-                            )
-                        }
-                        .size(80.dp)
-                        .border(3.dp, Color.White, CircleShape)
-                        .background(Color.DarkGray, CircleShape)
-                        .clip(CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (targetFaceBitmap != null) {
-                        Image(
-                            bitmap = targetFaceBitmap.asImageBitmap(),
-                            contentDescription = "Target Subject",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Icon(Icons.Default.Person, contentDescription = null, tint = Color.White)
-                    }
-                }
-
-                // 3. Draw Web/OSINT Nodes (Satellites)
-                filteredNodes.forEach { node ->
-                    val isSelected = selectedNode?.id == node.id
-                    Box(
-                        modifier = Modifier
-                            .offset {
-                                IntOffset(
-                                    (centerX + node.x - 30.dp.toPx()).roundToInt(),
-                                    (centerY + node.y - 30.dp.toPx()).roundToInt()
-                                )
-                            }
-                            .size(60.dp)
-                            .clickable {
-                                if (selectedNode?.id == node.id) {
-                                    onMatchClick(node.match)
-                                } else {
-                                    selectedNode = node
-                                }
-                            }
-                            .border(if (isSelected) 4.dp else 2.dp, if (isSelected) Color.White else node.color, CircleShape)
-                            .background(Color(0xFF1E293B), CircleShape)
-                            .clip(CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (node.match.imageUrl != null) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(node.match.imageUrl)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = node.match.displayName,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Text(
-                                text = node.match.source.take(1).uppercase(),
-                                color = node.color,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-
-                    // Node Label Overlay
-                    Surface(
-                        modifier = Modifier
-                            .offset {
-                                IntOffset(
-                                    (centerX + node.x - 45.dp.toPx()).roundToInt(),
-                                    (centerY + node.y + 35.dp.toPx()).roundToInt()
-                                )
-                            }
-                            .width(90.dp),
-                        color = Color.Black.copy(alpha = 0.7f),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            text = node.match.displayName.ifBlank { node.match.source },
-                            color = Color.White,
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
-        }
-
         // --- TOP FILTER BAR ---
         Row(
             modifier = Modifier
-                .align(Alignment.TopCenter)
                 .padding(12.dp)
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
@@ -307,37 +167,183 @@ fun IdentityNetworkGraph(
             }
         }
 
-        // --- BOTTOM RIGHT CONTROLS (RESET PAN/ZOOM) ---
+        // --- GRAPH CANVAS / DRAWING AREA ---
         Box(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(12.dp)
+                .fillMaxWidth()
+                .weight(1f)
         ) {
-            SmallFloatingActionButton(
-                onClick = {
-                    scale = 1f
-                    offset = Offset.Zero
-                },
-                containerColor = Color(0xFF1E293B),
-                contentColor = Color.White
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(0.2f, 3f)
+                            offset += pan
+                        }
+                    }
             ) {
-                Icon(Icons.Default.CenterFocusStrong, contentDescription = "Reset View")
-            }
-        }
+                val density = LocalDensity.current
+                val centerX = with(density) { maxWidth.toPx() / 2f }
+                val centerY = with(density) { maxHeight.toPx() / 2f }
 
-        // --- SELECTED NODE DETAIL CARD OVERLAY ---
-        AnimatedVisibility(
-            visible = selectedNode != null,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            selectedNode?.let { node ->
-                NodeDetailCard(
-                    node = node,
-                    onOpenProfile = { onMatchClick(node.match) },
-                    onDismiss = { selectedNode = null }
-                )
+                // The transformable master container
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = offset.x
+                            translationY = offset.y
+                        }
+                ) {
+                    // 1. Draw Connecting Edges (Lines)
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val centerOffset = Offset(centerX, centerY)
+                        filteredNodes.forEach { node ->
+                            drawLine(
+                                color = node.color.copy(alpha = 0.4f),
+                                start = centerOffset,
+                                end = Offset(centerX + node.x, centerY + node.y),
+                                strokeWidth = 2.dp.toPx()
+                            )
+                        }
+                    }
+
+                    // 2. Draw Target Node (Center)
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(
+                                    (centerX - 40.dp.toPx()).roundToInt(),
+                                    (centerY - 40.dp.toPx()).roundToInt()
+                                )
+                            }
+                            .size(80.dp)
+                            .border(3.dp, Color.White, CircleShape)
+                            .background(Color.DarkGray, CircleShape)
+                            .clip(CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (targetFaceBitmap != null) {
+                            Image(
+                                bitmap = targetFaceBitmap.asImageBitmap(),
+                                contentDescription = "Target Subject",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(Icons.Default.Person, contentDescription = null, tint = Color.White)
+                        }
+                    }
+
+                    // 3. Draw Web/OSINT Nodes (Satellites)
+                    filteredNodes.forEach { node ->
+                        val isSelected = selectedNode?.id == node.id
+                        Box(
+                            modifier = Modifier
+                                .offset {
+                                    IntOffset(
+                                        (centerX + node.x - 30.dp.toPx()).roundToInt(),
+                                        (centerY + node.y - 30.dp.toPx()).roundToInt()
+                                    )
+                                }
+                                .size(60.dp)
+                                .clickable {
+                                    if (selectedNode?.id == node.id) {
+                                        onMatchClick(node.match)
+                                    } else {
+                                        selectedNode = node
+                                    }
+                                }
+                                .border(if (isSelected) 4.dp else 2.dp, if (isSelected) Color.White else node.color, CircleShape)
+                                .background(Color(0xFF1E293B), CircleShape)
+                                .clip(CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (node.match.imageUrl != null) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(node.match.imageUrl)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = node.match.displayName,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Text(
+                                    text = node.match.source.take(1).uppercase(),
+                                    color = node.color,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 20.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+
+                        // Node Label Overlay
+                        Surface(
+                            modifier = Modifier
+                                .offset {
+                                    IntOffset(
+                                        (centerX + node.x - 45.dp.toPx()).roundToInt(),
+                                        (centerY + node.y + 35.dp.toPx()).roundToInt()
+                                    )
+                                }
+                                .width(90.dp),
+                            color = Color.Black.copy(alpha = 0.7f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = node.match.displayName.ifBlank { node.match.source },
+                                color = Color.White,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+
+            // --- BOTTOM RIGHT CONTROLS (RESET PAN/ZOOM) ---
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(12.dp)
+            ) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        scale = 1f
+                        offset = Offset.Zero
+                    },
+                    containerColor = Color(0xFF1E293B),
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.CenterFocusStrong, contentDescription = "Reset View")
+                }
+            }
+
+            // --- SELECTED NODE DETAIL CARD OVERLAY ---
+            this@Column.AnimatedVisibility(
+                visible = selectedNode != null,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                selectedNode?.let { node ->
+                    NodeDetailCard(
+                        node = node,
+                        onOpenProfile = { onMatchClick(node.match) },
+                        onDismiss = { selectedNode = null }
+                    )
+                }
             }
         }
     }

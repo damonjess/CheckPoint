@@ -68,8 +68,10 @@ class FaceSearchRepository(private val context: Context) {
             val allResults = Collections.synchronizedList(mutableListOf<SerpVisualMatch>())
 
             val cropper = NativeFaceCropper()
-            val searchBitmap = faceBitmap ?: cropper.prepareFaceForSearch(bitmap)
-            val expandedBitmap = cropper.getExpandedHeadAndShouldersProbe(bitmap)
+            // Always route the face crop through prepareFaceForSearch and applyClothingHardenedMask
+            // right before handoff to freeHost.upload for search engine upload
+            val searchBitmap = cropper.prepareFaceForSearch(faceBitmap ?: bitmap)
+            val expandedBitmap = searchBitmap
 
             // Perform OCR on the full original image to extract contextual clues (e.g. badges, signs)
             var textHint = keywordHint

@@ -297,7 +297,7 @@ fun SuccessContent(
                 tinEyeMatches = uiState.tinEyeMatches,
                 adultMatches = uiState.adultMatches,
                 onMatchClick = onMatchClick,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().height(500.dp)
             )
         } else if (viewMode == ResultsViewMode.GRID) {
             // --- STAGGERED GRID VIEW MODE ---

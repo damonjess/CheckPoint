@@ -118,7 +118,7 @@ class FaceSearchRepository(private val context: Context) {
             val probeUrl = if (imageUrl != null && imageUrl.startsWith("http")) {
                 imageUrl
             } else {
-                onLog("Uploading primary face probe (${byteArray.size / 1024} KB)...")
+                onLog("Uploading face-focused probe (excluding neckline)...")
                 freeHost.upload(searchBitmap, onLog)
             }
 
@@ -408,7 +408,7 @@ class FaceSearchRepository(private val context: Context) {
     private fun harvestSearchHints(matches: List<SerpVisualMatch>): List<String> {
         val stopWords = setOf(
             "http", "https", "www", "com", "net", "org", "co", "uk", "io", "jpg", "png", "jpeg",
-            "image", "photo", "picture", "wallpaper", "visual", "match", "matches", "candidate",
+            "image", "photo", "picture", "pic", "pics", "wallpaper", "visual", "match", "matches", "candidate",
             "shutterstock", "gettyimages", "alamy", "istockphoto", "stock", "fotocdn"
         )
 

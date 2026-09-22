@@ -312,13 +312,13 @@ class FaceDetectorHelper(private val context: Context) {
 
     private fun cropAndAlign(source: Bitmap, face: Face): Bitmap {
         val box = face.boundingBox.clampTo(source.width, source.height)
-        // Expanded isolation: include more forehead, hair, ears, and chin context.
-        // Increased from 1.25x/1.55x to 1.50x/1.80x for a larger face scanning boundary box.
-        val width = min(source.width, max(box.width(), (box.width() * 1.50f).toInt()))
-        val height = min(source.height, max(box.height(), (box.height() * 1.80f).toInt()))
+        
+        // TIGHT ISOLATION: Stop at the jawline to exclude collars/clothing.
+        val width = min(source.width, max(box.width(), (box.width() * 1.25f).toInt()))
+        val height = min(source.height, max(box.height(), (box.height() * 1.35f).toInt()))
         val centerX = box.centerX()
-        // Shift slightly upward to center the face and exclude shoulders.
-        val centerY = (box.centerY() - box.height() * 0.08f).toInt()
+        // Shift upward more aggressively (15%) to keep hair but drop the shirt completely.
+        val centerY = (box.centerY() - box.height() * 0.15f).toInt()
         val left = (centerX - width / 2).coerceIn(0, source.width - width)
         val top = (centerY - height / 2).coerceIn(0, source.height - height)
         val crop = Bitmap.createBitmap(source, left, top, width, height)

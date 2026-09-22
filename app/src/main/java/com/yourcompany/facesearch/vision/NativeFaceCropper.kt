@@ -132,13 +132,13 @@ class NativeFaceCropper {
         val box = face.boundingBox.clampTo(source.width, source.height)
         
         // FIX: Match FaceDetectorHelper EXACTLY to ensure source and result embeddings map correctly
-        val widthScale = 1.50f
-        val heightScale = 1.80f
+        val widthScale = 1.25f
+        val heightScale = 1.35f
         
         val crop = cropAround(
             source = source,
             centerX = box.centerX(),
-            centerY = (box.centerY() - box.height() * 0.08f).toInt(), // Match 0.08f shift upward
+            centerY = (box.centerY() - box.height() * 0.15f).toInt(), // Match 0.15f shift upward
             width = max(box.width(), (box.width() * widthScale).toInt()),
             height = max(box.height(), (box.height() * heightScale).toInt())
         )

@@ -383,6 +383,7 @@ fun CheckInScreen(
                     is CheckInUiState.Confirming -> {
                         FaceSearchConfirmScreen(
                             croppedBitmap = uiState.faceBitmap,
+                            sceneBitmap = uiState.sceneBitmap,
                             nameHint = targetHint,
                             searchMode = searchMode,
                             onConfirm = { onConfirmSearch(uiState.faceBitmap, uiState.sceneBitmap) },

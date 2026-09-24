@@ -339,18 +339,6 @@ class WebViewScraper private constructor(
         """
     }
 
-    suspend fun scrapeFaceCheckId(imageUrl: String): List<SerpVisualMatch> = scrapeEngineWithRetry(
-        url = "https://facecheck.id/",
-        engineName = "FaceCheck.id",
-        delayMs = 1000L,
-        extractJs = """
-            (function() {
-                let r = [];
-                return JSON.stringify(r);
-            })();
-        """.trimIndent()
-    )
-
     suspend fun scrapeSogou(imageUrl: String): List<SerpVisualMatch> = scrapeEngineWithRetry(
         url = "https://pic.sogou.com/ris?query=${URLEncoder.encode(imageUrl, "UTF-8")}&flag=1",
         engineName = "Sogou",

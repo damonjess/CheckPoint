@@ -166,20 +166,6 @@ class FaceSearchRepository(private val context: Context) {
                 coroutineScope {
                     val jobs = mutableListOf<Deferred<Unit>>()
 
-                    if ("FaceCheck.id" !in enginesToSkip) {
-                        jobs.add(async {
-                            val s = WebViewScraper.create(context)
-                            try {
-                                val matches = s.scrapeFaceCheckId(probeUrl)
-                                if (matches.isNotEmpty()) {
-                                    onLog("✓ FaceCheck.id found ${matches.size} candidate(s)")
-                                }
-                                allResults.addAll(matches)
-                                Unit
-                            } finally { s.destroy() }
-                        })
-                    }
-
                     if ("Sogou" !in enginesToSkip) {
                         jobs.add(async {
                             val s = WebViewScraper.create(context)

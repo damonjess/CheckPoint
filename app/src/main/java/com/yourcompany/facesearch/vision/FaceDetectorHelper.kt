@@ -10,7 +10,9 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Region
 import android.graphics.Shader
+import android.os.Build
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceContour
@@ -353,11 +355,8 @@ class FaceDetectorHelper(private val context: Context) {
     }
 
     /**
-     * Applies all 4 Hardening Layers against Google Lens / visual search clothing hijacking:
-     * 1. Layer 1: ML Kit 36-Point Facial Contour & Elliptical Path Masking
-     * 2. Layer 2: Neutral Studio Gray Fill (#808080) for Non-Face Background
-     * 3. Layer 3: Chin Boundary Tapering & Soft Gradient Fade into Background
-     * 4. Layer 4: Desaturation & Edge/Texture Suppression
+     * Applies facial contour mask with a translucent gray overlay (alpha = 160)
+     * so that background/clothing is dimmed while remaining visible to the user.
      */
     private fun applyClothingHardenedMask(
         source: Bitmap,
@@ -373,10 +372,10 @@ class FaceDetectorHelper(private val context: Context) {
         val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
 
-        // Layer 2: Fill background with neutral studio gray (#808080)
-        canvas.drawColor(backgroundColor)
+        // 1. Draw original unmasked bitmap
+        canvas.drawBitmap(safe, 0f, 0f, null)
 
-        // Layer 1: Build 36-point facial contour path or tapered face oval
+        // 2. Build 36-point facial contour path or tapered face oval
         val path = Path()
         val faceContour = face.getContour(FaceContour.FACE)
 
@@ -399,36 +398,25 @@ class FaceDetectorHelper(private val context: Context) {
             }
             path.close()
         } else {
-            // Tapered Facial Oval that curves inward towards the chin (0.85h)
             val ovalRect = RectF(
                 width * 0.03f,
                 height * 0.01f,
                 width * 0.97f,
-                height * 0.85f // Taper at/above chin level to eliminate collar
+                height * 0.85f
             )
             path.addOval(ovalRect, Path.Direction.CW)
         }
 
-        // Layer 4: Desaturation & Texture Suppression on crop edges
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        // 3. Clip outside the face path and overlay translucent gray mask
         canvas.save()
-        canvas.clipPath(path)
-        canvas.drawBitmap(safe, 0f, 0f, paint)
-        canvas.restore()
-
-        // Layer 3: Chin Boundary Tapering & Soft Linear Gradient Fade into Neutral Background
-        val gradientYStart = height * 0.76f
-        val gradientYEnd = height * 0.88f
-        val fadePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = LinearGradient(
-                0f, gradientYStart,
-                0f, gradientYEnd,
-                Color.TRANSPARENT,
-                backgroundColor,
-                Shader.TileMode.CLAMP
-            )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            canvas.clipOutPath(path)
+        } else {
+            @Suppress("DEPRECATION")
+            canvas.clipPath(path, Region.Op.DIFFERENCE)
         }
-        canvas.drawRect(0f, gradientYStart, width.toFloat(), height.toFloat(), fadePaint)
+        canvas.drawColor(Color.argb(160, 60, 60, 60))
+        canvas.restore()
 
         return output
     }

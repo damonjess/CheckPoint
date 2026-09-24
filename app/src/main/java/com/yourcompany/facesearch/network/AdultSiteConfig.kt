@@ -3,6 +3,7 @@ package com.yourcompany.facesearch.network
 object AdultSiteConfig {
     /** Expanded adult platforms searched via in-app WebView & Termux. */
     val SITES = listOf(
+        "theadulthub.com",
         "pornhub.com",
         "xvideos.com",
         "xnxx.com",
@@ -42,10 +43,11 @@ object AdultSiteConfig {
         "sunporno.com",
         "gotporn.com",
         "vporn.com",
-        "daftsex.com"
+        "daftsex.com",
     )
 
     fun labelFor(domain: String): String = when {
+        domain.contains("theadulthub") -> "TheAdultHub"
         domain.contains("pornhub") -> "Pornhub"
         domain.contains("xvideos") -> "XVideos"
         domain.contains("xnxx") -> "XNXX"

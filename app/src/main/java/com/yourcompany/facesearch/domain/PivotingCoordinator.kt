@@ -30,8 +30,19 @@ object PivotingCoordinator {
     fun extractPivotTasks(verifiedResults: List<ScanResultEntity>): List<PivotTask> {
         val tasks = mutableSetOf<PivotTask>()
 
+        // Block any URL pointing to an individual media item, status, or post container
+        val mediaPathBlacklist = listOf(
+            "/p/", "/reel/", "/reels/", "/tv/", "/status/",
+            "/video/", "/watch", "/shorts/", "/comments/"
+        )
+
         verifiedResults.forEach { entity ->
             val url = entity.profileUrl
+
+            // Skip candidate URLs that are posts rather than profile roots
+            if (mediaPathBlacklist.any { url.contains(it, ignoreCase = true) }) {
+                return@forEach
+            }
 
             // Extract Usernames
             val handleMatcher = handlePattern.matcher(url)
@@ -174,7 +185,16 @@ object PivotingCoordinator {
             // Generic publisher/meme names to ignore
             "news", "entertainment", "meme", "memes", "daily", "pics"
         )
-        return generics.contains(handle.lowercase())
+
+        if (generics.contains(handle.lowercase())) return true
+
+        // In PivotingCoordinator.kt -> isGenericPath()
+        // Alphanumeric strings with mixed case and no vowels/separators are usually post shortcodes
+        if (handle.length in 8..15 && handle.none { it == '_' || it == '.' } && handle.count { it.isDigit() } >= 2) {
+            return true
+        }
+
+        return false
     }
 
     private fun isValidUrl(url: String): Boolean {

@@ -15,6 +15,8 @@ import coil3.imageLoader
 import coil3.toBitmap
 import coil3.request.allowHardware
 import com.yourcompany.facesearch.data.cache.SearchCacheManager
+import com.yourcompany.facesearch.data.local.ScanResultEntity
+import com.yourcompany.facesearch.domain.PivotingCoordinator
 import com.yourcompany.facesearch.network.AdultSiteConfig
 import com.yourcompany.facesearch.network.FaceSearchRepository
 import com.yourcompany.facesearch.network.FreeImageHost
@@ -921,6 +923,63 @@ class CheckInViewModel(
                 addLog("✓ Saved ${verifiedHits.size} verified matches to local cache.")
             } catch (e: Exception) {
                 addLog("⚠ Failed to save verified results to cache: ${e.message}")
+            }
+        }
+
+        // --- NEW KNOWLEDGE GRAPH PIVOTING BLOCK ---
+        if (verifiedHits.isNotEmpty() && useTermux) {
+            addLog("Initiating Knowledge Graph Pivot on ${verifiedHits.size} verified visual matches...")
+
+            // Convert WebMatchDisplay back to Entity format for the Coordinator
+            val pivotEntities = verifiedHits.map {
+                ScanResultEntity(
+                    queryTarget = targetHint.ifBlank { "unknown" },
+                    platform = it.source ?: "Unknown",
+                    profileUrl = it.link ?: "",
+                    timestamp = System.currentTimeMillis()
+                )
+            }.filter { it.profileUrl.isNotBlank() }
+
+            val tasks = PivotingCoordinator.extractPivotTasks(pivotEntities)
+            if (tasks.isNotEmpty()) {
+                val pivotResults = PivotingCoordinator.executePivots(
+                    tasks = tasks,
+                    backendUrl = faceSearchRepository.activeBackend ?: "http://127.0.0.1:3000",
+                    onLog = { msg -> addLog(msg) }
+                )
+
+                if (pivotResults.isNotEmpty()) {
+                    addLog("Knowledge Graph Expansion Complete: Found ${pivotResults.size} secondary accounts linked to these usernames.")
+
+                    // Map the pivot discoveries into WebMatchDisplay objects so the UI can render them
+                    val mappedPivotDisplays = pivotResults.map { entity ->
+                        WebMatchDisplay(
+                            name = "Discovered Account (@${entity.queryTarget})",
+                            source = "Pivot Discovery (${entity.platform})",
+                            profileUrl = entity.profileUrl,
+                            score = 6500,
+                            isFaceVerified = false,
+                            isLikelyFaceMatch = true,
+                            isSocial = true
+                        )
+                    }
+
+                    // Update the UI live with the newly discovered pivot nodes
+                    updateResultsLive(
+                        mappedPivotDisplays.map {
+                            SerpVisualMatch(
+                                title = it.name,
+                                link = it.profileUrl,
+                                source = it.source,
+                                thumbnail = null,
+                                score = it.score
+                            )
+                        },
+                        useTermux
+                    )
+                }
+            } else {
+                addLog("No viable usernames extracted for pivoting.")
             }
         }
 

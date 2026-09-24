@@ -211,7 +211,32 @@ fun IdentityNetworkGraph(
                         }
                     }
 
-                    // 2. Draw Target Node (Center)
+                    // 2. Draw Node Circles with dynamic color rules (verified/likely/pivot-aware)
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        filteredNodes.forEach { node ->
+                            val nodeColor = when {
+                                node.match.isFaceVerified -> Color(0xFF00FF66)
+                                node.match.source.contains("Pivot Discovery", ignoreCase = true) -> Color(0xFF00E5FF)
+                                node.match.isLikelyFaceMatch -> Color(0xFFFFB000)
+                                else -> Color(0xFF334155)
+                            }
+
+                            drawCircle(
+                                color = nodeColor,
+                                radius = 24.dp.toPx(),
+                                center = Offset(centerX + node.x, centerY + node.y)
+                            )
+
+                            drawCircle(
+                                color = Color.Black,
+                                radius = 24.dp.toPx(),
+                                center = Offset(centerX + node.x, centerY + node.y),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+                            )
+                        }
+                    }
+
+                    // 3. Draw Target Node (Center)
                     Box(
                         modifier = Modifier
                             .offset {

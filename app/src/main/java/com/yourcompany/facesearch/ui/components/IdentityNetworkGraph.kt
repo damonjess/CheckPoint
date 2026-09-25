@@ -198,21 +198,25 @@ fun IdentityNetworkGraph(
                             translationY = offset.y
                         }
                 ) {
-                    // 1. Draw Connecting Edges (Lines)
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        val centerOffset = Offset(centerX, centerY)
-                        filteredNodes.forEach { node ->
-                            drawLine(
-                                color = node.color.copy(alpha = 0.4f),
-                                start = centerOffset,
-                                end = Offset(centerX + node.x, centerY + node.y),
-                                strokeWidth = 2.dp.toPx()
-                            )
-                        }
-                    }
+                        // Phase 1: Draw edges first so they sit underneath nodes
+                        val parentNode = filteredNodes.find { it.match.isFaceVerified }
 
-                    // 2. Draw Node Circles with dynamic color rules (verified/likely/pivot-aware)
-                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        filteredNodes.forEach { childNode ->
+                            if (childNode.match.source.contains("Pivot Discovery", ignoreCase = true)) {
+                                val targetParent = parentNode ?: filteredNodes.firstOrNull()
+                                if (targetParent != null) {
+                                    drawLine(
+                                        color = Color(0xFF334155),
+                                        start = Offset(centerX + targetParent.x, centerY + targetParent.y),
+                                        end = Offset(centerX + childNode.x, centerY + childNode.y),
+                                        strokeWidth = 2.dp.toPx()
+                                    )
+                                }
+                            }
+                        }
+
+                        // Phase 2: Draw node circles after edges have been painted
                         filteredNodes.forEach { node ->
                             val nodeColor = when {
                                 node.match.isFaceVerified -> Color(0xFF00FF66)

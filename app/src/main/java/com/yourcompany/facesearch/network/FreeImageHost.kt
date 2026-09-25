@@ -12,9 +12,16 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 
 class FreeImageHost {
+    private val directUploadClient = OkHttpClient.Builder()
+        .proxy(Proxy.NO_PROXY)
+        .connectTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(35, TimeUnit.SECONDS)
+        .build()
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(25, TimeUnit.SECONDS)
         .readTimeout(35, TimeUnit.SECONDS)
@@ -67,7 +74,7 @@ class FreeImageHost {
             .build()
 
         try {
-            client.newCall(req).execute().use { res ->
+            directUploadClient.newCall(req).execute().use { res ->
                 val json = res.body?.string() ?: ""
                 val response = gson.fromJson(json, ImgbbResponse::class.java)
                 
@@ -101,7 +108,7 @@ class FreeImageHost {
             .build()
 
         try {
-            client.newCall(req).execute().use { res ->
+            directUploadClient.newCall(req).execute().use { res ->
                 val json = res.body?.string() ?: ""
                 val response = gson.fromJson(json, ImgbbResponse::class.java)
                 
@@ -137,7 +144,7 @@ class FreeImageHost {
             .build()
 
         try {
-            client.newCall(req).execute().use { res ->
+            directUploadClient.newCall(req).execute().use { res ->
                 val json = res.body?.string() ?: ""
                 if (res.isSuccessful && json.contains("\"url\"")) {
                     val m = "\"url\":\"([^\"]+)\"".toRegex().find(json)
@@ -165,7 +172,7 @@ class FreeImageHost {
             .build()
 
         try {
-            client.newCall(req).execute().use { res ->
+            directUploadClient.newCall(req).execute().use { res ->
                 val json = res.body?.string() ?: ""
                 if (res.isSuccessful && json.contains("\"url\"")) {
                     val m = "\"url\":\"([^\"]+)\"".toRegex().find(json)
@@ -194,7 +201,7 @@ class FreeImageHost {
             .build()
 
         try {
-            client.newCall(req).execute().use { res ->
+            directUploadClient.newCall(req).execute().use { res ->
                 val text = res.body?.string().orEmpty().trim()
                 if (res.isSuccessful && text.startsWith("http") && text.contains("catbox.moe")) {
                     onLog("✓ Catbox.moe Active")
@@ -218,7 +225,7 @@ class FreeImageHost {
             .build()
 
         try {
-            client.newCall(req).execute().use { res ->
+            directUploadClient.newCall(req).execute().use { res ->
                 val text = res.body?.string().orEmpty().trim()
                 if (res.isSuccessful && text.startsWith("http")) {
                     onLog("✓ 0x0.st Active")

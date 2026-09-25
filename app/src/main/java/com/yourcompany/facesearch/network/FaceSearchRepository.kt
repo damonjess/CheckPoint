@@ -534,7 +534,8 @@ class FaceSearchRepository(private val context: Context) {
             val backendBase = activeBackend ?: "http://127.0.0.1:3000"
             val req = mapOf<String, Any>(
                 "command" to baseCmd,
-                "args" to args
+                "args" to args,
+                "useTor" to NetworkProxyConfig.isProxyEnabled
             )
 
             try {

@@ -2,6 +2,7 @@ package com.yourcompany.facesearch.domain
 
 import android.net.Uri
 import com.yourcompany.facesearch.data.local.ScanResultEntity
+import com.yourcompany.facesearch.network.NetworkProxyConfig
 import com.yourcompany.facesearch.network.RetrofitClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -105,7 +106,8 @@ object PivotingCoordinator {
                             val response = api.executeCommand(
                                 mapOf(
                                     "command" to task.tool,
-                                    "args" to listOf(task.target)
+                                    "args" to listOf(task.target),
+                                    "useTor" to NetworkProxyConfig.isProxyEnabled
                                 )
                             )
 

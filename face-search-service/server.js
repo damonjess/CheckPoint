@@ -313,7 +313,7 @@ app.get('/api/ping', (req, res) => {
 });
 
 app.post('/api/exec', (req, res) => {
-  const { command, args = [] } = req.body;
+  const { command, args = [], useTor = false } = req.body;
 
   if (!command || typeof command !== 'string') {
     return res.status(400).json({ success: false, error: 'Valid command string is required.' });
@@ -323,7 +323,7 @@ app.post('/api/exec', (req, res) => {
   const parts = trimmedCommand.split(/\s+/);
   const baseCmd = parts[0].toLowerCase();
 
-  const combinedArgs = [
+  let combinedArgs = [
     ...(parts.length > 1 ? parts.slice(1) : []),
     ...(Array.isArray(args) ? args : [])
   ];
@@ -331,7 +331,7 @@ app.post('/api/exec', (req, res) => {
   if (!ALLOWED_COMMANDS[baseCmd]) {
     return res.status(403).json({
       success: false,
-      error: `Command '${baseCmd}' is not permitted in ALLOWED_COMMANDS whitelist. Allowed: ${Object.keys(ALLOWED_COMMANDS).filter(k => ALLOWED_COMMANDS[k]).join(', ')}`
+      error: `Command '${baseCmd}' is not permitted in ALLOWED_COMMANDS whitelist.`
     });
   }
 
@@ -352,15 +352,30 @@ app.post('/api/exec', (req, res) => {
     process.env.PATH || ''
   ].filter(Boolean).join(':');
 
+  // Configure environment variables
   const env = {
     ...process.env,
     PATH: termuxPaths
   };
 
-  console.log(`[Exec] Executing: ${baseCmd} ${combinedArgs.join(' ')}`);
+  // If Tor is enabled, apply SOCKS5 routing
+  if (useTor) {
+    const torProxy = 'socks5h://127.0.0.1:9050';
+    env.ALL_PROXY = torProxy;
+    env.HTTP_PROXY = torProxy;
+    env.HTTPS_PROXY = torProxy;
+
+    // Sherlock requires explicit CLI proxy argument
+    if (baseCmd === 'sherlock' && !combinedArgs.includes('--proxy')) {
+      combinedArgs.push('--proxy', 'socks5://127.0.0.1:9050');
+    }
+  }
+
+  const timeoutMs = useTor ? 120000 : 60000;
+  console.log(`[Exec] Executing: ${baseCmd} ${combinedArgs.join(' ')} (Tor: ${useTor})`);
 
   try {
-    const child = spawn(baseCmd, combinedArgs, { env, timeout: 60000 });
+    const child = spawn(baseCmd, combinedArgs, { env, timeout: timeoutMs });
     let stdout = '';
     let stderr = '';
 
@@ -377,7 +392,7 @@ app.post('/api/exec', (req, res) => {
       if (err.code === 'ENOENT') {
         return res.status(404).json({
           success: false,
-          error: `Command '${baseCmd}' not found in PATH. Ensure binary path is set up in Termux environment.`
+          error: `Command '${baseCmd}' not found in PATH.`
         });
       }
       return res.status(500).json({

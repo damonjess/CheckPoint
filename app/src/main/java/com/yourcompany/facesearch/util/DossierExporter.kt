@@ -1,7 +1,6 @@
 package com.yourcompany.facesearch.util
 
 import android.content.Context
-import android.content.Intent
 import com.yourcompany.facesearch.ui.models.WebMatchDisplay
 
 object DossierExporter {
@@ -16,12 +15,13 @@ object DossierExporter {
             csvBuilder.append("$title,$source,$score,$url\n")
         }
 
-        val sendIntent = Intent().apply {
-            action = Intent.ACTION_SEND
-            putExtra(Intent.EXTRA_TEXT, csvBuilder.toString())
-            type = "text/csv"
-        }
-        context.startActivity(Intent.createChooser(sendIntent, "Export Dossier (CSV)"))
+        ShareManager.shareText(
+            context = context,
+            text = csvBuilder.toString(),
+            chooserTitle = "Export Dossier (CSV)",
+            mimeType = "text/csv",
+            fileName = "dossier_export_${System.currentTimeMillis()}.csv"
+        )
     }
 
     fun exportToJson(context: Context, matches: List<WebMatchDisplay>) {
@@ -37,11 +37,12 @@ object DossierExporter {
         }
         jsonBuilder.append("]\n")
 
-        val sendIntent = Intent().apply {
-            action = Intent.ACTION_SEND
-            putExtra(Intent.EXTRA_TEXT, jsonBuilder.toString())
-            type = "application/json"
-        }
-        context.startActivity(Intent.createChooser(sendIntent, "Export Dossier (JSON)"))
+        ShareManager.shareText(
+            context = context,
+            text = jsonBuilder.toString(),
+            chooserTitle = "Export Dossier (JSON)",
+            mimeType = "application/json",
+            fileName = "dossier_export_${System.currentTimeMillis()}.json"
+        )
     }
 }

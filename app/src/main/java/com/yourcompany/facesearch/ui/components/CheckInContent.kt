@@ -38,6 +38,7 @@ import com.yourcompany.facesearch.ui.Amber
 import com.yourcompany.facesearch.ui.CheckInUiState
 import com.yourcompany.facesearch.ui.SearchMode
 import com.yourcompany.facesearch.ui.models.WebMatchDisplay
+import com.yourcompany.facesearch.util.ShareManager
 
 @Composable
 fun LoadingContent(
@@ -250,12 +251,13 @@ fun SuccessContent(
                     val summary = (uiState.matches + uiState.tinEyeMatches + uiState.adultMatches).take(10).joinToString("\n\n") {
                         "${it.displayName} (${it.source})\n${it.profileUrl}"
                     }
-                    val sendIntent = Intent().apply {
-                        action = Intent.ACTION_SEND
-                        putExtra(Intent.EXTRA_TEXT, "Sherlock visual-search results:\n\n$summary")
-                        type = "text/plain"
-                    }
-                    context.startActivity(Intent.createChooser(sendIntent, null))
+                    ShareManager.shareText(
+                        context = context,
+                        text = "Sherlock visual-search results:\n\n$summary",
+                        chooserTitle = "Share results",
+                        mimeType = "text/plain",
+                        fileName = "sherlock_results_${System.currentTimeMillis()}.txt"
+                    )
                 }) {
                     Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.Gray, modifier = Modifier.size(20.dp))
                 }

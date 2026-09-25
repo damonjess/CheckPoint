@@ -1,10 +1,7 @@
 package com.yourcompany.facesearch.ui
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.core.content.FileProvider
-import java.io.File
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +49,7 @@ import com.yourcompany.facesearch.data.ProfileLeadStrength
 import com.yourcompany.facesearch.data.ProfileStatus
 import com.yourcompany.facesearch.data.PublicProfileLead
 import com.yourcompany.facesearch.ui.components.InAppWebViewSheet
+import com.yourcompany.facesearch.util.ShareManager
 
 /**
  * Optional local identity-card workflow. It is intentionally independent from
@@ -540,7 +538,13 @@ fun ProfileDiscoveryScreen(
                     TextButton(
                         onClick = {
                             viewModel.exportText?.let { text ->
-                                shareExportFile(context, text)
+                                ShareManager.shareText(
+                                    context = context,
+                                    text = text,
+                                    chooserTitle = "Export OSINT Results",
+                                    mimeType = "text/plain",
+                                    fileName = "profile_export_${System.currentTimeMillis()}.txt"
+                                )
                             }
                         }
                     ) { Text("Share") }
@@ -558,26 +562,6 @@ fun ProfileDiscoveryScreen(
             )
         }
     }
-}
-
-private fun shareExportFile(context: Context, exportText: String) {
-    val exportFile = File(context.cacheDir, "profile_export_${System.currentTimeMillis()}.txt")
-    exportFile.writeText(exportText)
-
-    val contentUri = FileProvider.getUriForFile(
-        context,
-        "${context.packageName}.fileprovider",
-        exportFile
-    )
-
-    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(Intent.EXTRA_STREAM, contentUri)
-        putExtra(Intent.EXTRA_TEXT, exportText)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-
-    context.startActivity(Intent.createChooser(shareIntent, "Export OSINT Results"))
 }
 
 enum class ProfileFilter { ALL, FOUND, STRONG, UNCHECKED }

@@ -6,8 +6,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
-import androidx.core.content.FileProvider
 import com.yourcompany.facesearch.data.local.ScanResultEntity
+import com.yourcompany.facesearch.util.ShareManager
 import java.io.File
 import java.io.FileWriter
 import java.text.SimpleDateFormat
@@ -177,16 +177,11 @@ object OsintReportExporter {
         }
 
         return file?.let {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                it
+            ShareManager.buildFileShareIntent(
+                context = context,
+                file = it,
+                mimeType = if (format == "pdf") "application/pdf" else "text/csv"
             )
-            Intent(Intent.ACTION_SEND).apply {
-                type = if (format == "pdf") "application/pdf" else "text/csv"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
         }
     }
 
@@ -201,16 +196,11 @@ object OsintReportExporter {
         )
 
         return file?.let {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                it
+            ShareManager.buildFileShareIntent(
+                context = context,
+                file = it,
+                mimeType = "application/pdf"
             )
-            Intent(Intent.ACTION_SEND).apply {
-                type = "application/pdf"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
         }
     }
 }

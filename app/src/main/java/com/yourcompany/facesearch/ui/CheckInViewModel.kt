@@ -940,7 +940,12 @@ class CheckInViewModel(
                 )
             }.filter { it.profileUrl.isNotBlank() }
 
-            val tasks = PivotingCoordinator.extractPivotTasks(pivotEntities)
+            val titlesMap = verifiedHits.associate {
+                val url = it.link ?: it.source ?: "unknown"
+                val title = it.title ?: it.source ?: "unknown"
+                url to title
+            }
+            val tasks = PivotingCoordinator.extractPivotTasks(pivotEntities, titlesMap)
             if (tasks.isNotEmpty()) {
                 val pivotResults = PivotingCoordinator.executePivots(
                     tasks = tasks,

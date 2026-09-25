@@ -17,17 +17,22 @@ data class PivotTask(
 )
 
 object PivotingCoordinator {
-    // Matches standard handles preceded by @ or domain-specific user paths
-    private val handlePattern = Pattern.compile("(?:@|/user/|/u/|instagram\\.com/|twitter\\.com/|x\\.com/|github\\.com/|tiktok\\.com/@)([a-zA-Z0-9._-]{2,32})")
+    // Matches handles in URLs (e.g. twitter.com/username)
+    private val urlHandlePattern = Pattern.compile("(?<=/@|/user/|/u/|instagram\\.com/|twitter\\.com/|x\\.com/|github\\.com/|tiktok\\.com/@)[a-zA-Z0-9._-]{2,32}")
 
-    // Matches basic email structures
+    // Matches handles anywhere in text (e.g. "Ariana Grande (@arianagrande)")
+    private val textHandlePattern = Pattern.compile("@([a-zA-Z0-9._]{2,30})")
+
     private val emailPattern = Pattern.compile("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}")
 
     /**
      * Phase 1: Extracts secondary targets (alternate usernames/emails) from the URLs and
      * page titles of the initial VERIFIED visual scan results.
      */
-    fun extractPivotTasks(verifiedResults: List<ScanResultEntity>): List<PivotTask> {
+    fun extractPivotTasks(
+        verifiedResults: List<ScanResultEntity>,
+        candidateTitles: Map<String, String> = emptyMap()
+    ): List<PivotTask> {
         val tasks = mutableSetOf<PivotTask>()
 
         // Block any URL pointing to an individual media item, status, or post container
@@ -38,23 +43,33 @@ object PivotingCoordinator {
 
         verifiedResults.forEach { entity ->
             val url = entity.profileUrl
+            val title = candidateTitles[url] ?: entity.queryTarget
 
             // Skip candidate URLs that are posts rather than profile roots
             if (mediaPathBlacklist.any { url.contains(it, ignoreCase = true) }) {
                 return@forEach
             }
 
-            // Extract Usernames
-            val handleMatcher = handlePattern.matcher(url)
-            while (handleMatcher.find()) {
-                val handle = handleMatcher.group(1)?.trimEnd('.') ?: continue
-                if (handle.isNotBlank() && handle.length > 2 && !isGenericPath(handle)) {
+            // 1. Check for @mentions inside the page title/snippet text
+            val titleMatcher = textHandlePattern.matcher(title)
+            while (titleMatcher.find()) {
+                val handle = titleMatcher.group(1)?.trimEnd('.') ?: ""
+                if (handle.isNotBlank() && !isGenericPath(handle)) {
+                    tasks.add(PivotTask("sherlock", handle, "Handle extracted from title on ${entity.platform}"))
+                }
+            }
+
+            // 2. Fall back to checking the URL path
+            val urlMatcher = urlHandlePattern.matcher(url)
+            while (urlMatcher.find()) {
+                val handle = urlMatcher.group().trimEnd('.')
+                if (handle.isNotBlank() && !isGenericPath(handle)) {
                     tasks.add(PivotTask("sherlock", handle, "Username extracted from ${entity.platform}"))
                 }
             }
 
-            // Extract Emails from page titles or snippet hints if available
-            val emailMatcher = emailPattern.matcher(entity.queryTarget)
+            // 3. Extract emails from the combined metadata
+            val emailMatcher = emailPattern.matcher("$url $title")
             while (emailMatcher.find()) {
                 val email = emailMatcher.group()
                 if (email.isNotBlank()) {

@@ -14,8 +14,10 @@ object RetrofitClient {
                 .readTimeout(300, TimeUnit.SECONDS) // Increased for slow Termux scraping
                 .writeTimeout(60, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
-            
-            return NetworkProxyConfig.applyProxy(builder).build()
+
+            return NetworkProxyConfig.applyDesktopBrowserUserAgent(
+                NetworkProxyConfig.applyProxy(builder)
+            ).build()
         }
 
     private var cachedApi: LocalServerApi? = null

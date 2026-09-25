@@ -23,11 +23,12 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class ProfileExistenceChecker {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    private val client = NetworkProxyConfig.applyDesktopBrowserUserAgent(
+        OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .followRedirects(true)
+    ).build()
 
     private val completed = AtomicInteger(0)
     private var total = 0
@@ -59,7 +60,6 @@ class ProfileExistenceChecker {
         try {
             val request = Request.Builder()
                 .url(lead.url)
-                .header("User-Agent", USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "en-US,en;q=0.9")
                 .build()
@@ -181,7 +181,5 @@ class ProfileExistenceChecker {
 
     companion object {
         private const val TAG = "ProfileChecker"
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 }

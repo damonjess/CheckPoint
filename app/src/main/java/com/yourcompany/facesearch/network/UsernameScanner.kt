@@ -10,11 +10,12 @@ import java.util.concurrent.TimeUnit
 
 object UsernameScanner {
 
-    private val fastClient = OkHttpClient.Builder()
-        .connectTimeout(4, TimeUnit.SECONDS)
-        .readTimeout(4, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    private val fastClient = NetworkProxyConfig.applyDesktopBrowserUserAgent(
+        OkHttpClient.Builder()
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(4, TimeUnit.SECONDS)
+            .followRedirects(true)
+    ).build()
 
     private data class TargetPlatform(
         val name: String,
@@ -149,7 +150,6 @@ object UsernameScanner {
                 try {
                     val request = Request.Builder()
                         .url(checkUrl)
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
                         .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
                         .header("Accept-Language", "en-US,en;q=0.9")
                         .get()

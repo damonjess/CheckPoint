@@ -932,19 +932,23 @@ class CheckInViewModel(
 
             // If we have at least one verified hit, we know we have the right person.
             // So, let's harvest usernames from ALL visual leads, even the unverified ones!
-            val allScrapedLeads = verifiedHits + likelyHits + visualLeads
+            val allScrapedLeads = verifiedMatches + likelyMatches + retainedVisualCandidates
 
             val pivotEntities = allScrapedLeads.map {
                 ScanResultEntity(
                     queryTarget = targetHint.ifBlank { "unknown" },
                     platform = it.source ?: "Unknown",
-                    profileUrl = it.profileUrl,
+                    profileUrl = it.link ?: "",
                     timestamp = System.currentTimeMillis()
                 )
             }.filter { it.profileUrl.isNotBlank() }
 
             // Pass the titles of all scraped links so the regex can find the @handles
-            val titlesMap = allScrapedLeads.associate { it.profileUrl to it.name }
+            val titlesMap = allScrapedLeads.associate {
+                val url = it.link ?: it.source ?: "unknown"
+                val title = it.title ?: it.source ?: "unknown"
+                url to title
+            }
 
             val tasks = PivotingCoordinator.extractPivotTasks(pivotEntities, titlesMap)
             if (tasks.isNotEmpty()) {

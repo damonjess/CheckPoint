@@ -191,22 +191,17 @@ object PivotingCoordinator {
     }
 
     private fun isGenericPath(handle: String): Boolean {
-        val generics = setOf(
-            // General site paths
-            "home", "profile", "login", "signup", "user", "explore", "search", "about",
-            // Content paths (stops the 'reel' bug)
-            "reel", "reels", "p", "post", "posts", "shorts", "watch", "status", "video",
-            "videos", "photo", "photos", "story", "stories", "tv", "channel", "c",
-            // Common language/country codes
-            "en", "us", "uk", "fr", "es",
-            // Generic publisher/meme names to ignore
-            "news", "entertainment", "meme", "memes", "daily", "pics"
+        val lower = handle.lowercase()
+        val blacklist = setOf(
+            "reel", "reels", "explore", "p", "post", "popular",
+            "search", "tags", "hashtag", "category", "home",
+            "about", "login", "signup", "user", "profile"
         )
 
-        if (generics.contains(handle.lowercase())) return true
+        // Check if it's a known generic word
+        if (blacklist.contains(lower)) return true
 
-        // In PivotingCoordinator.kt -> isGenericPath()
-        // Alphanumeric strings with mixed case and no vowels/separators are usually post shortcodes
+        // Filter out randomized post shortcodes (e.g., stiifgm)
         if (handle.length in 8..15 && handle.none { it == '_' || it == '.' } && handle.count { it.isDigit() } >= 2) {
             return true
         }

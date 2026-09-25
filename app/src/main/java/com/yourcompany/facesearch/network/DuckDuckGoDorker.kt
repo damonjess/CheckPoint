@@ -40,7 +40,7 @@ object DuckDuckGoDorker {
             val request = Request.Builder()
                 .url("https://html.duckduckgo.com/html/")
                 .post(formBody)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
                 .header("Accept-Language", "en-US,en;q=0.9")
                 .header("Referer", "https://html.duckduckgo.com/")
                 .header("Accept", "text/html,application/xhtml+xml")
@@ -105,7 +105,7 @@ object DuckDuckGoDorker {
                 if (results.isEmpty()) {
                     val jsonRequest = Request.Builder()
                         .url("https://duckduckgo.com/?q=${java.net.URLEncoder.encode(query, "UTF-8")}&format=json")
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
                         .get()
                         .build()
 

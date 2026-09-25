@@ -7,7 +7,7 @@ import java.net.Proxy
 
 object NetworkProxyConfig {
     const val DESKTOP_BROWSER_USER_AGENT =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 
     var isProxyEnabled: Boolean = false
     var proxyHost: String = "127.0.0.1"

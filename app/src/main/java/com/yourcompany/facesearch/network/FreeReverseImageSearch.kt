@@ -38,7 +38,7 @@ class FreeReverseImageSearch(private val context: Context) {
             bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
         }
         
-        return FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 
     private fun openGoogleLens(imageUri: Uri, nameHint: String?) {

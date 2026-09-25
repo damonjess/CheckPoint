@@ -907,7 +907,7 @@ class FaceSearchRepository(private val context: Context) {
 
                     val request = Request.Builder()
                         .url("https://search4faces.com/api/search")
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
                         .header("Accept", "application/json")
                         .post(requestBody)
                         .build()
@@ -1007,7 +1007,7 @@ class FaceSearchRepository(private val context: Context) {
         try {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
                 .build()
             
             client.newCall(request).execute().use { response ->

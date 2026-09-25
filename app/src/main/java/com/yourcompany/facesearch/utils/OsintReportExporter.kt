@@ -179,7 +179,7 @@ object OsintReportExporter {
         return file?.let {
             val uri = FileProvider.getUriForFile(
                 context,
-                "${context.packageName}.provider",
+                "${context.packageName}.fileprovider",
                 it
             )
             Intent(Intent.ACTION_SEND).apply {
@@ -203,7 +203,7 @@ object OsintReportExporter {
         return file?.let {
             val uri = FileProvider.getUriForFile(
                 context,
-                "${context.packageName}.provider",
+                "${context.packageName}.fileprovider",
                 it
             )
             Intent(Intent.ACTION_SEND).apply {

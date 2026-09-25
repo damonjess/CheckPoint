@@ -130,7 +130,7 @@ fun InAppWebViewSheet(
                         settings.domStorageEnabled = true
                         settings.loadWithOverviewMode = true
                         settings.useWideViewPort = true
-                        settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
+                        settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36"
                         
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, finishedUrl: String?) {

@@ -66,7 +66,7 @@ class MainActivity : ComponentActivity() {
                         .readTimeout(15, TimeUnit.SECONDS)
                         .addInterceptor { chain ->
                             val request = chain.request().newBuilder()
-                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
                                 .header("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
                                 .build()
                             chain.proceed(request)

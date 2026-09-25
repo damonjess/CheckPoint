@@ -21,7 +21,7 @@ class FreeImageHost {
         .build()
 
     private val gson = Gson()
-    private val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+    private val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 
     suspend fun upload(bitmap: Bitmap, onLog: (String) -> Unit): String? {
         val bytes = ByteArrayOutputStream().apply {

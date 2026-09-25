@@ -17,6 +17,6 @@ class FreeFaceSearchHelper(private val context: Context) {
         FileOutputStream(file).use {
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it)
         }
-        return FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 }

@@ -930,21 +930,22 @@ class CheckInViewModel(
         if (verifiedHits.isNotEmpty() && useTermux) {
             addLog("Initiating Knowledge Graph Pivot on ${verifiedHits.size} verified visual matches...")
 
-            // Convert WebMatchDisplay back to Entity format for the Coordinator
-            val pivotEntities = verifiedHits.map {
+            // If we have at least one verified hit, we know we have the right person.
+            // So, let's harvest usernames from ALL visual leads, even the unverified ones!
+            val allScrapedLeads = verifiedHits + likelyHits + visualLeads
+
+            val pivotEntities = allScrapedLeads.map {
                 ScanResultEntity(
                     queryTarget = targetHint.ifBlank { "unknown" },
                     platform = it.source ?: "Unknown",
-                    profileUrl = it.link ?: "",
+                    profileUrl = it.profileUrl,
                     timestamp = System.currentTimeMillis()
                 )
             }.filter { it.profileUrl.isNotBlank() }
 
-            val titlesMap = verifiedHits.associate {
-                val url = it.link ?: it.source ?: "unknown"
-                val title = it.title ?: it.source ?: "unknown"
-                url to title
-            }
+            // Pass the titles of all scraped links so the regex can find the @handles
+            val titlesMap = allScrapedLeads.associate { it.profileUrl to it.name }
+
             val tasks = PivotingCoordinator.extractPivotTasks(pivotEntities, titlesMap)
             if (tasks.isNotEmpty()) {
                 val pivotResults = PivotingCoordinator.executePivots(
